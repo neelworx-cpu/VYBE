@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import fs from 'fs';
+import { fileURLToPath } from 'url';
 import path from 'path';
 
 if (process.argv.length !== 3) {
@@ -11,7 +12,7 @@ if (process.argv.length !== 3) {
 	process.exit(-1);
 }
 
-const ROOT = path.join(import.meta.dirname, '../../../');
+const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../../');
 
 function findNodeModulesFiles(location: string, inNodeModules: boolean, result: string[]) {
 	const entries = fs.readdirSync(path.join(ROOT, location));

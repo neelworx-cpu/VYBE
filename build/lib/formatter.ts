@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 import fs from 'fs';
+import { fileURLToPath } from 'url';
 import path from 'path';
 import ts from 'typescript';
 
@@ -59,7 +60,7 @@ const defaults: ts.FormatCodeSettings = {
 const getOverrides = (() => {
 	let value: ts.FormatCodeSettings | undefined;
 	return () => {
-		value ??= JSON.parse(fs.readFileSync(path.join(import.meta.dirname, '..', '..', 'tsfmt.json'), 'utf8'));
+		value ??= JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'tsfmt.json'), 'utf8'));
 		return value;
 	};
 })();

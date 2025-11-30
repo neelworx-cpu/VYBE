@@ -4,12 +4,13 @@
  *--------------------------------------------------------------------------------------------*/
 
 import fs from 'fs';
+import { fileURLToPath } from 'url';
 import path from 'path';
 import { sign, type SignOptions } from '@electron/osx-sign';
 import { spawn } from '@malept/cross-spawn-promise';
 
-const root = path.dirname(path.dirname(import.meta.dirname));
-const baseDir = path.dirname(import.meta.dirname);
+const root = path.dirname(path.dirname(path.dirname(fileURLToPath(import.meta.url))));
+const baseDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const product = JSON.parse(fs.readFileSync(path.join(root, 'product.json'), 'utf8'));
 const helperAppBaseName = product.nameShort;
 const gpuHelperAppName = helperAppBaseName + ' Helper (GPU).app';

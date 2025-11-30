@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import path from 'path';
+import { fileURLToPath } from 'url';
 import cp from 'child_process';
 import fs from 'fs';
 import File from 'vinyl';
@@ -11,7 +12,7 @@ import es from 'event-stream';
 import filter from 'gulp-filter';
 import { Stream } from 'stream';
 
-const watcherPath = path.join(import.meta.dirname, 'watcher.exe');
+const watcherPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'watcher.exe');
 
 function toChangeType(type: '0' | '1' | '2'): 'change' | 'add' | 'unlink' {
 	switch (type) {

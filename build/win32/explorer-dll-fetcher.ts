@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 import fs from 'fs';
+import { fileURLToPath } from 'url';
 import debug from 'debug';
 import path from 'path';
 import { downloadArtifact } from '@electron/get';
@@ -26,7 +27,7 @@ export async function downloadExplorerDll(outDir: string, quality: string = 'sta
 	}
 
 	// Read and parse checksums file
-	const checksumsFilePath = path.join(path.dirname(import.meta.dirname), 'checksums', 'explorer-dll.txt');
+	const checksumsFilePath = path.join(path.dirname(path.dirname(fileURLToPath(import.meta.url))), 'checksums', 'explorer-dll.txt');
 	const checksumsContent = fs.readFileSync(checksumsFilePath, 'utf8');
 	const checksums: Record<string, string> = {};
 

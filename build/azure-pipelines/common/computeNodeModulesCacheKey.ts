@@ -3,11 +3,12 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 import fs from 'fs';
+import { fileURLToPath } from 'url';
 import path from 'path';
 import crypto from 'crypto';
 import { dirs } from '../../npm/dirs.ts';
 
-const ROOT = path.join(import.meta.dirname, '../../../');
+const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../../');
 
 const shasum = crypto.createHash('sha256');
 

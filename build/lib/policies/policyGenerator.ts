@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import minimist from 'minimist';
+import { fileURLToPath } from 'url';
 import * as fs from 'fs';
 import path from 'path';
 import { type CategoryDto, type ExportedPolicyDataDto } from './policyDto.ts';
@@ -16,8 +17,8 @@ import { StringPolicy } from './stringPolicy.ts';
 import { type Version, type LanguageTranslations, type Policy, type Translations, Languages, type ProductJson } from './types.ts';
 import { renderGP, renderJsonPolicies, renderMacOSPolicy } from './render.ts';
 
-const product: ProductJson = JSON.parse(fs.readFileSync(path.join(import.meta.dirname, '../../../product.json'), 'utf8'));
-const packageJson = JSON.parse(fs.readFileSync(path.join(import.meta.dirname, '../../../package.json'), 'utf8'));
+const product: ProductJson = JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '../../../product.json'), 'utf8'));
+const packageJson = JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '../../../package.json'), 'utf8'));
 
 async function getSpecificNLS(resourceUrlTemplate: string, languageId: string, version: Version): Promise<LanguageTranslations> {
 	const resource = {

@@ -4,11 +4,12 @@
  *--------------------------------------------------------------------------------------------*/
 
 import path from 'path';
+import { fileURLToPath } from 'url';
 import fs from 'fs';
 import minimatch from 'minimatch';
 import { makeUniversalApp } from 'vscode-universal-bundler';
 
-const root = path.dirname(path.dirname(import.meta.dirname));
+const root = path.dirname(path.dirname(path.dirname(fileURLToPath(import.meta.url))));
 
 async function main(buildDir?: string) {
 	const arch = process.env['VSCODE_ARCH'];

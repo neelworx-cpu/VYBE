@@ -4,13 +4,14 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as fs from 'fs';
+import { fileURLToPath } from 'url';
 import path from 'path';
 import * as os from 'os';
 import * as child_process from 'child_process';
 import { dirs } from './dirs.ts';
 
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-const root = path.dirname(path.dirname(import.meta.dirname));
+const root = path.dirname(path.dirname(path.dirname(fileURLToPath(import.meta.url))));
 
 function log(dir: string, message: string) {
 	if (process.stdout.isTTY) {
@@ -86,8 +87,8 @@ function setNpmrcConfig(dir: string, env: NodeJS.ProcessEnv) {
 	// Use our bundled node-gyp version
 	env['npm_config_node_gyp'] =
 		process.platform === 'win32'
-			? path.join(import.meta.dirname, 'gyp', 'node_modules', '.bin', 'node-gyp.cmd')
-			: path.join(import.meta.dirname, 'gyp', 'node_modules', '.bin', 'node-gyp');
+			? path.join(path.dirname(fileURLToPath(import.meta.url)), 'gyp', 'node_modules', '.bin', 'node-gyp.cmd')
+			: path.join(path.dirname(fileURLToPath(import.meta.url)), 'gyp', 'node_modules', '.bin', 'node-gyp');
 
 	// Force node-gyp to use process.config on macOS
 	// which defines clang variable as expected. Otherwise we

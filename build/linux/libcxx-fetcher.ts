@@ -6,12 +6,13 @@
 // Can be removed once https://github.com/electron/electron-rebuild/pull/703 is available.
 
 import fs from 'fs';
+import { fileURLToPath } from 'url';
 import path from 'path';
 import debug from 'debug';
 import extract from 'extract-zip';
 import { downloadArtifact } from '@electron/get';
 
-const root = path.dirname(path.dirname(import.meta.dirname));
+const root = path.dirname(path.dirname(path.dirname(fileURLToPath(import.meta.url))));
 
 const d = debug('libcxx-fetcher');
 

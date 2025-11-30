@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import gulp from 'gulp';
+import { fileURLToPath } from 'url';
 import replace from 'gulp-replace';
 import rename from 'gulp-rename';
 import es from 'event-stream';
@@ -20,7 +21,7 @@ import * as cp from 'child_process';
 import { promisify } from 'util';
 
 const exec = promisify(cp.exec);
-const root = path.dirname(import.meta.dirname);
+const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const commit = getVersion(root);
 
 const linuxPackageRevision = Math.floor(new Date().getTime() / 1000);

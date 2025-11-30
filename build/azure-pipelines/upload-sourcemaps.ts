@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import path from 'path';
+import { fileURLToPath } from 'url';
 import es from 'event-stream';
 import Vinyl from 'vinyl';
 import vfs from 'vinyl-fs';
@@ -13,7 +14,7 @@ import { ClientAssertionCredential } from '@azure/identity';
 import Stream from 'stream';
 import azure from 'gulp-azure-storage';
 
-const root = path.dirname(path.dirname(import.meta.dirname));
+const root = path.dirname(path.dirname(path.dirname(fileURLToPath(import.meta.url))));
 const commit = process.env['BUILD_SOURCEVERSION'];
 const credential = new ClientAssertionCredential(process.env['AZURE_TENANT_ID']!, process.env['AZURE_CLIENT_ID']!, () => Promise.resolve(process.env['AZURE_ID_TOKEN']!));
 

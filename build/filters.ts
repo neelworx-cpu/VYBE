@@ -4,6 +4,8 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { readFileSync } from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { join } from 'path';
 
 /**
@@ -217,7 +219,7 @@ export const eslintFilter = Object.freeze<string[]>([
 	'**/*.mjs',
 	'**/*.ts',
 	'.eslint-plugin-local/**/*.ts',
-	...readFileSync(join(import.meta.dirname, '..', '.eslint-ignore'))
+	...readFileSync(join(path.dirname(fileURLToPath(import.meta.url)), '..', '.eslint-ignore'))
 		.toString()
 		.split(/\r\n|\n/)
 		.filter(line => line && !line.startsWith('#'))

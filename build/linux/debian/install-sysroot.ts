@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { spawnSync, execSync } from 'child_process';
+import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
 import fs from 'fs';
 import https from 'https';
@@ -14,7 +15,7 @@ import type { DebianArchString } from './types.ts';
 // Based on https://source.chromium.org/chromium/chromium/src/+/main:build/linux/sysroot_scripts/install-sysroot.py.
 const URL_PREFIX = 'https://msftelectronbuild.z5.web.core.windows.net';
 const URL_PATH = 'sysroots/toolchain';
-const REPO_ROOT = path.dirname(path.dirname(path.dirname(import.meta.dirname)));
+const REPO_ROOT = path.dirname(path.dirname(path.dirname(path.dirname(fileURLToPath(import.meta.url)))));
 
 const ghApiHeaders: Record<string, string> = {
 	Accept: 'application/vnd.github.v3+json',

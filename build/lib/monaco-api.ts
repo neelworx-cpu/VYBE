@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import fs from 'fs';
+import { fileURLToPath } from 'url';
 import path from 'path';
 import fancyLog from 'fancy-log';
 import ansiColors from 'ansi-colors';
@@ -14,9 +15,9 @@ import tsfmt from '../../tsfmt.json' with { type: 'json' };
 
 const dtsv = '3';
 
-const SRC = path.join(import.meta.dirname, '../../src');
-export const RECIPE_PATH = path.join(import.meta.dirname, '../monaco/monaco.d.ts.recipe');
-const DECLARATION_PATH = path.join(import.meta.dirname, '../../src/vs/monaco.d.ts');
+const SRC = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../src');
+export const RECIPE_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), '../monaco/monaco.d.ts.recipe');
+const DECLARATION_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../src/vs/monaco.d.ts');
 
 function logErr(message: any, ...rest: unknown[]): void {
 	fancyLog(ansiColors.yellow(`[monaco.d.ts]`), message, ...rest);

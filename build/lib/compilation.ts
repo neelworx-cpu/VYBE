@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import es from 'event-stream';
+import { fileURLToPath } from 'url';
 import fs from 'fs';
 import gulp from 'gulp';
 import path from 'path';
@@ -30,7 +31,7 @@ import sourcemaps from 'gulp-sourcemaps';
 const reporter = createReporter();
 
 function getTypeScriptCompilerOptions(src: string): ts.CompilerOptions {
-	const rootDir = path.join(import.meta.dirname, `../../${src}`);
+	const rootDir = path.join(path.dirname(fileURLToPath(import.meta.url)), `../../${src}`);
 	const options: ts.CompilerOptions = {};
 	options.verbose = false;
 	options.sourceMap = true;
@@ -40,7 +41,7 @@ function getTypeScriptCompilerOptions(src: string): ts.CompilerOptions {
 	options.rootDir = rootDir;
 	options.baseUrl = rootDir;
 	options.sourceRoot = util.toFileUri(rootDir);
-	options.newLine = /\r\n/.test(fs.readFileSync(import.meta.filename, 'utf8')) ? 0 : 1;
+	options.newLine = /\r\n/.test(fs.readFileSync(fileURLToPath(import.meta.url), 'utf8')) ? 0 : 1;
 	return options;
 }
 
@@ -52,7 +53,7 @@ interface ICompileTaskOptions {
 }
 
 export function createCompile(src: string, { build, emitError, transpileOnly, preserveEnglish }: ICompileTaskOptions) {
-	const projectPath = path.join(import.meta.dirname, '../../', src, 'tsconfig.json');
+	const projectPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../', src, 'tsconfig.json');
 	const overrideOptions = { ...getTypeScriptCompilerOptions(src), inlineSources: Boolean(build) };
 	if (!build) {
 		overrideOptions.inlineSourceMap = true;
@@ -183,7 +184,7 @@ export function watchTask(out: string, build: boolean, srcPath: string = 'src'):
 	return task;
 }
 
-const REPO_SRC_FOLDER = path.join(import.meta.dirname, '../../src');
+const REPO_SRC_FOLDER = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../src');
 
 class MonacoGenerator {
 	private readonly _isWatch: boolean;

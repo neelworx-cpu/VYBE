@@ -6,12 +6,13 @@
 import fs from 'fs';
 import path from 'path';
 import url from 'url';
+import { fileURLToPath } from 'url';
 import ansiColors from 'ansi-colors';
 import type { IExtensionDefinition } from './builtInExtensions.ts';
 
-const root = path.dirname(path.dirname(import.meta.dirname));
+const root = path.dirname(path.dirname(path.dirname(fileURLToPath(import.meta.url))));
 const rootCG = path.join(root, 'extensionsCG');
-const productjson = JSON.parse(fs.readFileSync(path.join(import.meta.dirname, '../../product.json'), 'utf8'));
+const productjson = JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '../../product.json'), 'utf8'));
 const builtInExtensions = productjson.builtInExtensions as IExtensionDefinition[] || [];
 const webBuiltInExtensions = productjson.webBuiltInExtensions as IExtensionDefinition[] || [];
 const token = process.env['GITHUB_TOKEN'];

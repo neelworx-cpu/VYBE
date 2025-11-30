@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import fs from 'fs';
+import { fileURLToPath } from 'url';
 import path from 'path';
 import vfs from 'vinyl-fs';
 import filter from 'gulp-filter';
@@ -26,7 +27,7 @@ function isDocumentSuffix(str?: string): str is DarwinDocumentSuffix {
 	return str === 'document' || str === 'script' || str === 'file' || str === 'source code';
 }
 
-const root = path.dirname(path.dirname(import.meta.dirname));
+const root = path.dirname(path.dirname(path.dirname(fileURLToPath(import.meta.url))));
 const product = JSON.parse(fs.readFileSync(path.join(root, 'product.json'), 'utf8'));
 const commit = getVersion(root);
 

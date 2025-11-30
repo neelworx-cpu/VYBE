@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import es from 'event-stream';
+import { fileURLToPath } from 'url';
 import gulp from 'gulp';
 import filter from 'gulp-filter';
 import path from 'path';
@@ -32,7 +33,7 @@ declare module 'gulp-sourcemaps' {
 	}
 }
 
-const REPO_ROOT_PATH = path.join(import.meta.dirname, '../..');
+const REPO_ROOT_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
 export interface IBundleESMTaskOpts {
 	/**

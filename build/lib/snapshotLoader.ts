@@ -1,3 +1,5 @@
+import { fileURLToPath } from 'url';
+import path from 'path';
 /*---------------------------------------------------------------------------------------------
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
@@ -10,7 +12,7 @@ export const snaps = (() => {
 	const os = require('os');
 	const cp = require('child_process');
 
-	const mksnapshot = path.join(import.meta.dirname, `../../node_modules/.bin/${process.platform === 'win32' ? 'mksnapshot.cmd' : 'mksnapshot'}`);
+	const mksnapshot = path.join(path.dirname(fileURLToPath(import.meta.url)), `../../node_modules/.bin/${process.platform === 'win32' ? 'mksnapshot.cmd' : 'mksnapshot'}`);
 	const product = require('../../product.json');
 	const arch = (process.argv.join('').match(/--arch=(.*)/) || [])[1];
 
@@ -34,8 +36,8 @@ export const snaps = (() => {
 			throw new Error('Unknown platform');
 	}
 
-	loaderFilepath = path.join(import.meta.dirname, '../../../', loaderFilepath);
-	startupBlobFilepath = path.join(import.meta.dirname, '../../../', startupBlobFilepath);
+	loaderFilepath = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../../', loaderFilepath);
+	startupBlobFilepath = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../../', startupBlobFilepath);
 
 	snapshotLoader(loaderFilepath, startupBlobFilepath);
 

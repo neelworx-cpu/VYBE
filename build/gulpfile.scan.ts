@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import gulp from 'gulp';
+import { fileURLToPath } from 'url';
 import * as path from 'path';
 import * as task from './lib/task.ts';
 import * as util from './lib/util.ts';
@@ -13,7 +14,7 @@ import filter from 'gulp-filter';
 import * as deps from './lib/dependencies.ts';
 import { existsSync, readdirSync } from 'fs';
 
-const root = path.dirname(import.meta.dirname);
+const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
 const BUILD_TARGETS = [
 	{ platform: 'win32', arch: 'x64' },

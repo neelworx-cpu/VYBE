@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import es from 'event-stream';
+import { fileURLToPath } from 'url';
 import fancyLog from 'fancy-log';
 import ansiColors from 'ansi-colors';
 import fs from 'fs';
@@ -76,7 +77,7 @@ function getErrorLog(id: string = '') {
 	return errorLog;
 }
 
-const buildLogFolder = path.join(path.dirname(path.dirname(import.meta.dirname)), '.build');
+const buildLogFolder = path.join(path.dirname(path.dirname(path.dirname(fileURLToPath(import.meta.url)))), '.build');
 
 try {
 	fs.mkdirSync(buildLogFolder);

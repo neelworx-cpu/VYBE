@@ -3,6 +3,8 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 import { EventEmitter } from 'events';
+import { fileURLToPath } from 'url';
+import path from 'path';
 import glob from 'glob';
 import gulp from 'gulp';
 import { createRequire } from 'node:module';
@@ -52,7 +54,7 @@ process.on('unhandledRejection', (reason, p) => {
 });
 
 // Load all the gulpfiles only if running tasks other than the editor tasks
-glob.sync('gulpfile.*.ts', { cwd: import.meta.dirname })
+glob.sync('gulpfile.*.ts', { cwd: path.dirname(fileURLToPath(import.meta.url)) })
 	.forEach(f => {
 		return require(`./${f}`);
 	});

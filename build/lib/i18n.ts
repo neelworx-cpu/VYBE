@@ -5,6 +5,7 @@
 
 import path from 'path';
 import fs from 'fs';
+import { fileURLToPath } from 'url';
 import eventStream from 'event-stream';
 import jsonMerge from 'gulp-merge-json';
 import File from 'vinyl';
@@ -15,7 +16,7 @@ import ansiColors from 'ansi-colors';
 import iconv from '@vscode/iconv-lite-umd';
 import { type l10nJsonFormat, getL10nXlf, type l10nJsonDetails, getL10nFilesFromXlf, getL10nJson } from '@vscode/l10n-dev';
 
-const REPO_ROOT_PATH = path.join(import.meta.dirname, '../..');
+const REPO_ROOT_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
 function log(message: any, ...rest: unknown[]): void {
 	fancyLog(ansiColors.green('[i18n]'), message, ...rest);

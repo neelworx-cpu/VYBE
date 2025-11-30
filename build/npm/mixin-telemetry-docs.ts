@@ -3,10 +3,12 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 import { execSync } from 'child_process';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { join, resolve } from 'path';
 import { existsSync, rmSync } from 'fs';
 
-const rootPath = resolve(import.meta.dirname, '..', '..');
+const rootPath = resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const telemetryDocsPath = join(rootPath, 'vscode-telemetry-docs');
 const repoUrl = 'https://github.com/microsoft/vscode-telemetry-docs';
 

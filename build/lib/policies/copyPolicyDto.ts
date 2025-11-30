@@ -4,10 +4,11 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as fs from 'fs';
+import { fileURLToPath } from 'url';
 import * as path from 'path';
 
-const sourceFile = path.join(import.meta.dirname, '../../../src/vs/workbench/contrib/policyExport/common/policyDto.ts');
-const destFile = path.join(import.meta.dirname, 'policyDto.ts');
+const sourceFile = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../../src/vs/workbench/contrib/policyExport/common/policyDto.ts');
+const destFile = path.join(path.dirname(fileURLToPath(import.meta.url)), 'policyDto.ts');
 
 try {
 	// Check if source file exists

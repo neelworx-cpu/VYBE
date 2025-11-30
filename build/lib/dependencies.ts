@@ -4,9 +4,10 @@
  *--------------------------------------------------------------------------------------------*/
 
 import fs from 'fs';
+import { fileURLToPath } from 'url';
 import path from 'path';
 import cp from 'child_process';
-const root = fs.realpathSync(path.dirname(path.dirname(import.meta.dirname)));
+const root = fs.realpathSync(path.dirname(path.dirname(path.dirname(fileURLToPath(import.meta.url)))));
 
 function getNpmProductionDependencies(folder: string): string[] {
 	let raw: string;

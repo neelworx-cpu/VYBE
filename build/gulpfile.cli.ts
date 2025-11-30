@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import es from 'event-stream';
+import { fileURLToPath } from 'url';
 import gulp from 'gulp';
 import * as path from 'path';
 import fancyLog from 'fancy-log';
@@ -19,7 +20,7 @@ import untar from 'gulp-untar';
 import gunzip from 'gulp-gunzip';
 
 const root = 'cli';
-const rootAbs = path.resolve(import.meta.dirname, '..', root);
+const rootAbs = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', root);
 const src = `${root}/src`;
 
 const platformOpensslDirName =

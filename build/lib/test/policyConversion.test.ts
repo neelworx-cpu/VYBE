@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
+import { fileURLToPath } from 'url';
 import { promises as fs } from 'fs';
 import path from 'path';
 import type { ExportedPolicyDataDto, CategoryDto } from '../policies/policyDto.ts';
@@ -398,7 +399,7 @@ suite('Policy E2E conversion', () => {
 		const result = renderMacOSPolicy(mockProduct, parsedPolicies, []);
 
 		// Load the expected fixture file
-		const fixturePath = path.join(import.meta.dirname, 'fixtures', 'policies', 'darwin', 'com.visualstudio.code.oss.mobileconfig');
+		const fixturePath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'policies', 'darwin', 'com.visualstudio.code.oss.mobileconfig');
 		const expectedContent = await fs.readFile(fixturePath, 'utf-8');
 
 		// Compare the rendered profile with the fixture
@@ -410,7 +411,7 @@ suite('Policy E2E conversion', () => {
 		const result = renderMacOSPolicy(mockProduct, parsedPolicies, []);
 
 		// Load the expected fixture file
-		const fixturePath = path.join(import.meta.dirname, 'fixtures', 'policies', 'darwin', 'en-us', 'com.visualstudio.code.oss.plist');
+		const fixturePath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'policies', 'darwin', 'en-us', 'com.visualstudio.code.oss.plist');
 		const expectedContent = await fs.readFile(fixturePath, 'utf-8');
 
 		// Find the en-us manifest
@@ -432,7 +433,7 @@ suite('Policy E2E conversion', () => {
 		const result = renderGP(mockProduct, parsedPolicies, []);
 
 		// Load the expected fixture file
-		const fixturePath = path.join(import.meta.dirname, 'fixtures', 'policies', 'win32', 'CodeOSS.admx');
+		const fixturePath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'policies', 'win32', 'CodeOSS.admx');
 		const expectedContent = await fs.readFile(fixturePath, 'utf-8');
 
 		// Compare the rendered ADMX with the fixture
@@ -444,7 +445,7 @@ suite('Policy E2E conversion', () => {
 		const result = renderGP(mockProduct, parsedPolicies, []);
 
 		// Load the expected fixture file
-		const fixturePath = path.join(import.meta.dirname, 'fixtures', 'policies', 'win32', 'en-us', 'CodeOSS.adml');
+		const fixturePath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'policies', 'win32', 'en-us', 'CodeOSS.adml');
 		const expectedContent = await fs.readFile(fixturePath, 'utf-8');
 
 		// Find the en-us ADML
@@ -460,7 +461,7 @@ suite('Policy E2E conversion', () => {
 		const result = renderMacOSPolicy(mockProduct, parsedPolicies, frenchTranslations);
 
 		// Load the expected fixture file
-		const fixturePath = path.join(import.meta.dirname, 'fixtures', 'policies', 'darwin', 'fr-fr', 'com.visualstudio.code.oss.plist');
+		const fixturePath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'policies', 'darwin', 'fr-fr', 'com.visualstudio.code.oss.plist');
 		const expectedContent = await fs.readFile(fixturePath, 'utf-8');
 
 		// Find the fr-fr manifest
@@ -481,7 +482,7 @@ suite('Policy E2E conversion', () => {
 		const result = renderGP(mockProduct, parsedPolicies, frenchTranslations);
 
 		// Load the expected fixture file
-		const fixturePath = path.join(import.meta.dirname, 'fixtures', 'policies', 'win32', 'fr-fr', 'CodeOSS.adml');
+		const fixturePath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'policies', 'win32', 'fr-fr', 'CodeOSS.adml');
 		const expectedContent = await fs.readFile(fixturePath, 'utf-8');
 
 		// Find the fr-fr ADML
@@ -497,7 +498,7 @@ suite('Policy E2E conversion', () => {
 		const result = renderJsonPolicies(parsedPolicies);
 
 		// Load the expected fixture file
-		const fixturePath = path.join(import.meta.dirname, 'fixtures', 'policies', 'linux', 'policy.json');
+		const fixturePath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'policies', 'linux', 'policy.json');
 		const expectedContent = await fs.readFile(fixturePath, 'utf-8');
 		const expectedJson = JSON.parse(expectedContent);
 

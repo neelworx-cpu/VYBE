@@ -13,13 +13,13 @@ function code() {
 	# Sync built-in extensions
 	npm run download-builtin-extensions
 
-	NODE=$(node build/lib/node.ts)
+	NODE=$(node --import ./build/node/import-meta-dirname-polyfill.mjs --import tsx build/lib/node.ts)
 	if [ ! -e $NODE ];then
 		# Load remote node
 		npm run gulp node
 	fi
 
-	NODE=$(node build/lib/node.ts)
+	NODE=$(node --import ./build/node/import-meta-dirname-polyfill.mjs --import tsx build/lib/node.ts)
 
 	$NODE ./scripts/code-web.js "$@"
 }

@@ -3,10 +3,12 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 import { execSync } from 'child_process';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { join, resolve } from 'path';
 import { readFileSync, writeFileSync } from 'fs';
 
-const rootPath = resolve(import.meta.dirname, '..', '..', '..');
+const rootPath = resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const vscodePath = join(rootPath, 'vscode');
 const distroPath = join(rootPath, 'vscode-distro');
 const commit = execSync('git rev-parse HEAD', { cwd: distroPath, encoding: 'utf8' }).trim();

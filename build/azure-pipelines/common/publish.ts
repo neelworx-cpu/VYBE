@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import fs from 'fs';
+import { fileURLToPath } from 'url';
 import path from 'path';
 import { Readable } from 'stream';
 import type { ReadableStream } from 'stream/web';
@@ -1026,7 +1027,7 @@ async function main() {
 
 			processing.add(artifact.name);
 			const promise = new Promise<void>((resolve, reject) => {
-				const worker = new Worker(import.meta.filename, { workerData: { artifact, artifactFilePath } });
+				const worker = new Worker(fileURLToPath(import.meta.url), { workerData: { artifact, artifactFilePath } });
 				worker.on('error', reject);
 				worker.on('exit', code => {
 					if (code === 0) {

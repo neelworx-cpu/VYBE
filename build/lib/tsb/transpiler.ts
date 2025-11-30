@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import esbuild from 'esbuild';
+import { fileURLToPath } from 'url';
 import ts from 'typescript';
 import threads from 'node:worker_threads';
 import Vinyl from 'vinyl';
@@ -97,7 +98,7 @@ class TranspileWorker {
 
 	readonly id = TranspileWorker.pool++;
 
-	private _worker = new threads.Worker(import.meta.filename);
+	private _worker = new threads.Worker(fileURLToPath(import.meta.url));
 	private _pending?: [resolve: Function, reject: Function, file: Vinyl[], options: ts.TranspileOptions, t1: number];
 	private _durations: number[] = [];
 

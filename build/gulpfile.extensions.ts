@@ -5,6 +5,7 @@
 
 // Increase max listeners for event emitters
 import { EventEmitter } from 'events';
+import { fileURLToPath } from 'url';
 EventEmitter.defaultMaxListeners = 100;
 
 import gulp from 'gulp';
@@ -23,7 +24,7 @@ import * as ext from './lib/extensions.ts';
 import * as tsb from './lib/tsb/index.ts';
 import sourcemaps from 'gulp-sourcemaps';
 
-const root = path.dirname(import.meta.dirname);
+const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const commit = getVersion(root);
 
 // To save 250ms for each gulp startup, we are caching the result here

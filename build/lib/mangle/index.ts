@@ -9,6 +9,7 @@ import path from 'path';
 import { type Mapping, SourceMapGenerator } from 'source-map';
 import ts from 'typescript';
 import { pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
 import workerpool from 'workerpool';
 import { StaticLanguageServiceHost } from './staticLanguageServiceHost.ts';
 import * as buildfile from '../../buildfile.ts';
@@ -429,7 +430,7 @@ export class Mangler {
 		this.log = log;
 		this.config = config;
 
-		this.renameWorkerPool = workerpool.pool(path.join(import.meta.dirname, 'renameWorker.ts'), {
+		this.renameWorkerPool = workerpool.pool(path.join(path.dirname(fileURLToPath(import.meta.url)), 'renameWorker.ts'), {
 			maxWorkers: 4,
 			minWorkers: 'max'
 		});
@@ -772,7 +773,7 @@ function normalize(path: string): string {
 }
 
 async function _run() {
-	const root = path.join(import.meta.dirname, '..', '..', '..');
+	const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 	const projectBase = path.join(root, 'src');
 	const projectPath = path.join(projectBase, 'tsconfig.json');
 	const newProjectBase = path.join(path.dirname(projectBase), path.basename(projectBase) + '2');

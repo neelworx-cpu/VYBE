@@ -14,9 +14,10 @@ import VinylFile from 'vinyl';
 import through from 'through';
 import sm from 'source-map';
 import { pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
 import ternaryStream from 'ternary-stream';
 
-const root = path.dirname(path.dirname(import.meta.dirname));
+const root = path.dirname(path.dirname(path.dirname(fileURLToPath(import.meta.url))));
 
 export interface ICancellationToken {
 	isCancellationRequested(): boolean;

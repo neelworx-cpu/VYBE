@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import gulp from 'gulp';
+import { fileURLToPath } from 'url';
 import * as path from 'path';
 import es from 'event-stream';
 import * as util from './lib/util.ts';
@@ -23,7 +24,7 @@ import VinylFile from 'vinyl';
 import jsonEditor from 'gulp-json-editor';
 import buildfile from './buildfile.ts';
 
-const REPO_ROOT = path.dirname(import.meta.dirname);
+const REPO_ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const BUILD_ROOT = path.dirname(REPO_ROOT);
 const WEB_FOLDER = path.join(REPO_ROOT, 'remote', 'web');
 
@@ -170,7 +171,7 @@ function packageTask(sourceFolderName: string, destinationFolderName: string) {
 
 		const deps = gulp.src(dependenciesSrc, { base: 'remote/web', dot: true })
 			.pipe(filter(['**', '!**/package-lock.json']))
-			.pipe(util.cleanNodeModules(path.join(import.meta.dirname, '.webignore')));
+			.pipe(util.cleanNodeModules(path.join(path.dirname(fileURLToPath(import.meta.url)), '.webignore')));
 
 		const favicon = gulp.src('resources/server/favicon.ico', { base: 'resources/server' });
 		const manifest = gulp.src('resources/server/manifest.json', { base: 'resources/server' });
