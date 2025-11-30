@@ -1,0 +1,168 @@
+# ============================
+# VYBE IDE — Build 2 Official Cursor Ruleset
+# ============================
+
+# Purpose:
+# These rules govern ALL changes Cursor AI makes inside the VYBE IDE fork.
+# The goal: Create a production-grade, stable, modular, upstream-compatible IDE.
+
+# ============================
+# 1. GENERAL RULES
+# ============================
+
+- Treat this repo as a long-term fork of Microsoft VS Code.
+- NEVER remove or rewrite critical VS Code build infrastructure.
+- NEVER auto-upgrade Node, Yarn, NPM, or rebuild scripts unless explicitly instructed.
+- ALWAYS follow the .nvmrc version for all operations.
+- NEVER introduce experimental loaders, breaking ESM rewrites, or tsx conversions on your own.
+- DO NOT modify Gulp, Webpack, build/generate files unless explicitly told.
+
+# ============================
+# 2. UPSTREAM COMPATIBILITY RULES
+# ============================
+
+- Keep all custom VYBE code inside isolated namespaces or folders:
+  src/vybe/*
+  src/vybePanel/*
+  src/vybeCore/*
+  extensions/vybe*
+
+- DO NOT modify upstream code directly unless absolutely necessary.
+- If modification is required, wrap changes using:
+  // VYBE-PATCH-START
+  // VYBE-PATCH-END
+
+- NEVER break the ability to run:
+  git fetch upstream
+  git merge upstream/main
+
+- Avoid touching:
+  build/
+  gulpfile.ts
+  .vscode internal config
+  product build pipelines
+
+# ============================
+# 3. BRANCH STRATEGY
+# ============================
+
+MAIN BRANCH:
+- Always stable.
+- No experimental code.
+- Only merge after full testing.
+
+DEVELOP BRANCH:
+- All new features go here.
+- Cursor should assume work happens on develop.
+
+FEATURE BRANCHES:
+- For major changes, use:
+  feature/<name>
+- Cursor must ask before editing more than 10 files.
+
+MERGE POLICY:
+- NEVER auto-merge anything into main.
+- ALL merges require human approval.
+
+# ============================
+# 4. VYBE BRANDING RULES
+# ============================
+
+- Branding changes only allowed in:
+  product.json
+  resources/
+  icons/
+  splash/
+  src/vybe/*
+
+- DO NOT modify branding behavior outside these folders.
+- DO NOT override theme files outside VYBE namespaces.
+
+# ============================
+# 5. AI PANEL & AGENT SYSTEM
+# ============================
+
+- All VYBE AI panel logic goes under:
+  src/vybe/panel/*
+  src/vybe/agents/*
+  src/vybe/core/*
+
+- DO NOT mix VYBE panel logic into VS Code's native chat, Copilot, or GitHub Chat.
+- Keep all agent logic modular and framework-agnostic.
+- All prompts/templates stored in:
+  src/vybe/prompts/*
+
+- Mode system:
+  ASK, PLAN, AGENT
+  — Must remain isolated logic.
+
+# ============================
+# 6. CODE QUALITY / SAFETY
+# ============================
+
+- NEVER rewrite more than 20 files without explicit approval.
+- ALWAYS show a diff summary BEFORE applying major changes.
+- DO NOT create circular dependencies.
+- DO NOT introduce breaking changes to:
+  tsconfig.json
+  package.json
+  build scripts
+
+- Commit messages must follow:
+  feat: for features
+  fix: for bug fixes
+  chore: for maintenance
+  vybe: for panel/AI changes
+
+# ============================
+# 7. UI/UX RULES
+# ============================
+
+- Maintain VYBE UI in:
+  src/vybe/ui/*
+- DO NOT modify the upstream workbench layout directly unless explicitly told.
+- Sidebar modifications must be modular and behind config flags.
+- Animations must be optional and not break UX.
+
+# ============================
+# 8. PERFORMANCE RULES
+# ============================
+
+- Minimize impact on startup time.
+- Do not load heavy modules at startup.
+- Use lazy-loading for AI panel components.
+
+# ============================
+# 9. TESTING AND STABILITY
+# ============================
+
+- BEFORE major changes: confirm ability to run:
+  npm install
+  npm run watch
+  ./scripts/code.sh
+
+- Cursor must avoid changes that break:
+  electron launch
+  extension compilation
+  VS Code protocol
+
+# ============================
+# 10. AI BEHAVIOR RULES
+# ============================
+
+- Cursor must always ask before:
+  — Rewriting more than 20 files
+  — Changing build system
+  — Editing node or gulp configs
+  — Altering core VS Code behavior
+
+- Cursor must validate:
+  “Is this change compatible with upstream merges?”
+
+If NO → suggest alternative approaches.
+
+# ============================
+# END OF OFFICIAL RULESET
+# ============================---
+alwaysApply: true
+---

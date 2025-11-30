@@ -402,7 +402,9 @@ export class Menubar extends Disposable {
 	}
 
 	private setMacApplicationMenu(macApplicationMenu: Menu): void {
-		const about = this.createMenuItem(nls.localize('mAbout', "About {0}", this.productService.nameLong), 'workbench.action.showAboutDialog');
+		// VYBE-PATCH-START: branding
+		const about = this.createMenuItem(nls.localize('mAbout', "About {0}", this.productService.nameShort), 'workbench.action.showAboutDialog');
+		// VYBE-PATCH-END: branding
 		const checkForUpdates = this.getUpdateMenuItems();
 
 		let preferences;

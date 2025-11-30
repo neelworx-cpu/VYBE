@@ -108,6 +108,13 @@ export class StartupPageRunnerContribution extends Disposable implements IWorkbe
 		// Wait for resolving startup editor until we are restored to reduce startup pressure
 		await this.lifecycleService.when(LifecyclePhase.Restored);
 
+		// VYBE-PATCH-START: branding
+		// Disable welcome page completely for VYBE
+		if (this.productService.nameShort === 'VYBE') {
+			return;
+		}
+		// VYBE-PATCH-END: branding
+
 		if (AuxiliaryBarMaximizedContext.getValue(this.contextKeyService)) {
 			// If the auxiliary bar is maximized, we do not show the welcome page.
 			return;

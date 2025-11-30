@@ -21,7 +21,9 @@
   <Properties>
     <DisplayName>@@AppxPackageDisplayName@@</DisplayName>
     <PublisherDisplayName>Microsoft Corporation</PublisherDisplayName>
-    <Logo>resources\app\resources\win32\code_150x150.png</Logo>
+    <!-- VYBE-PATCH-START: branding -->
+    <Logo>resources\app\resources\vybe\icons\vybe-icon-150.png</Logo>
+    <!-- VYBE-PATCH-END: branding -->
     <uap10:AllowExternalContent>true</uap10:AllowExternalContent>
     <desktop6:RegistryWriteVirtualization>disabled</desktop6:RegistryWriteVirtualization>
     <desktop6:FileSystemWriteVirtualization>disabled</desktop6:FileSystemWriteVirtualization>
@@ -54,13 +56,15 @@
       Executable="@@ApplicationExe@@"
       uap10:TrustLevel="mediumIL"
       uap10:RuntimeBehavior="win32App">
+      <!-- VYBE-PATCH-START: branding -->
       <uap:VisualElements
         AppListEntry="none"
         DisplayName="@@AppxPackageDisplayName@@"
         Description="@@AppxPackageDescription@@"
         BackgroundColor="transparent"
-        Square150x150Logo="resources\app\resources\win32\code_150x150.png"
-        Square44x44Logo="resources\app\resources\win32\code_70x70.png">
+        Square150x150Logo="resources\app\resources\vybe\icons\vybe-icon-150.png"
+        Square44x44Logo="resources\app\resources\vybe\icons\vybe-icon-70.png">
+      <!-- VYBE-PATCH-END: branding -->
       </uap:VisualElements>
       <Extensions>
         <desktop4:Extension Category="windows.fileExplorerContextMenus">

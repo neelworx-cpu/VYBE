@@ -105,10 +105,14 @@ const { electronVersion, msBuildId } = util.getElectronVersion();
 export const config = {
 	version: electronVersion,
 	tag: product.electronRepository ? `v${electronVersion}-${msBuildId}` : undefined,
-	productAppName: product.nameLong,
+	// VYBE-PATCH-START: branding
+	productAppName: product.nameShort,
+	// VYBE-PATCH-END: branding
 	companyName: 'Microsoft Corporation',
 	copyright: 'Copyright (C) 2025 Microsoft. All rights reserved',
-	darwinIcon: 'resources/darwin/code.icns',
+	// VYBE-PATCH-START: branding
+	darwinIcon: 'resources/vybe/icons/vybe.icns',
+	// VYBE-PATCH-END: branding
 	darwinBundleIdentifier: product.darwinBundleIdentifier,
 	darwinApplicationCategoryType: 'public.app-category.developer-tools',
 	darwinHelpBookFolder: 'VS Code HelpBook',
@@ -199,7 +203,9 @@ export const config = {
 	darwinForceDarkModeSupport: true,
 	darwinCredits: darwinCreditsTemplate ? Buffer.from(darwinCreditsTemplate({ commit: commit, date: new Date().toISOString() })) : undefined,
 	linuxExecutableName: product.applicationName,
-	winIcon: 'resources/win32/code.ico',
+	// VYBE-PATCH-START: branding
+	winIcon: 'resources/vybe/icons/vybe.ico',
+	// VYBE-PATCH-END: branding
 	token: process.env['GITHUB_TOKEN'],
 	repo: product.electronRepository || undefined,
 	validateChecksum: true,
@@ -236,7 +242,11 @@ async function main(arch: string = process.arch): Promise<void> {
 	}
 }
 
-if (import.meta.main) {
+// VYBE-PATCH-START: fix tsx import.meta.main issue
+// tsx doesn't set import.meta.main correctly, so check if this file is being run directly
+const isMainModule = import.meta.main || (import.meta.url && process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/')));
+if (isMainModule) {
+	// VYBE-PATCH-END: fix tsx import.meta.main issue
 	main(process.argv[2]).catch(err => {
 		console.error(err);
 		process.exit(1);

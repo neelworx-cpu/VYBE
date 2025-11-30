@@ -353,7 +353,11 @@ function packageTask(platform: string, arch: string, sourceFolderName: string, d
 				'resources/win32/xml.ico',
 				'resources/win32/yaml.ico',
 				'resources/win32/code_70x70.png',
-				'resources/win32/code_150x150.png'
+				'resources/win32/code_150x150.png',
+				// VYBE-PATCH-START: branding
+				'resources/vybe/icons/vybe-icon-70.png',
+				'resources/vybe/icons/vybe-icon-150.png'
+				// VYBE-PATCH-END: branding
 			], { base: '.' }));
 			if (quality && quality === 'insider') {
 				customElectronConfig = {

@@ -31,12 +31,23 @@ else if (globalThis._VSCODE_PRODUCT_JSON && globalThis._VSCODE_PACKAGE_JSON) {
 
 	// Running out of sources
 	if (env['VSCODE_DEV']) {
-		Object.assign(product, {
-			nameShort: `${product.nameShort} Dev`,
-			nameLong: `${product.nameLong} Dev`,
-			dataFolderName: `${product.dataFolderName}-dev`,
-			serverDataFolderName: product.serverDataFolderName ? `${product.serverDataFolderName}-dev` : undefined
-		});
+		// VYBE-PATCH-START: branding
+		// Don't add "Dev" suffix for VYBE branding
+		if (product.nameShort !== 'VYBE') {
+			Object.assign(product, {
+				nameShort: `${product.nameShort} Dev`,
+				nameLong: `${product.nameLong} Dev`,
+				dataFolderName: `${product.dataFolderName}-dev`,
+				serverDataFolderName: product.serverDataFolderName ? `${product.serverDataFolderName}-dev` : undefined
+			});
+		} else {
+			// Still update data folder for dev mode
+			Object.assign(product, {
+				dataFolderName: `${product.dataFolderName}-dev`,
+				serverDataFolderName: product.serverDataFolderName ? `${product.serverDataFolderName}-dev` : undefined
+			});
+		}
+		// VYBE-PATCH-END: branding
 	}
 
 	// Version is added during built time, but we still

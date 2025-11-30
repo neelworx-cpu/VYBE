@@ -37,7 +37,9 @@ export function createNativeAboutDialogDetails(productService: IProductService, 
 	const detailsToCopy = getDetails(false);
 
 	return {
-		title: productService.nameLong,
+		// VYBE-PATCH-START: branding
+		title: productService.nameShort,
+		// VYBE-PATCH-END: branding
 		details: details,
 		detailsToCopy: detailsToCopy
 	};

@@ -17,7 +17,9 @@ function code() {
 	cd "$ROOT"
 
 	if [[ "$OSTYPE" == "darwin"* ]]; then
-		NAME=`node -p "require('./product.json').nameLong"`
+		# VYBE-PATCH-START: branding
+		NAME=`node -p "require('./product.json').nameShort"`
+		# VYBE-PATCH-END: branding
 		CODE="./.build/electron/$NAME.app/Contents/MacOS/Electron"
 	else
 		NAME=`node -p "require('./product.json').applicationName"`

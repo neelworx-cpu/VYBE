@@ -60,6 +60,18 @@
         "label": "%lightHcColorThemeLabel%",
         "uiTheme": "hc-light",
         "path": "./themes/hc_light.json"
+      },
+      {
+        "id": "VYBE Light",
+        "label": "VYBE Light",
+        "uiTheme": "vs",
+        "path": "./themes/vybe-light.json"
+      },
+      {
+        "id": "VYBE Dark",
+        "label": "VYBE Dark",
+        "uiTheme": "vs-dark",
+        "path": "./themes/vybe-dark.json"
       }
     ],
     "iconThemes": [

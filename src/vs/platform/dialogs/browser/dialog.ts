@@ -58,7 +58,9 @@ export function createBrowserAboutDialogDetails(productService: IProductService)
 	const detailsToCopy = detailString(false);
 
 	return {
-		title: productService.nameLong,
+		// VYBE-PATCH-START: branding
+		title: productService.nameShort,
+		// VYBE-PATCH-END: branding
 		details: details,
 		detailsToCopy: detailsToCopy
 	};
