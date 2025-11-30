@@ -21,12 +21,13 @@ import { IWorkspaceContextService, WorkbenchState } from '../../../../platform/w
 import { IWorkspacesService } from '../../../../platform/workspaces/common/workspaces.js';
 import { IProductService } from '../../../../platform/product/common/productService.js';
 import { ILabelService, Verbosity } from '../../../../platform/label/common/label.js';
-import { URI } from '../../../../base/common/uri.js';
 import { isRecentFolder, isRecentWorkspace } from '../../../../platform/workspaces/common/workspaces.js';
 import { splitRecentLabel } from '../../../../base/common/labels.js';
 import { IHostService } from '../../../services/host/browser/host.js';
 import { IWindowOpenable } from '../../../../platform/window/common/window.js';
 import { FileAccess } from '../../../../base/common/network.js';
+import { IWorkbenchThemeService } from '../../../services/themes/common/workbenchThemeService.js';
+import { ColorScheme } from '../../../../platform/theme/common/theme.js';
 // VYBE-PATCH-END: branding
 
 interface WatermarkEntry {
@@ -106,7 +107,8 @@ export class EditorGroupWatermark extends Disposable {
 		@ICommandService private readonly commandService: ICommandService,
 		@IProductService private readonly productService: IProductService,
 		@ILabelService private readonly labelService: ILabelService,
-		@IHostService private readonly hostService: IHostService
+		@IHostService private readonly hostService: IHostService,
+		@IWorkbenchThemeService private readonly themeService: IWorkbenchThemeService
 		// VYBE-PATCH-END: branding
 	) {
 		super();
@@ -226,6 +228,53 @@ export class EditorGroupWatermark extends Disposable {
 		this.transientDisposables.clear();
 		this.watermarkContainer.classList.add('vybe-watermark');
 
+		// VYBE-PATCH-START: branding
+		// Inject style element with maximum specificity to override any conflicting CSS
+		// Use multiple high-specificity selectors to override color-mix() rules
+		const styleId = 'vybe-button-styles';
+		let styleElement = document.getElementById(styleId) as HTMLStyleElement;
+		if (!styleElement) {
+			styleElement = document.createElement('style');
+			styleElement.id = styleId;
+			document.head.appendChild(styleElement);
+		}
+		const updateStyles = () => {
+			const themeType = this.themeService.getColorTheme().type;
+			const isDark = themeType === ColorScheme.DARK || themeType === ColorScheme.HIGH_CONTRAST_DARK;
+			const bgColor = isDark ? '#202124' : '#f3f4f5';
+			const hoverColor = isDark ? '#2a2b2e' : '#e5e8ea';
+			styleElement.textContent = `
+				.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark .vybe-button[data-vybe-button="true"],
+				.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark .cursor-button.vybe-button[data-vybe-button="true"],
+				.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark .cursor-button-secondary.vybe-button[data-vybe-button="true"],
+				.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark .cursor-button-secondary-clickable.vybe-button[data-vybe-button="true"],
+				.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark .empty-screen-button.vybe-button[data-vybe-button="true"] {
+					background-color: ${bgColor} !important;
+					background: ${bgColor} !important;
+					border: none !important;
+					border-top: none !important;
+					border-right: none !important;
+					border-bottom: none !important;
+					border-left: none !important;
+					border-width: 0 !important;
+					border-style: none !important;
+				}
+				.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark .vybe-button[data-vybe-button="true"]:hover,
+				.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark .cursor-button.vybe-button[data-vybe-button="true"]:hover,
+				.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark .cursor-button-secondary.vybe-button[data-vybe-button="true"]:hover,
+				.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark .cursor-button-secondary-clickable.vybe-button[data-vybe-button="true"]:hover,
+				.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark .empty-screen-button.vybe-button[data-vybe-button="true"]:hover {
+					background-color: ${hoverColor} !important;
+					background: ${hoverColor} !important;
+				}
+			`;
+		};
+		updateStyles();
+		this.transientDisposables.add(this.themeService.onDidColorThemeChange(() => {
+			updateStyles();
+		}));
+		// VYBE-PATCH-END: branding
+
 		// Only show buttons and recent projects when workspace is empty
 		const isEmpty = this.workbenchState === WorkbenchState.EMPTY;
 
@@ -293,7 +342,7 @@ export class EditorGroupWatermark extends Disposable {
 					);
 					append(recentList, item);
 				} else if (isRecentWorkspace(recent)) {
-					if (currentWorkspace.configPath && currentWorkspace.configPath.toString() === recent.workspace.configPath.toString()) {
+					if (this.contextService.isCurrentWorkspace(recent.workspace)) {
 						continue; // Skip current workspace
 					}
 					const fullPath = recent.label || this.labelService.getWorkspaceLabel(recent.workspace, { verbose: Verbosity.LONG });
@@ -323,10 +372,33 @@ export class EditorGroupWatermark extends Disposable {
 	}
 
 	private createVybeButton(icon: string, label: string, onClick: () => void): HTMLElement {
+		// VYBE-PATCH-START: branding
+		// Theme variables (button.secondaryBackground, button.secondaryHoverBackground, quickInput.background)
+		// are now set correctly in our themes, so VS Code's color-mix() will naturally use our colors.
+		// We just need to remove conflicting classes and ensure no border.
 		const button = $('.vybe-button', {
-			class: 'cursor-button cursor-button-secondary cursor-button-secondary-clickable empty-screen-button',
-			style: 'user-select: none; flex-shrink: 0; background-color: color-mix(in srgb, color-mix(in srgb, var(--vscode-quickInput-background) 80%, var(--vscode-editor-foreground) 5%) 95%, rgb(128, 128, 128) 5%); border: 1px solid var(--vscode-widget-border); padding: 10px 12px; border-radius: 6px; display: flex; flex-direction: column; justify-content: center; align-items: flex-start; gap: 6px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; box-shadow: 0 0 1px var(--vscode-widget-shadow);'
+			'data-vybe-button': 'true',
+			style: `user-select: none; flex-shrink: 0; padding: 10px 12px; border-radius: 6px; display: flex; flex-direction: column; justify-content: center; align-items: flex-start; gap: 6px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; box-shadow: 0 0 1px var(--vscode-widget-shadow); transition: background-color 0.2s ease; border: none !important;`
 		});
+
+		// Remove cursor-button classes that VS Code adds (these trigger unwanted styling)
+		const removeCursorButtonClasses = () => {
+			button.classList.remove('cursor-button', 'cursor-button-secondary', 'cursor-button-secondary-clickable', 'empty-screen-button');
+		};
+		removeCursorButtonClasses();
+
+		// Watch for classes being re-added and remove them
+		const observer = new MutationObserver(() => {
+			if (button.classList.contains('cursor-button') || button.classList.contains('cursor-button-secondary')) {
+				removeCursorButtonClasses();
+			}
+		});
+		observer.observe(button, {
+			attributes: true,
+			attributeFilter: ['class']
+		});
+		this.transientDisposables.add({ dispose: () => observer.disconnect() });
+		// VYBE-PATCH-END: branding
 
 		const iconEl = $('.codicon', {
 			class: `codicon codicon-${icon}`,

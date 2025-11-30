@@ -129,11 +129,17 @@
 	margin-bottom: 24px;
 }
 
+/* VYBE-PATCH-START: branding */
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark .vybe-button[data-vybe-button="true"],
 .monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark .vybe-button {
 	user-select: none;
 	flex-shrink: 0;
-	background-color: color-mix(in srgb, color-mix(in srgb, var(--vscode-quickInput-background) 80%, var(--vscode-editor-foreground) 5%) 95%, rgb(128, 128, 128) 5%);
-	border: 1px solid var(--vscode-widget-border);
+	background-color: #f3f4f5 !important;
+	border: none !important;
+	border-top: none !important;
+	border-right: none !important;
+	border-bottom: none !important;
+	border-left: none !important;
 	padding: 10px 12px;
 	border-radius: 6px;
 	display: flex;
@@ -148,9 +154,21 @@
 	transition: background-color 0.2s;
 }
 
-.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark .vybe-button:hover {
-	background-color: color-mix(in srgb, var(--vscode-quickInput-background) 90%, var(--vscode-editor-foreground) 10%);
+.monaco-workbench.vs-dark .part.editor > .content .editor-group-container > .editor-group-watermark .vybe-button[data-vybe-button="true"],
+.monaco-workbench.vs-dark .part.editor > .content .editor-group-container > .editor-group-watermark .vybe-button {
+	background-color: #202124 !important;
 }
+
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark .vybe-button[data-vybe-button="true"]:hover,
+.monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark .vybe-button:hover {
+	background-color: #e5e8ea !important;
+}
+
+.monaco-workbench.vs-dark .part.editor > .content .editor-group-container > .editor-group-watermark .vybe-button[data-vybe-button="true"]:hover,
+.monaco-workbench.vs-dark .part.editor > .content .editor-group-container > .editor-group-watermark .vybe-button:hover {
+	background-color: #2a2b2e !important;
+}
+/* VYBE-PATCH-END: branding */
 
 .monaco-workbench .part.editor > .content .editor-group-container > .editor-group-watermark .vybe-button .codicon {
 	font-size: 16px;

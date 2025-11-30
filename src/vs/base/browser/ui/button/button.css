@@ -8,12 +8,14 @@
 	display: flex;
 	width: 100%;
 	padding: 4px;
-	border-radius: 2px;
+	/* VYBE-PATCH-START: button-styling */
+	border-radius: 4px;
+	border: none;
+	/* VYBE-PATCH-END: button-styling */
 	text-align: center;
 	cursor: pointer;
 	justify-content: center;
 	align-items: center;
-	border: 1px solid var(--vscode-button-border, transparent);
 	line-height: 18px;
 }
 
@@ -98,15 +100,19 @@
 }
 
 .monaco-button-dropdown > .monaco-button.monaco-dropdown-button {
-	border: 1px solid var(--vscode-button-border, transparent);
+	/* VYBE-PATCH-START: button-styling */
+	border: none;
 	border-left-width: 0 !important;
-	border-radius: 0 2px 2px 0;
+	border-radius: 0 4px 4px 0;
+	/* VYBE-PATCH-END: button-styling */
 	display: flex;
 	align-items: center;
 }
 
 .monaco-button-dropdown > .monaco-button.monaco-text-button {
-	border-radius: 2px 0 0 2px;
+	/* VYBE-PATCH-START: button-styling */
+	border-radius: 4px 0 0 4px;
+	/* VYBE-PATCH-END: button-styling */
 }
 
 .monaco-description-button {
@@ -161,8 +167,10 @@
 
 .monaco-button-dropdown.default-colors .monaco-button-dropdown-separator {
 	background-color: var(--vscode-button-background);
-	border-top: 1px solid var(--vscode-button-border);
-	border-bottom: 1px solid var(--vscode-button-border);
+	/* VYBE-PATCH-START: button-styling */
+	border-top: none;
+	border-bottom: none;
+	/* VYBE-PATCH-END: button-styling */
 }
 
 .monaco-button-dropdown.default-colors .monaco-button.secondary + .monaco-button-dropdown-separator {

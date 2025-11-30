@@ -45,6 +45,7 @@ import { EditorPane } from '../editor/editorPane.js';
 import { IKeybindingService } from '../../../../platform/keybinding/common/keybinding.js';
 import { ResolvedKeybinding } from '../../../../base/common/keybindings.js';
 import { EditorCommandsContextActionRunner } from '../editor/editorTabsControl.js';
+import { IProductService } from '../../../../platform/product/common/productService.js';
 import { IEditorCommandsContext, IEditorPartOptionsChangeEvent, IToolbarActions } from '../../../common/editor.js';
 import { CodeWindow, mainWindow } from '../../../../base/browser/window.js';
 import { ACCOUNTS_ACTIVITY_TILE_ACTION, GLOBAL_ACTIVITY_TITLE_ACTION } from './titlebarActions.js';
@@ -306,7 +307,8 @@ export class BrowserTitlebarPart extends Part implements ITitlebarPart {
 		@IHostService private readonly hostService: IHostService,
 		@IEditorService private readonly editorService: IEditorService,
 		@IMenuService private readonly menuService: IMenuService,
-		@IKeybindingService private readonly keybindingService: IKeybindingService
+		@IKeybindingService private readonly keybindingService: IKeybindingService,
+		@IProductService private readonly productService: IProductService
 	) {
 		super(id, { hasTitle: false }, themeService, storageService, layoutService);
 
@@ -459,6 +461,11 @@ export class BrowserTitlebarPart extends Part implements ITitlebarPart {
 			this.appIcon = prepend(this.leftContent, $('a.window-appicon'));
 		}
 
+		// VYBE-PATCH-START: vybe-mode-toggle
+		// VYBE Mode Toggle (add to left content for proper positioning)
+		this.createVybeModeToggle();
+		// VYBE-PATCH-END: vybe-mode-toggle
+
 		// Draggable region that we can manipulate for #52522
 		this.dragRegion = prepend(this.rootContainer, $('div.titlebar-drag-region'));
 
@@ -581,6 +588,137 @@ export class BrowserTitlebarPart extends Part implements ITitlebarPart {
 			this.titleDisposables.add(commandCenter);
 		}
 	}
+
+	// VYBE-PATCH-START: vybe-mode-toggle
+	private createVybeModeToggle(): void {
+		if (this.isAuxiliary) {
+			return; // only show in primary window
+		}
+
+		// Only show toggle for VYBE product
+		if (this.productService.nameShort !== 'VYBE') {
+			return;
+		}
+
+		// Ensure leftContent exists
+		if (!this.leftContent) {
+			return;
+		}
+
+		const host = append(this.leftContent, $(".vybe-mode-toggle-host"));
+		const container = append(host, $(".vybe-mode-tab-container"));
+		container.id = "vybeModeToggle";
+		container.dataset.mode = "ide";
+		container.classList.add("ide-mode");
+
+		const track = append(container, $(".vybe-mode-track"));
+
+		const soloTab = append(track, $(".vybe-mode-tab"));
+		soloTab.classList.add("vybe-mode-solo");
+		soloTab.dataset.mode = "solo";
+		append(soloTab, $(".vybe-mode-label")).textContent = "VYBE";
+
+		const iconWrapper = append(track, $(".vybe-mode-center-icon"));
+		const svgNS = "http://www.w3.org/2000/svg";
+		const iconSvg = document.createElementNS(svgNS, "svg");
+		iconSvg.setAttribute("viewBox", "0 0 512 512");
+		iconSvg.setAttribute("class", "vybe-mode-icon");
+		iconSvg.setAttribute("focusable", "false");
+		iconSvg.setAttribute("aria-hidden", "true");
+		iconSvg.setAttribute("role", "presentation");
+
+		const gradientId = `vybeToggleGradient-${Math.random().toString(36).slice(2, 8)}`;
+		const defs = document.createElementNS(svgNS, "defs");
+		const gradient = document.createElementNS(svgNS, "linearGradient");
+		gradient.setAttribute("id", gradientId);
+		gradient.setAttribute("x1", "0");
+		gradient.setAttribute("y1", "0");
+		gradient.setAttribute("x2", "0");
+		gradient.setAttribute("y2", "1");
+
+		const stopTop = document.createElementNS(svgNS, "stop");
+		stopTop.setAttribute("offset", "0%");
+		stopTop.setAttribute("stop-color", "#3ecf8e");
+		gradient.append(stopTop);
+
+		const stopBottom = document.createElementNS(svgNS, "stop");
+		stopBottom.setAttribute("offset", "100%");
+		stopBottom.setAttribute("stop-color", "#2aa66d");
+		gradient.append(stopBottom);
+
+		defs.append(gradient);
+		iconSvg.append(defs);
+
+		const equalizerGroup = document.createElementNS(svgNS, "g");
+		equalizerGroup.setAttribute("fill", `url(#${gradientId})`);
+		equalizerGroup.setAttribute("transform", "translate(49,60)");
+
+		const bars: Array<[number, number, number, number]> = [
+			[0, 160, 32, 192],
+			[48, 120, 32, 232],
+			[96, 80, 32, 272],
+			[144, 40, 32, 312],
+			[192, 180, 32, 172],
+			[240, 40, 32, 312],
+			[288, 80, 32, 272],
+			[336, 120, 32, 232],
+			[384, 160, 32, 192],
+		];
+
+		for (const [x, y, width, height] of bars) {
+			const rect = document.createElementNS(svgNS, "rect");
+			rect.setAttribute("x", String(x));
+			rect.setAttribute("y", String(y));
+			rect.setAttribute("width", String(width));
+			rect.setAttribute("height", String(height));
+			rect.setAttribute("rx", "16");
+			equalizerGroup.append(rect);
+		}
+
+		iconSvg.append(equalizerGroup);
+		iconWrapper.append(iconSvg);
+
+		const ideTab = append(track, $(".vybe-mode-tab"));
+		ideTab.classList.add("vybe-mode-ide", "active");
+		ideTab.dataset.mode = "ide";
+		append(ideTab, $(".vybe-mode-label")).textContent = "IDE";
+
+		// For now, just static UI - service will be added later
+		// Click handlers will be added when service is implemented
+		type VybeMode = "solo" | "ide";
+		const updateVisualState = (mode: VybeMode): void => {
+			const isSolo = mode === "solo";
+			soloTab.classList.toggle("active", isSolo);
+			ideTab.classList.toggle("active", !isSolo);
+			container.classList.toggle("solo-mode", isSolo);
+			container.classList.toggle("ide-mode", !isSolo);
+			container.dataset.mode = mode;
+		};
+
+		// Start in IDE mode (default)
+		updateVisualState("ide");
+
+		// Placeholder click handlers - will be wired to service later
+		this._register(
+			addDisposableListener(soloTab, EventType.CLICK, () => {
+				updateVisualState("solo");
+			}),
+		);
+		this._register(
+			addDisposableListener(ideTab, EventType.CLICK, () => {
+				updateVisualState("ide");
+			}),
+		);
+		this._register(
+			addDisposableListener(container, EventType.CLICK, (event) => {
+				const rect = container.getBoundingClientRect();
+				const clickOffset = event.clientX - rect.left;
+				const midpoint = rect.width / 2;
+				updateVisualState(clickOffset < midpoint ? "solo" : "ide");
+			}),
+		);
+	}
+	// VYBE-PATCH-END: vybe-mode-toggle
 
 	private actionViewItemProvider(action: IAction, options: IBaseActionViewItemOptions): IActionViewItem | undefined {
 
@@ -908,8 +1046,9 @@ export class MainBrowserTitlebarPart extends BrowserTitlebarPart {
 		@IEditorService editorService: IEditorService,
 		@IMenuService menuService: IMenuService,
 		@IKeybindingService keybindingService: IKeybindingService,
+		@IProductService productService: IProductService
 	) {
-		super(Parts.TITLEBAR_PART, mainWindow, editorGroupService.mainPart, contextMenuService, configurationService, environmentService, instantiationService, themeService, storageService, layoutService, contextKeyService, hostService, editorService, menuService, keybindingService);
+		super(Parts.TITLEBAR_PART, mainWindow, editorGroupService.mainPart, contextMenuService, configurationService, environmentService, instantiationService, themeService, storageService, layoutService, contextKeyService, hostService, editorService, menuService, keybindingService, productService);
 	}
 }
 
@@ -943,9 +1082,10 @@ export class AuxiliaryBrowserTitlebarPart extends BrowserTitlebarPart implements
 		@IEditorService editorService: IEditorService,
 		@IMenuService menuService: IMenuService,
 		@IKeybindingService keybindingService: IKeybindingService,
+		@IProductService productService: IProductService
 	) {
 		const id = AuxiliaryBrowserTitlebarPart.COUNTER++;
-		super(`workbench.parts.auxiliaryTitle.${id}`, getWindow(container), editorGroupsContainer, contextMenuService, configurationService, environmentService, instantiationService, themeService, storageService, layoutService, contextKeyService, hostService, editorService, menuService, keybindingService);
+		super(`workbench.parts.auxiliaryTitle.${id}`, getWindow(container), editorGroupsContainer, contextMenuService, configurationService, environmentService, instantiationService, themeService, storageService, layoutService, contextKeyService, hostService, editorService, menuService, keybindingService, productService);
 	}
 
 	override get preventZoom(): boolean {

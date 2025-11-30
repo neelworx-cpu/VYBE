@@ -4,10 +4,12 @@
  *--------------------------------------------------------------------------------------------*/
 // @ts-check
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { run } from '../esbuild-webview-common.mjs';
 
-const srcDir = path.join(import.meta.dirname, 'chat-webview-src');
-const outDir = path.join(import.meta.dirname, 'chat-webview-out');
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const srcDir = path.join(__dirname, 'chat-webview-src');
+const outDir = path.join(__dirname, 'chat-webview-out');
 
 run({
 	entryPoints: [

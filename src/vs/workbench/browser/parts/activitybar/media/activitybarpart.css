@@ -4,7 +4,9 @@
  *--------------------------------------------------------------------------------------------*/
 
 .monaco-workbench .part.activitybar {
-	width: 48px;
+	/* VYBE-PATCH-START: activity-bar-width */
+	width: 38px;
+	/* VYBE-PATCH-END: activity-bar-width */
 	height: 100%;
 }
 
@@ -63,3 +65,17 @@
 	width: 100%;
 	height: 35px;
 }
+
+/* VYBE-PATCH-START: activity-bar-separator */
+.monaco-workbench .activitybar > .content > .composite-bar .monaco-action-bar .activitybar-extension-separator,
+.monaco-workbench .activitybar > .content > .composite-bar .activitybar-extension-separator {
+	display: block;
+	width: 20px;
+	height: 1px;
+	background-color: #3ECF8E;
+	margin: 6px auto;
+	flex-shrink: 0;
+	pointer-events: none;
+	box-sizing: border-box;
+}
+/* VYBE-PATCH-END: activity-bar-separator */

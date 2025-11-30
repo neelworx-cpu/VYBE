@@ -4,15 +4,17 @@
  *--------------------------------------------------------------------------------------------*/
 // @ts-check
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { run } from '../esbuild-webview-common.mjs';
 
-const srcDir = path.join(import.meta.dirname, 'preview-src');
-const outDir = path.join(import.meta.dirname, 'media');
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const srcDir = path.join(__dirname, 'preview-src');
+const outDir = path.join(__dirname, 'media');
 
 run({
 	entryPoints: {
 		'index': path.join(srcDir, 'index.ts'),
-		'codicon': path.join(import.meta.dirname, 'node_modules', '@vscode', 'codicons', 'dist', 'codicon.css'),
+		'codicon': path.join(__dirname, 'node_modules', '@vscode', 'codicons', 'dist', 'codicon.css'),
 	},
 	srcDir,
 	outdir: outDir,

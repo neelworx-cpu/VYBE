@@ -239,3 +239,32 @@
 	color: var(--vscode-statusBarItem-offlineHoverForeground);
 	background-color: var(--vscode-statusBarItem-offlineHoverBackground) !important;
 }
+
+/* VYBE-PATCH-START: status-bar-first-item-styling */
+.monaco-workbench .part.statusbar > .items-container > .statusbar-item.left.first-visible-item {
+	width: 38px;
+	min-width: 38px;
+	max-width: 38px;
+	box-sizing: border-box;
+}
+
+.monaco-workbench .part.statusbar > .items-container > .statusbar-item.left.first-visible-item > .statusbar-item-label {
+	width: 100%;
+	height: 100%;
+	margin: 0;
+	padding: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background-color: #3ECF8E;
+	box-sizing: border-box;
+}
+
+.monaco-workbench .part.statusbar > .items-container > .statusbar-item.left.first-visible-item > .statusbar-item-label:hover:not(.disabled) {
+	background-color: #2AA66D !important;
+}
+
+.monaco-workbench .part.statusbar > .items-container > .statusbar-item.left.first-visible-item > .statusbar-item-label:active:not(.disabled) {
+	background-color: #2AA66D !important;
+}
+/* VYBE-PATCH-END: status-bar-first-item-styling */

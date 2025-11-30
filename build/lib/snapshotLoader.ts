@@ -8,7 +8,6 @@ import path from 'path';
 export const snaps = (() => {
 
 	const fs = require('fs');
-	const path = require('path');
 	const os = require('os');
 	const cp = require('child_process');
 

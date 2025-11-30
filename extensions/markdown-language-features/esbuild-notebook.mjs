@@ -4,10 +4,12 @@
  *--------------------------------------------------------------------------------------------*/
 // @ts-check
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { run } from '../esbuild-webview-common.mjs';
 
-const srcDir = path.join(import.meta.dirname, 'notebook');
-const outDir = path.join(import.meta.dirname, 'notebook-out');
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const srcDir = path.join(__dirname, 'notebook');
+const outDir = path.join(__dirname, 'notebook-out');
 
 run({
 	entryPoints: [

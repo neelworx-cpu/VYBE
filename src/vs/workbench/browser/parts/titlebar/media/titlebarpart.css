@@ -465,3 +465,175 @@
 	border-radius: 16px;
 	text-align: center;
 }
+
+/* VYBE-PATCH-START: vybe-mode-toggle */
+/* ========================================
+	VYBE Mode Toggle Styles
+	======================================== */
+
+.monaco-workbench .part.titlebar > .titlebar-container > .titlebar-left > .vybe-mode-toggle-host {
+	display: flex !important;
+	align-items: center;
+	margin-left: 8px;
+	margin-right: 4px;
+	-webkit-app-region: no-drag;
+	transition: margin-left 0s; /* Instant movement to match macOS buttons */
+	visibility: visible;
+	opacity: 1;
+}
+
+.monaco-workbench .part.titlebar > .titlebar-container > .titlebar-left > .vybe-mode-toggle-host > .vybe-mode-tab-container {
+	outline: 0;
+	display: flex !important;
+	align-items: center;
+	justify-content: center;
+	box-sizing: border-box;
+	margin-left: 0;
+	border-radius: 6px;
+	background-color: transparent;
+	height: 28px;
+	width: 72px;
+	overflow: hidden;
+	position: relative;
+	border: 1px solid #eceff2;
+	cursor: pointer;
+	visibility: visible;
+	opacity: 1;
+}
+
+.monaco-workbench.vs-dark .part.titlebar > .titlebar-container > .titlebar-left > .vybe-mode-toggle-host > .vybe-mode-tab-container {
+	border-color: #2a2c2f;
+}
+
+.monaco-workbench .part.titlebar > .titlebar-container > .titlebar-left > .vybe-mode-toggle-host > .vybe-mode-tab-container::before {
+	content: '';
+	position: absolute;
+	top: 0;
+	left: 0;
+	width: 100%;
+	height: 100%;
+	border-radius: inherit;
+	background: transparent;
+	pointer-events: none;
+	transition: background 0.25s cubic-bezier(.3, .8, .2, 1);
+}
+
+.monaco-workbench .part.titlebar > .titlebar-container > .titlebar-left > .vybe-mode-toggle-host > .vybe-mode-tab-container.solo-mode::before {
+	background: #3ecf8e;
+}
+
+.monaco-workbench .part.titlebar > .titlebar-container > .titlebar-left > .vybe-mode-toggle-host > .vybe-mode-tab-container.ide-mode::before {
+	background: rgba(255, 255, 255, 0.06);
+}
+
+.monaco-workbench.vs .part.titlebar > .titlebar-container > .titlebar-left > .vybe-mode-toggle-host > .vybe-mode-tab-container.ide-mode::before {
+	background: #dce0e5;
+}
+
+.monaco-workbench .part.titlebar > .titlebar-container > .titlebar-left > .vybe-mode-toggle-host > .vybe-mode-tab-container > .vybe-mode-track {
+	display: flex;
+	align-items: center;
+	gap: 0;
+	padding: 0;
+	width: max-content;
+	transform: translateX(-22px);
+	transition: transform 0.25s cubic-bezier(.3, .8, .2, 1);
+	position: relative;
+	z-index: 1;
+}
+
+.monaco-workbench .part.titlebar > .titlebar-container > .titlebar-left > .vybe-mode-toggle-host > .vybe-mode-tab-container.solo-mode > .vybe-mode-track {
+	transform: translateX(22px);
+}
+
+.monaco-workbench .part.titlebar > .titlebar-container > .titlebar-left > .vybe-mode-toggle-host > .vybe-mode-tab-container > .vybe-mode-track > .vybe-mode-tab {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 40px;
+	height: 28px;
+	border-radius: 0;
+	font-size: 12px;
+	font-weight: 600;
+	cursor: pointer;
+	transition: opacity 0.2s ease, color 0.2s ease;
+	color: inherit;
+	position: relative;
+	z-index: 1;
+	background: transparent;
+}
+
+.monaco-workbench .part.titlebar > .titlebar-container > .titlebar-left > .vybe-mode-toggle-host > .vybe-mode-tab-container > .vybe-mode-track > .vybe-mode-tab::after {
+	content: '';
+	position: absolute;
+	top: 0;
+	left: -6px;
+	width: calc(100% + 12px);
+	height: 100%;
+	background: transparent;
+	z-index: -1;
+	pointer-events: none;
+}
+
+.monaco-workbench .part.titlebar > .titlebar-container > .titlebar-left > .vybe-mode-toggle-host > .vybe-mode-tab-container > .vybe-mode-track > .vybe-mode-solo::after {
+	background: #3ecf8e;
+}
+
+.monaco-workbench .part.titlebar > .titlebar-container > .titlebar-left > .vybe-mode-toggle-host > .vybe-mode-tab-container > .vybe-mode-track > .vybe-mode-ide::after {
+	background: rgba(255, 255, 255, 0.06);
+}
+
+.monaco-workbench.vs .part.titlebar > .titlebar-container > .titlebar-left > .vybe-mode-toggle-host > .vybe-mode-tab-container > .vybe-mode-track > .vybe-mode-ide::after {
+	background: #dce0e5;
+}
+
+.monaco-workbench .part.titlebar > .titlebar-container > .titlebar-left > .vybe-mode-toggle-host > .vybe-mode-tab-container.ide-mode > .vybe-mode-track > .vybe-mode-solo::after,
+.monaco-workbench .part.titlebar > .titlebar-container > .titlebar-left > .vybe-mode-toggle-host > .vybe-mode-tab-container.solo-mode > .vybe-mode-track > .vybe-mode-ide::after {
+	background: transparent;
+}
+
+.monaco-workbench.vs .part.titlebar > .titlebar-container > .titlebar-left > .vybe-mode-toggle-host > .vybe-mode-tab-container.solo-mode > .vybe-mode-track > .vybe-mode-ide::after {
+	background: transparent;
+}
+
+.monaco-workbench.vs .part.titlebar > .titlebar-container > .titlebar-left > .vybe-mode-toggle-host > .vybe-mode-tab-container.ide-mode > .vybe-mode-track > .vybe-mode-ide::after {
+	background: #dce0e5;
+}
+
+.monaco-workbench .part.titlebar > .titlebar-container > .titlebar-left > .vybe-mode-toggle-host > .vybe-mode-tab-container > .vybe-mode-track > .vybe-mode-tab.active {
+	opacity: 1;
+	font-weight: 600;
+}
+
+.monaco-workbench .part.titlebar > .titlebar-container > .titlebar-left > .vybe-mode-toggle-host > .vybe-mode-tab-container > .vybe-mode-track > .vybe-mode-solo {
+	color: #ffffff;
+}
+
+.monaco-workbench .part.titlebar > .titlebar-container > .titlebar-left > .vybe-mode-toggle-host > .vybe-mode-tab-container > .vybe-mode-track > .vybe-mode-ide {
+	color: #3ecf8e;
+}
+
+.monaco-workbench .part.titlebar > .titlebar-container > .titlebar-left > .vybe-mode-toggle-host > .vybe-mode-tab-container > .vybe-mode-track > .vybe-mode-center-icon {
+	cursor: pointer;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 24px;
+	height: 24px;
+	margin: 0;
+	border-radius: 4px;
+	background-color: #ffffff;
+	color: var(--vscode-foreground);
+	z-index: 2;
+}
+
+.monaco-workbench.vs-dark .part.titlebar > .titlebar-container > .titlebar-left > .vybe-mode-toggle-host > .vybe-mode-tab-container > .vybe-mode-track > .vybe-mode-center-icon {
+	background-color: #1a1b1d;
+}
+
+.monaco-workbench .part.titlebar > .titlebar-container > .titlebar-left > .vybe-mode-toggle-host > .vybe-mode-tab-container > .vybe-mode-track > .vybe-mode-center-icon svg {
+	width: 18px;
+	height: 18px;
+	display: block;
+}
+/* VYBE-PATCH-END: vybe-mode-toggle */

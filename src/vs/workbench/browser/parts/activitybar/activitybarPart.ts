@@ -41,7 +41,9 @@ import { SwitchCompositeViewAction } from '../compositeBarActions.js';
 
 export class ActivitybarPart extends Part {
 
-	static readonly ACTION_HEIGHT = 48;
+	// VYBE-PATCH-START: activity-bar-width
+	static readonly ACTION_HEIGHT = 38;
+	// VYBE-PATCH-END: activity-bar-width
 
 	static readonly pinnedViewContainersKey = 'workbench.activity.pinnedViewlets2';
 	static readonly placeholderViewContainersKey = 'workbench.activity.placeholderViewlets';
@@ -49,8 +51,10 @@ export class ActivitybarPart extends Part {
 
 	//#region IView
 
-	readonly minimumWidth: number = 48;
-	readonly maximumWidth: number = 48;
+	// VYBE-PATCH-START: activity-bar-width
+	readonly minimumWidth: number = 38;
+	readonly maximumWidth: number = 38;
+	// VYBE-PATCH-END: activity-bar-width
 	readonly minimumHeight: number = 0;
 	readonly maximumHeight: number = Number.POSITIVE_INFINITY;
 
@@ -77,7 +81,9 @@ export class ActivitybarPart extends Part {
 			viewContainersWorkspaceStateKey: ActivitybarPart.viewContainersWorkspaceStateKey,
 			orientation: ActionsOrientation.VERTICAL,
 			icon: true,
-			iconSize: 24,
+			// VYBE-PATCH-START: activity-bar-icon-size
+			iconSize: 20,
+			// VYBE-PATCH-END: activity-bar-icon-size
 			activityHoverOptions: {
 				position: () => this.layoutService.getSideBarPosition() === Position.LEFT ? HoverPosition.RIGHT : HoverPosition.LEFT,
 			},
@@ -200,6 +206,12 @@ export class ActivityBarCompositeBar extends PaneCompositeBar {
 	private readonly globalCompositeBar: GlobalCompositeBar | undefined;
 
 	private readonly keyboardNavigationDisposables = this._register(new DisposableStore());
+	// VYBE-PATCH-START: activity-bar-separator
+	private extensionSeparator: HTMLElement | undefined;
+	private readonly _viewDescriptorServiceForSeparator: IViewDescriptorService;
+	private readonly _extensionServiceForSeparator: IExtensionService;
+	private separatorObserver: MutationObserver | undefined;
+	// VYBE-PATCH-END: activity-bar-separator
 
 	constructor(
 		options: IPaneCompositeBarOptions,
@@ -225,6 +237,12 @@ export class ActivityBarCompositeBar extends PaneCompositeBar {
 			}
 		}, part, paneCompositePart, instantiationService, storageService, extensionService, viewDescriptorService, viewService, contextKeyService, environmentService, layoutService);
 
+		// VYBE-PATCH-START: activity-bar-separator
+		// Store services for use in updateExtensionSeparator (using different names to avoid conflict with parent class)
+		this._viewDescriptorServiceForSeparator = viewDescriptorService;
+		this._extensionServiceForSeparator = extensionService;
+		// VYBE-PATCH-END: activity-bar-separator
+
 		if (showGlobalActivities) {
 			this.globalCompositeBar = this._register(instantiationService.createInstance(GlobalCompositeBar, () => this.getContextMenuActions(), (theme: IColorTheme) => this.options.colors(theme), this.options.activityHoverOptions));
 		}
@@ -239,6 +257,19 @@ export class ActivityBarCompositeBar extends PaneCompositeBar {
 				}
 			}
 		}));
+
+		// VYBE-PATCH-START: activity-bar-separator
+		// Listen to view container changes to update separator position
+		this._register(this._viewDescriptorServiceForSeparator.onDidChangeViewContainers(() => {
+			setTimeout(() => this.updateExtensionSeparator(), 0);
+			setTimeout(() => this.updateExtensionSeparator(), 100);
+		}));
+		// Also listen to extension service to catch when extensions are registered
+		this._register(this._extensionServiceForSeparator.onDidRegisterExtensions(() => {
+			setTimeout(() => this.updateExtensionSeparator(), 100);
+			setTimeout(() => this.updateExtensionSeparator(), 500);
+		}));
+		// VYBE-PATCH-END: activity-bar-separator
 	}
 
 	private fillContextMenuActions(actions: IAction[], e?: MouseEvent | GestureEvent) {
@@ -337,6 +368,18 @@ export class ActivityBarCompositeBar extends PaneCompositeBar {
 		// View Containers action bar
 		this.compositeBarContainer = super.create(this.element);
 
+		// VYBE-PATCH-START: activity-bar-separator
+		// Create separator element
+		this.extensionSeparator = $('.activitybar-extension-separator');
+		// Update separator position after initial render and DOM is ready
+		// Use multiple timeouts to ensure DOM is fully rendered
+		setTimeout(() => this.updateExtensionSeparator(), 0);
+		setTimeout(() => this.updateExtensionSeparator(), 100);
+		setTimeout(() => this.updateExtensionSeparator(), 500);
+		// Set up MutationObserver to watch for DOM changes in the action bar
+		this.setupSeparatorObserver();
+		// VYBE-PATCH-END: activity-bar-separator
+
 		// Global action bar
 		if (this.globalCompositeBar) {
 			this.globalCompositeBar.create(this.element);
@@ -380,6 +423,179 @@ export class ActivityBarCompositeBar extends PaneCompositeBar {
 
 		return actions;
 	}
+
+	// VYBE-PATCH-START: activity-bar-separator
+	private setupSeparatorObserver(): void {
+		if (!this.compositeBarContainer) {
+			return;
+		}
+
+		// Wait for the action bar and actions container to be created
+		setTimeout(() => {
+			const actionBar = this.compositeBarContainer?.querySelector('.monaco-action-bar');
+			if (!actionBar) {
+				return;
+			}
+
+			const actionsContainer = actionBar.querySelector('.actions-container');
+			if (!actionsContainer) {
+				return;
+			}
+
+			// Set up MutationObserver to watch for changes in the actions container
+			this.separatorObserver = new MutationObserver(() => {
+				this.updateExtensionSeparator();
+			});
+
+			this.separatorObserver.observe(actionsContainer, {
+				childList: true,
+				subtree: false
+			});
+
+			this._register({ dispose: () => this.separatorObserver?.disconnect() });
+		}, 100);
+	}
+
+	private updateExtensionSeparator(): void {
+		if (!this.extensionSeparator || !this.compositeBarContainer) {
+			return;
+		}
+
+		// Find the action bar and actions container
+		const actionBar = this.compositeBarContainer.querySelector('.monaco-action-bar') as HTMLElement;
+		if (!actionBar) {
+			// Action bar not ready yet, try again later
+			return;
+		}
+
+		// Action items are inside .actions-container (which is inside .monaco-action-bar)
+		const actionsContainer = actionBar.querySelector('.actions-container') as HTMLElement;
+		if (!actionsContainer) {
+			// Actions container not ready yet, try again later
+			return;
+		}
+
+		const visibleCompositeIds = this.getPaneCompositeIds();
+		if (visibleCompositeIds.length === 0) {
+			this.extensionSeparator.style.display = 'none';
+			// Remove from DOM if hidden
+			if (this.extensionSeparator.parentNode) {
+				this.extensionSeparator.parentNode.removeChild(this.extensionSeparator);
+			}
+			return;
+		}
+
+		// Find the first extension item (one with extensionId)
+		let firstExtensionIndex = -1;
+		for (let i = 0; i < visibleCompositeIds.length; i++) {
+			const compositeId = visibleCompositeIds[i];
+			const viewContainer = this._viewDescriptorServiceForSeparator.getViewContainerById(compositeId);
+			if (viewContainer?.extensionId) {
+				firstExtensionIndex = i;
+				break;
+			}
+		}
+
+		// If no extension items or all items are extensions, hide separator
+		if (firstExtensionIndex === -1 || firstExtensionIndex === 0) {
+			this.extensionSeparator.style.display = 'none';
+			this.extensionSeparator.style.visibility = 'hidden';
+			// Keep in DOM but hidden (don't remove, just hide)
+			return;
+		}
+
+		// Show separator and position it before the first extension item
+		this.extensionSeparator.style.display = 'block';
+		this.extensionSeparator.style.visibility = 'visible';
+		this.extensionSeparator.style.opacity = '1';
+
+		// Remove separator from current location if it exists and is in wrong parent
+		if (this.extensionSeparator.parentNode && this.extensionSeparator.parentNode !== actionsContainer) {
+			this.extensionSeparator.parentNode.removeChild(this.extensionSeparator);
+		}
+
+		// Find all action items (they are direct children of actionsContainer, excluding the separator itself)
+		const actionItems = Array.from(actionsContainer.children).filter(child => {
+			return child.classList.contains('action-item') && child !== this.extensionSeparator;
+		}) as HTMLElement[];
+
+		// Ensure we have action items
+		if (actionItems.length === 0) {
+			// Action items not ready yet, try again later
+			return;
+		}
+
+		// Find the target item by matching action items to composite IDs
+		// Action items should be in the same order as visibleCompositeIds
+		// We need to find the action item that corresponds to the first extension composite
+		let targetItem: HTMLElement | null = null;
+
+		// Iterate through action items and match them to composite IDs
+		// Find the first action item that corresponds to an extension composite
+		for (let i = 0; i < Math.min(actionItems.length, visibleCompositeIds.length); i++) {
+			const compositeId = visibleCompositeIds[i];
+			const viewContainer = this._viewDescriptorServiceForSeparator.getViewContainerById(compositeId);
+
+			// Check if this composite is an extension (has extensionId)
+			if (viewContainer?.extensionId) {
+				// This is the first extension - the separator should go before this action item
+				targetItem = actionItems[i];
+				break;
+			}
+		}
+
+		// Fallback: if we couldn't find by matching, use index-based approach
+		if (!targetItem && firstExtensionIndex < actionItems.length) {
+			targetItem = actionItems[firstExtensionIndex];
+		}
+
+		if (!targetItem) {
+			// Couldn't find target item, might be a timing issue - try again later
+			setTimeout(() => this.updateExtensionSeparator(), 100);
+			return;
+		}
+
+		// Only insert if separator is not already in the correct position
+		const currentParent = this.extensionSeparator.parentNode;
+		const currentNextSibling = this.extensionSeparator.nextSibling;
+
+		// Check if separator is already in the correct position
+		const isInCorrectPosition = currentParent === actionsContainer && currentNextSibling === targetItem;
+
+		if (!isInCorrectPosition) {
+			// Temporarily disconnect observer to avoid infinite loop
+			if (this.separatorObserver) {
+				this.separatorObserver.disconnect();
+			}
+
+			// Ensure separator is removed from old location if it exists
+			if (currentParent) {
+				currentParent.removeChild(this.extensionSeparator);
+			}
+
+			// Insert before target item in the actions container
+			// This will place the separator BEFORE the first extension item
+			try {
+				actionsContainer.insertBefore(this.extensionSeparator, targetItem);
+			} catch (e) {
+				// If insertion fails, try again later
+				setTimeout(() => this.updateExtensionSeparator(), 100);
+				return;
+			}
+
+			// Reconnect observer to watch the actions container
+			if (actionsContainer) {
+				this.separatorObserver = new MutationObserver(() => {
+					this.updateExtensionSeparator();
+				});
+				this.separatorObserver.observe(actionsContainer, {
+					childList: true,
+					subtree: false
+				});
+			}
+		}
+	}
+	// VYBE-PATCH-END: activity-bar-separator
 
 }
 
