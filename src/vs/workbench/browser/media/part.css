@@ -95,3 +95,73 @@
 	top: 33px; /* at the bottom of the 35px height title container */
 	z-index: 5; /* on top of things */
 }
+
+/* ========================================
+	VYBE: Trae AI Component Design - All Panels Rounded on 4 Sides
+	======================================== */
+
+/* VYBE: Workbench background - match titlebar and activity bar background */
+.monaco-workbench {
+	background-color: var(--vscode-titleBar-activeBackground) !important;
+}
+
+/* Sidebar Panel (Explorer, Search, Extensions, etc.) - Rounded on ALL 4 sides */
+/* Extends FULL HEIGHT from top to bottom */
+.monaco-workbench .part.sidebar {
+	border-radius: 6px;
+	margin-right: 3px;
+	margin-bottom: 13px;
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+	border: none;
+	background-color: var(--vscode-sideBar-background); /* VYBE: Use theme panel color */
+}
+
+/* Editor Panel - Rounded on ALL 4 sides */
+/* Extends from top, but STOPS to make room for terminal below */
+.monaco-workbench .part.editor {
+	border-radius: 6px;
+	margin-right: 3px;
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+	border: none;
+	background-color: var(--vscode-sideBar-background); /* VYBE: Use theme panel color */
+}
+
+/* Bottom Panel (Terminal, Output, etc.) - Rounded on ALL 4 sides */
+/* Positioned ONLY under the Editor, NOT full width */
+.monaco-workbench .part.panel.bottom {
+	border-radius: 6px;
+	margin-right: 3px;
+	margin-bottom: 13px;
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+	border: none;
+	background-color: var(--vscode-sideBar-background); /* VYBE: Use theme panel color */
+}
+
+/* Panel on left/right - also rounded */
+.monaco-workbench .part.panel.left,
+.monaco-workbench .part.panel.right {
+	border-radius: 6px;
+	margin: 0 3px 3px 3px;
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+	border: none;
+	background-color: var(--vscode-sideBar-background); /* VYBE: Use theme panel color */
+}
+
+/* Auxiliary Bar (Chat/Agent Panel) - Rounded on ALL 4 sides */
+/* Extends FULL HEIGHT from top to bottom */
+.monaco-workbench .part.auxiliarybar {
+	border-radius: 6px;
+	margin-bottom: 13px;
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+	border: none;
+	background-color: var(--vscode-sideBar-background); /* VYBE: Use theme panel color */
+}
+
+/* VYBE-PATCH-START: panel-vertical-gaps */
+/* Make vertical gaps between panels visible by setting background color on the container */
+/* Use titlebar/activity bar background color (same as workbench background) */
+.monaco-workbench .part.panel > .content .monaco-pane-view > .monaco-split-view2.vertical > .monaco-scrollable-element > .split-view-container,
+.part.panel > .content .monaco-pane-view > .monaco-split-view2.vertical > .monaco-scrollable-element > .split-view-container {
+	background-color: var(--vscode-titleBar-activeBackground) !important;
+}
+/* VYBE-PATCH-END: panel-vertical-gaps */

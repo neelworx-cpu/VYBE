@@ -98,3 +98,14 @@
 	display: inline-block;
 	transform: rotate(180deg);
 }
+
+/* VYBE-PATCH-START: panel-horizontal-gap */
+/* Add 3px gap between editor and terminal panel */
+.monaco-workbench .part.panel.bottom {
+	margin-top: 3px !important;
+}
+
+.monaco-workbench .part.panel.top {
+	margin-bottom: 3px !important;
+}
+/* VYBE-PATCH-END: panel-horizontal-gap */

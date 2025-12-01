@@ -198,7 +198,8 @@ export class PanelPart extends AbstractPaneCompositePart {
 				dimensions = new Dimension(width, height - 1); // Take into account the 1px border when layouting
 				break;
 			default:
-				dimensions = new Dimension(width, height);
+				// VYBE-PATCH: Account for 3px margin-top gap between editor and terminal
+				dimensions = new Dimension(width, height - 3);
 				break;
 		}
 
