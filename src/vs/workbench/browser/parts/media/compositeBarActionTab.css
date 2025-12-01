@@ -1,0 +1,189 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* VYBE: Cursor-style composite bar action tab design */
+
+/* Base composite-bar-action-tab styling - override existing styles */
+.monaco-workbench .pane-composite-part > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab,
+.monaco-workbench .pane-composite-part > .header-or-footer > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab {
+	position: relative !important;
+	text-transform: uppercase !important;
+	font-size: 11px !important;
+	font-weight: 600 !important;
+	font-family: -apple-system, "system-ui", sans-serif !important;
+	height: 22px !important;
+	line-height: 27px !important;
+	padding: 4px 6px !important;
+	padding-top: 4px !important;
+	padding-bottom: 4px !important;
+	padding-left: 6px !important;
+	padding-right: 6px !important;
+	margin: 2px !important;
+	margin-top: 2px !important;
+	margin-bottom: 2px !important;
+	margin-left: 2px !important;
+	margin-right: 2px !important;
+	border-radius: 4px !important;
+	box-sizing: border-box !important;
+	display: flex !important;
+	align-items: center !important;
+	justify-content: center !important;
+	cursor: pointer !important;
+	user-select: none !important;
+	white-space: nowrap !important;
+	app-region: no-drag !important;
+	-webkit-user-drag: element !important;
+	visibility: visible !important;
+}
+
+/* Status indicator */
+.monaco-workbench .pane-composite-part > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab .status-indicator,
+.monaco-workbench .pane-composite-part > .header-or-footer > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab .status-indicator {
+	/* Status indicator styling - can be customized later */
+	display: none; /* Hidden for now */
+}
+
+/* Composite bar action tab label wrapper */
+.monaco-workbench .pane-composite-part > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab .composite-bar-action-tab-label,
+.monaco-workbench .pane-composite-part > .header-or-footer > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab .composite-bar-action-tab-label {
+	display: flex;
+	align-items: center;
+	flex: 1 1 auto;
+	min-width: 0px;
+	gap: 4px;
+}
+
+/* Action label inside wrapper - VYBE Dark Theme */
+.monaco-workbench .pane-composite-part > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab .composite-bar-action-tab-label .action-label,
+.monaco-workbench .pane-composite-part > .header-or-footer > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab .composite-bar-action-tab-label .action-label {
+	flex: 1 1 auto;
+	min-width: 0px;
+	/* VYBE Dark Theme: rgb(209, 211, 219) */
+	/* VYBE Light Theme: rgb(49, 53, 58) */
+	color: rgb(209, 211, 219) !important;
+	border-bottom-color: transparent !important;
+	border-bottom-style: none !important;
+	border-bottom-width: 0 !important;
+	text-overflow: ellipsis;
+	overflow: hidden;
+	white-space: nowrap;
+	margin: 0 !important;
+	padding: 0 !important;
+	text-align: left !important;
+}
+
+/* VYBE Light Theme - override for light theme */
+.monaco-workbench.vs .pane-composite-part > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab .composite-bar-action-tab-label .action-label,
+.monaco-workbench.vs .pane-composite-part > .header-or-footer > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab .composite-bar-action-tab-label .action-label,
+.monaco-workbench.vs-light .pane-composite-part > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab .composite-bar-action-tab-label .action-label,
+.monaco-workbench.vs-light .pane-composite-part > .header-or-footer > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab .composite-bar-action-tab-label .action-label {
+	color: rgb(49, 53, 58) !important;
+}
+
+/* Active/Checked state - with background box */
+.monaco-workbench .pane-composite-part > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab.checked,
+.monaco-workbench .pane-composite-part > .header-or-footer > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab.checked {
+	/* VYBE Dark Theme: rgba(224, 226, 242, 0.05) */
+	/* VYBE Light Theme: rgba(86, 99, 119, 0.11) */
+	background-color: rgba(224, 226, 242, 0.05) !important;
+}
+
+/* VYBE Light Theme - override background for light theme */
+.monaco-workbench.vs .pane-composite-part > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab.checked,
+.monaco-workbench.vs .pane-composite-part > .header-or-footer > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab.checked,
+.monaco-workbench.vs-light .pane-composite-part > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab.checked,
+.monaco-workbench.vs-light .pane-composite-part > .header-or-footer > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab.checked {
+	background-color: rgba(86, 99, 119, 0.11) !important;
+}
+
+.monaco-workbench .pane-composite-part > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab.checked .composite-bar-action-tab-label .action-label,
+.monaco-workbench .pane-composite-part > .header-or-footer > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab.checked .composite-bar-action-tab-label .action-label {
+	/* VYBE Dark Theme: rgb(209, 211, 219) */
+	/* VYBE Light Theme: rgb(49, 53, 58) */
+	color: rgb(209, 211, 219) !important;
+	border-bottom-color: rgb(209, 211, 219) !important;
+	border-bottom-style: none !important;
+	border-bottom-width: 0 !important;
+}
+
+/* VYBE Light Theme - override text color for checked state in light theme */
+.monaco-workbench.vs .pane-composite-part > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab.checked .composite-bar-action-tab-label .action-label,
+.monaco-workbench.vs .pane-composite-part > .header-or-footer > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab.checked .composite-bar-action-tab-label .action-label,
+.monaco-workbench.vs-light .pane-composite-part > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab.checked .composite-bar-action-tab-label .action-label,
+.monaco-workbench.vs-light .pane-composite-part > .header-or-footer > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab.checked .composite-bar-action-tab-label .action-label {
+	color: rgb(49, 53, 58) !important;
+	border-bottom-color: rgb(49, 53, 58) !important;
+}
+
+/* Hover state */
+.monaco-workbench .pane-composite-part > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab:hover .composite-bar-action-tab-label .action-label,
+.monaco-workbench .pane-composite-part > .header-or-footer > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab:hover .composite-bar-action-tab-label .action-label {
+	color: rgb(209, 211, 219) !important;
+}
+
+/* VYBE Light Theme - override hover color for light theme */
+.monaco-workbench.vs .pane-composite-part > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab:hover .composite-bar-action-tab-label .action-label,
+.monaco-workbench.vs .pane-composite-part > .header-or-footer > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab:hover .composite-bar-action-tab-label .action-label,
+.monaco-workbench.vs-light .pane-composite-part > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab:hover .composite-bar-action-tab-label .action-label,
+.monaco-workbench.vs-light .pane-composite-part > .header-or-footer > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab:hover .composite-bar-action-tab-label .action-label {
+	color: rgb(49, 53, 58) !important;
+}
+
+/* Close button */
+.monaco-workbench .pane-composite-part > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab .codicon-close.remove-button,
+.monaco-workbench .pane-composite-part > .header-or-footer > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab .codicon-close.remove-button {
+	position: absolute;
+	right: 0px;
+	top: 50%;
+	transform: translateY(-50%);
+	cursor: pointer;
+	z-index: 2;
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity 0.2s ease;
+}
+
+/* Show close button on hover */
+.monaco-workbench .pane-composite-part > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab:hover .codicon-close.remove-button,
+.monaco-workbench .pane-composite-part > .header-or-footer > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab:hover .codicon-close.remove-button {
+	opacity: 1;
+	pointer-events: auto;
+}
+
+/* Badge positioning for composite-bar-action-tab */
+.monaco-workbench .pane-composite-part > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab .badge,
+.monaco-workbench .pane-composite-part > .header-or-footer > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab .badge {
+	margin-left: 4px;
+}
+
+/* Active item indicator - hide default border, we use background box instead */
+.monaco-workbench .pane-composite-part > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab.checked .active-item-indicator,
+.monaco-workbench .pane-composite-part > .header-or-footer > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab.checked .active-item-indicator {
+	display: none !important; /* Hide default indicator, we use background box */
+}
+
+/* Truncated state */
+.monaco-workbench .pane-composite-part > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab.is-truncated,
+.monaco-workbench .pane-composite-part > .header-or-footer > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab.is-truncated {
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+/* Drag preview styling - ensure drag preview matches the new size */
+.monaco-workbench .pane-composite-part > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab[draggable="true"],
+.monaco-workbench .pane-composite-part > .header-or-footer > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab[draggable="true"] {
+	-webkit-user-drag: element !important;
+}
+
+/* Ensure drag preview maintains size during drag */
+.monaco-workbench .pane-composite-part > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab:active,
+.monaco-workbench .pane-composite-part > .header-or-footer > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab:active {
+	/* Maintain size during drag */
+	height: 22px !important;
+	line-height: 27px !important;
+	padding: 4px 6px !important;
+	margin: 2px !important;
+}
+

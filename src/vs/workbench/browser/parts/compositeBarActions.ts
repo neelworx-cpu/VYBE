@@ -192,22 +192,33 @@ export class CompositeBarActionViewItem extends BaseActionViewItem {
 		const colors = this.options.colors(theme);
 
 		if (this.label) {
-			if (this.options.icon) {
-				const foreground = this._action.checked ? colors.activeForegroundColor : colors.inactiveForegroundColor;
-				if (this.compositeBarActionItem.iconUrl) {
-					// Apply background color to activity bar item provided with iconUrls
-					this.label.style.backgroundColor = foreground ? foreground.toString() : '';
-					this.label.style.color = '';
+			// VYBE: For composite-bar-action-tab, let CSS handle colors
+			const isCompositeBarActionTab = this.container.classList.contains('composite-bar-action-tab');
+
+			if (!isCompositeBarActionTab) {
+				// Original styling for non-composite-bar-action-tab items
+				if (this.options.icon) {
+					const foreground = this._action.checked ? colors.activeForegroundColor : colors.inactiveForegroundColor;
+					if (this.compositeBarActionItem.iconUrl) {
+						// Apply background color to activity bar item provided with iconUrls
+						this.label.style.backgroundColor = foreground ? foreground.toString() : '';
+						this.label.style.color = '';
+					} else {
+						// Apply foreground color to activity bar items provided with codicons
+						this.label.style.color = foreground ? foreground.toString() : '';
+						this.label.style.backgroundColor = '';
+					}
 				} else {
-					// Apply foreground color to activity bar items provided with codicons
+					const foreground = this._action.checked ? colors.activeForegroundColor : colors.inactiveForegroundColor;
+					const borderBottomColor = this._action.checked ? colors.activeBorderBottomColor : null;
 					this.label.style.color = foreground ? foreground.toString() : '';
-					this.label.style.backgroundColor = '';
+					this.label.style.borderBottomColor = borderBottomColor ? borderBottomColor.toString() : '';
 				}
 			} else {
-				const foreground = this._action.checked ? colors.activeForegroundColor : colors.inactiveForegroundColor;
-				const borderBottomColor = this._action.checked ? colors.activeBorderBottomColor : null;
-				this.label.style.color = foreground ? foreground.toString() : '';
-				this.label.style.borderBottomColor = borderBottomColor ? borderBottomColor.toString() : '';
+				// For composite-bar-action-tab, only set border-bottom-color to transparent for active
+				if (this._action.checked) {
+					this.label.style.borderBottomColor = 'rgba(228, 228, 228, 0)';
+				}
 			}
 
 			this.container.style.setProperty('--insert-border-color', colors.dragAndDropBorder ? colors.dragAndDropBorder.toString() : '');
@@ -233,6 +244,10 @@ export class CompositeBarActionViewItem extends BaseActionViewItem {
 		super.render(container);
 
 		this.container = container;
+
+		// VYBE: Add Cursor-style composite-bar-action-tab class
+		this.container.classList.add('composite-bar-action-tab');
+
 		if (this.options.icon) {
 			this.container.classList.add('icon');
 		}
@@ -270,12 +285,38 @@ export class CompositeBarActionViewItem extends BaseActionViewItem {
 			},
 		}), { groupId: 'composite-bar-actions' }));
 
-		// Label
-		this.label = append(container, $('a'));
+		// VYBE: Cursor-style structure
+		// Status indicator
+		append(container, $('.status-indicator'));
 
-		// Badge
+		// Label wrapper with flex layout
+		const labelWrapper = append(container, $('.composite-bar-action-tab-label'));
+		labelWrapper.style.display = 'flex';
+		labelWrapper.style.alignItems = 'center';
+		labelWrapper.style.flex = '1 1 auto';
+		labelWrapper.style.minWidth = '0px';
+		labelWrapper.style.gap = '4px';
+
+		// Label (moved inside wrapper)
+		this.label = append(labelWrapper, $('a'));
+		this.label.style.flex = '1 1 auto';
+		this.label.style.minWidth = '0px';
+
+		// Badge (stays outside label wrapper for now, will be repositioned via CSS if needed)
 		this.badge = append(container, $('.badge'));
 		this.badgeContent = append(this.badge, $('.badge-content'));
+
+		// VYBE: Close button (hidden by default, shown on hover)
+		const closeButton = append(container, $('span.codicon.codicon-close.remove-button'));
+		closeButton.style.position = 'absolute';
+		closeButton.style.right = '0px';
+		closeButton.style.top = '50%';
+		closeButton.style.transform = 'translateY(-50%)';
+		closeButton.style.cursor = 'pointer';
+		closeButton.style.zIndex = '2';
+		closeButton.style.opacity = '0';
+		closeButton.style.pointerEvents = 'none';
+		// TODO: Add click handler to close/remove tab
 
 		// pane composite bar active border + background
 		append(container, $('.active-item-indicator'));
