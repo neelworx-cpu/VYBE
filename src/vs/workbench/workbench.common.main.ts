@@ -203,7 +203,7 @@ import './contrib/notebook/browser/notebook.contribution.js';
 // Speech
 import './contrib/speech/browser/speech.contribution.js';
 
-// Chat
+// Chat - Keep services but views will be hidden (VYBE uses its own chat implementation)
 import './contrib/chat/browser/chat.contribution.js';
 import './contrib/inlineChat/browser/inlineChat.contribution.js';
 import './contrib/mcp/browser/mcp.contribution.js';
@@ -427,5 +427,8 @@ import './contrib/editTelemetry/browser/editTelemetry.contribution.js';
 
 // Opener
 import './contrib/opener/browser/opener.contribution.js';
+
+// VYBE Chat
+import './contrib/vybeChat/browser/contribution/vybeChat.contribution.js';
 
 //#endregion

@@ -71,6 +71,9 @@
 	/* VYBE-PATCH-END: activity-bar-icon-size */
 	align-items: center;
 	justify-content: center;
+	/* VYBE-PATCH-START: activity-bar-inactive-color */
+	color: var(--vscode-activityBar-inactiveForeground);
+	/* VYBE-PATCH-END: activity-bar-inactive-color */
 }
 
 .monaco-workbench .activitybar > .content :not(.monaco-menu) > .monaco-action-bar .action-item.active .action-label.codicon,

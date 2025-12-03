@@ -1,0 +1,158 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+import { Disposable } from '../../../../../base/common/lifecycle.js';
+
+/**
+ * Base interface for all VYBE Chat content parts.
+ * Each content part represents a piece of AI response (markdown, code, thinking, etc.)
+ * and is responsible for rendering itself and handling updates.
+ */
+export interface IVybeChatContentPart extends Disposable {
+	/**
+	 * The DOM element that represents this content part.
+	 * This will be inserted into the message container.
+	 */
+	readonly domNode: HTMLElement;
+
+	/**
+	 * The kind of content this part represents.
+	 * Used for identification and re-rendering optimization.
+	 */
+	readonly kind: VybeChatContentPartKind;
+
+	/**
+	 * Check if this part has the same content as another part.
+	 * Used to optimize re-rendering - if content is the same, no need to update.
+	 */
+	hasSameContent(other: IVybeChatContentPart): boolean;
+
+	/**
+	 * Update this content part with new data.
+	 * Called when streaming updates arrive.
+	 */
+	updateContent?(data: any): void;
+}
+
+/**
+ * All possible content part kinds in VYBE Chat.
+ * Starting with Phase 1 types, will expand in later phases.
+ */
+export type VybeChatContentPartKind =
+	// Phase 1: Foundation
+	| 'markdown'        // Main text responses
+	| 'thinking'        // Collapsible AI thinking process
+	| 'progress'        // Loading/status messages
+	| 'error'          // Error messages
+	// Phase 2: Code (coming soon)
+	| 'codeBlock'      // Code blocks with syntax highlighting
+	// Phase 3: File Edits (coming soon)
+	| 'textEdit'       // File edit suggestions
+	| 'diff'           // Side-by-side diff view
+	// Phase 4: Advanced (coming soon)
+	| 'reference'      // File references
+	| 'command';       // Command buttons
+
+/**
+ * Data for markdown content parts.
+ */
+export interface IVybeChatMarkdownContent {
+	kind: 'markdown';
+	content: string;  // Markdown text
+}
+
+/**
+ * Data for thinking content parts.
+ */
+export interface IVybeChatThinkingContent {
+	kind: 'thinking';
+	value: string | string[];  // Thinking text (can be array of chunks)
+	duration?: number;         // How long AI thought (in ms)
+	isStreaming?: boolean;     // Whether the thinking is still in progress
+}
+
+/**
+ * Data for code block content parts.
+ */
+export interface IVybeChatCodeBlockContent {
+	kind: 'codeBlock';
+	code: string;      // The code content
+	language: string;  // Programming language (typescript, python, etc.)
+}
+
+/**
+ * Data for progress content parts.
+ */
+export interface IVybeChatProgressContent {
+	kind: 'progress';
+	message: string;  // Progress message (e.g., "Reading file...")
+}
+
+/**
+ * Data for error content parts.
+ */
+export interface IVybeChatErrorContent {
+	kind: 'error';
+	message: string;  // Error message
+	level: 'info' | 'warning' | 'error';
+}
+
+/**
+ * Union type of all content data.
+ * This is what gets passed to content parts for rendering.
+ */
+export type IVybeChatContentData =
+	| IVybeChatMarkdownContent
+	| IVybeChatThinkingContent
+	| IVybeChatCodeBlockContent
+	| IVybeChatProgressContent
+	| IVybeChatErrorContent;
+
+/**
+ * Base class for content parts.
+ * Provides common functionality that all parts need.
+ */
+export abstract class VybeChatContentPart extends Disposable implements IVybeChatContentPart {
+	private _domNode: HTMLElement | undefined;
+
+	constructor(
+		public readonly kind: VybeChatContentPartKind
+	) {
+		super();
+	}
+
+	/**
+	 * Get the DOM node for this content part.
+	 * Lazy initialization - creates on first access.
+	 */
+	get domNode(): HTMLElement {
+		if (!this._domNode) {
+			this._domNode = this.createDomNode();
+		}
+		return this._domNode;
+	}
+
+	/**
+	 * Create the DOM node for this content part.
+	 * Must be implemented by subclasses.
+	 */
+	protected abstract createDomNode(): HTMLElement;
+
+	/**
+	 * Default implementation - compare by kind and content.
+	 * Subclasses can override for more specific comparisons.
+	 */
+	hasSameContent(other: IVybeChatContentPart): boolean {
+		return this.kind === other.kind;
+	}
+
+	override dispose(): void {
+		super.dispose();
+		this._domNode?.remove();
+		this._domNode = undefined;
+	}
+}
+
+

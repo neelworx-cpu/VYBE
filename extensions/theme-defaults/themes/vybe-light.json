@@ -7,7 +7,7 @@
 		"activityBar.background": "#eceff2",
 		"activityBar.border": "#00000000",
 		"activityBar.foreground": "#1F1F1F",
-		"activityBar.inactiveForeground": "#616161",
+		"activityBar.inactiveForeground": "#3B3B3B",
 		"activityBarBadge.background": "#3ECF8E",
 		"activityBarBadge.foreground": "#FFFFFF",
 		"badge.background": "#CCCCCC",

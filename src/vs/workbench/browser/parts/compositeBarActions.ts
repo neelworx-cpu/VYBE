@@ -25,6 +25,7 @@ import { IConfigurationService } from '../../../platform/configuration/common/co
 import { HoverPosition } from '../../../base/browser/ui/hover/hoverWidget.js';
 import { URI } from '../../../base/common/uri.js';
 import { badgeBackground, badgeForeground, contrastBorder } from '../../../platform/theme/common/colorRegistry.js';
+import { SIDE_BAR_BACKGROUND } from '../../common/theme.js';
 import { Action2, IAction2Options } from '../../../platform/actions/common/actions.js';
 import { ViewContainerLocation } from '../../common/views.js';
 import { IPaneCompositePartService } from '../../services/panecomposite/browser/panecomposite.js';
@@ -172,6 +173,7 @@ export class CompositeBarActionViewItem extends BaseActionViewItem {
 		@IHoverService private readonly hoverService: IHoverService,
 		@IConfigurationService protected readonly configurationService: IConfigurationService,
 		@IKeybindingService protected readonly keybindingService: IKeybindingService,
+		@ICommandService protected readonly commandService: ICommandService,
 	) {
 		super(null, action, options);
 
@@ -306,17 +308,150 @@ export class CompositeBarActionViewItem extends BaseActionViewItem {
 		this.badge = append(container, $('.badge'));
 		this.badgeContent = append(this.badge, $('.badge-content'));
 
-		// VYBE: Close button (hidden by default, shown on hover)
-		const closeButton = append(container, $('span.codicon.codicon-close.remove-button'));
-		closeButton.style.position = 'absolute';
-		closeButton.style.right = '0px';
-		closeButton.style.top = '50%';
-		closeButton.style.transform = 'translateY(-50%)';
-		closeButton.style.cursor = 'pointer';
-		closeButton.style.zIndex = '2';
-		closeButton.style.opacity = '0';
-		closeButton.style.pointerEvents = 'none';
-		// TODO: Add click handler to close/remove tab
+		// VYBE: Close button (hidden by default, shown on hover) - only for VYBE Chat tabs
+		const compositeId = this.compositeBarActionItem.id;
+		const isVybeChatTab = compositeId && compositeId.startsWith('workbench.panel.vybeChat.');
+
+		let closeButton: HTMLElement | undefined;
+		if (isVybeChatTab) {
+			closeButton = append(container, $('div.codicon.codicon-close.remove-button'));
+			closeButton.style.position = 'absolute';
+			closeButton.style.right = '0px';
+			closeButton.style.top = '50%';
+			closeButton.style.transform = 'translateY(-50%)';
+			closeButton.style.cursor = 'pointer';
+			closeButton.style.zIndex = '2';
+			closeButton.style.opacity = '0';  // Initially hidden
+			closeButton.style.pointerEvents = 'none';  // Not clickable when hidden
+
+			// X button gets its own background box - 25% narrower width, same height
+			closeButton.style.width = '16.5px'; // 75% of 22px (reduced by 25%)
+			closeButton.style.height = '22px'; // Same as tab height
+			// Only round top-right and bottom-right corners to match active tab
+			closeButton.style.borderTopLeftRadius = '0px';
+			closeButton.style.borderBottomLeftRadius = '0px';
+			closeButton.style.borderTopRightRadius = '4px'; // Match active tab border-radius
+			closeButton.style.borderBottomRightRadius = '4px'; // Match active tab border-radius
+			closeButton.style.display = 'flex';
+			closeButton.style.alignItems = 'center';
+			closeButton.style.justifyContent = 'center';
+			// Don't set initial background - let CSS handle it
+
+			// Click handler for close button
+			this._register(addDisposableListener(closeButton, EventType.CLICK, async (e) => {
+				EventHelper.stop(e, true);
+				// Extract session ID from container ID (format: workbench.panel.vybeChat.{sessionId})
+				const sessionId = compositeId.replace('workbench.panel.vybeChat.', '');
+				// Close the session using the view ID format
+				await this.commandService.executeCommand('vybeChat.closeChat', `workbench.panel.vybeChat.view.chat.${sessionId}`);
+			}));
+
+			// Get theme colors for active/inactive backgrounds
+			const getThemeColors = () => {
+				const theme = this.themeService.getColorTheme();
+				const colors = this.options.colors(theme);
+				const isDarkTheme = theme.type === 'dark';
+
+				// Active tab background - use same as active tab
+				const activeBg = colors.activeBackgroundColor?.toString() || (isDarkTheme ? 'rgba(51, 51, 51, 0.6)' : 'rgba(255, 255, 255, 0.6)');
+
+				// Inactive tab background - if transparent, use panel/auxiliary bar background
+				let inactiveBg = colors.inactiveBackgroundColor?.toString();
+				if (!inactiveBg || inactiveBg === 'transparent' || inactiveBg === 'rgba(0, 0, 0, 0)') {
+					// Use auxiliary bar (side bar) background
+					const panelBg = theme.getColor(SIDE_BAR_BACKGROUND);
+					if (panelBg) {
+						inactiveBg = panelBg.toString();
+					} else {
+						// Fallback
+						inactiveBg = isDarkTheme ? 'rgba(51, 51, 51, 0.4)' : 'rgba(255, 255, 255, 0.4)';
+					}
+				}
+
+				return { activeBg, inactiveBg, isDarkTheme };
+			};
+
+			// Get the action label element for text color changes
+			const actionLabel = this.label;
+
+			// Tab hover: Show close button with SOLID background, change text color (NO tab background)
+			this._register(addDisposableListener(container, EventType.MOUSE_ENTER, () => {
+				if (!closeButton) return;
+
+				const { inactiveBg, isDarkTheme } = getThemeColors();
+
+				// FORCE tab background to stay the same - prevent CSS hover
+				// For checked tabs, don't override - let CSS handle it (it has !important)
+				if (!this._action.checked) {
+					container.style.backgroundColor = inactiveBg;
+				}
+				// For checked tabs, we don't set inline style to avoid overriding CSS
+
+				// Only change text color for INACTIVE tabs
+				if (!this._action.checked && actionLabel) {
+					actionLabel.style.color = isDarkTheme ? 'rgba(228, 228, 228, 0.92)' : 'rgba(51, 51, 51, 0.92)';
+				}
+
+				// Show close button with background
+				closeButton.style.opacity = '1';
+				closeButton.style.pointerEvents = 'auto';
+
+				// For active/checked tabs, use the CSS-defined background colors directly
+				// These match the .checked class background in compositeBarActionTab.css
+				// VYBE Dark: rgba(224, 226, 242, 0.05), VYBE Light: rgba(86, 99, 119, 0.11)
+				const isChecked = this._action.checked || container.classList.contains('checked');
+				if (isChecked) {
+					// Directly use the CSS-defined checked tab background colors
+					const checkedTabBg = isDarkTheme ? 'rgba(224, 226, 242, 0.05)' : 'rgba(86, 99, 119, 0.11)';
+					// Remove any existing background-color property first
+					closeButton.style.removeProperty('background-color');
+					// Set with !important to ensure it overrides any other styles
+					closeButton.style.setProperty('background-color', checkedTabBg, 'important');
+					// Verify it was set correctly after a frame
+					requestAnimationFrame(() => {
+						if (!closeButton) return;
+						const computedBg = window.getComputedStyle(closeButton).backgroundColor;
+						if (!computedBg || computedBg === 'transparent' || computedBg === 'rgba(0, 0, 0, 0)') {
+							// Force set again if still transparent
+							closeButton.style.setProperty('background-color', checkedTabBg, 'important');
+						}
+					});
+				} else {
+					// For inactive tabs, use inactiveBg
+					if (inactiveBg && inactiveBg !== 'transparent' && inactiveBg !== 'rgba(0, 0, 0, 0)') {
+						closeButton.style.setProperty('background-color', inactiveBg, 'important');
+					} else {
+						// Fallback to a visible color
+						const fallbackBg = isDarkTheme ? 'rgba(51, 51, 51, 0.4)' : 'rgba(255, 255, 255, 0.4)';
+						closeButton.style.setProperty('background-color', fallbackBg, 'important');
+					}
+				}
+			}));
+
+			this._register(addDisposableListener(container, EventType.MOUSE_LEAVE, () => {
+				if (!closeButton) return;
+
+				const { inactiveBg, isDarkTheme } = getThemeColors();
+
+				// FORCE tab background to stay the same
+				// For checked tabs, remove inline style to let CSS handle it
+				if (this._action.checked) {
+					container.style.backgroundColor = ''; // Remove inline style, let CSS handle it
+				} else {
+					container.style.backgroundColor = inactiveBg;
+				}
+
+				// Restore text color for INACTIVE tabs only
+				if (!this._action.checked && actionLabel) {
+					actionLabel.style.color = isDarkTheme ? 'rgba(228, 228, 228, 0.55)' : 'rgba(51, 51, 51, 0.55)';
+				}
+
+				// Hide close button and its background
+				closeButton.style.opacity = '0';
+				closeButton.style.pointerEvents = 'none';
+				closeButton.style.backgroundColor = 'transparent';
+			}));
+		}
 
 		// pane composite bar active border + background
 		append(container, $('.active-item-indicator'));
@@ -519,8 +654,9 @@ export class CompositeOverflowActivityActionViewItem extends CompositeBarActionV
 		@IHoverService hoverService: IHoverService,
 		@IConfigurationService configurationService: IConfigurationService,
 		@IKeybindingService keybindingService: IKeybindingService,
+		@ICommandService commandService: ICommandService,
 	) {
-		super(action, { icon: true, colors, hasPopup: true, hoverOptions }, () => true, themeService, hoverService, configurationService, keybindingService);
+		super(action, { icon: true, colors, hasPopup: true, hoverOptions }, () => true, themeService, hoverService, configurationService, keybindingService, commandService);
 	}
 
 	showMenu(): void {
@@ -570,7 +706,7 @@ export class CompositeActionViewItem extends CompositeBarActionViewItem {
 		@IThemeService themeService: IThemeService,
 		@IHoverService hoverService: IHoverService,
 		@IConfigurationService configurationService: IConfigurationService,
-		@ICommandService private readonly commandService: ICommandService
+		@ICommandService override commandService: ICommandService
 	) {
 		super(
 			compositeActivityAction,
@@ -579,7 +715,8 @@ export class CompositeActionViewItem extends CompositeBarActionViewItem {
 			themeService,
 			hoverService,
 			configurationService,
-			keybindingService
+			keybindingService,
+			commandService
 		);
 	}
 

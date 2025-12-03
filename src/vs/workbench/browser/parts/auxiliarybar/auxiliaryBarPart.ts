@@ -189,8 +189,10 @@ export class AuxiliaryBarPart extends AbstractPaneCompositePart {
 			fillExtraContextMenuActions: actions => this.fillExtraContextMenuActions(actions),
 			compositeSize: 0,
 			iconSize: 16,
-			// Add 10px spacing if the overflow action is visible to no confuse the user with ... between the toolbars
-			get overflowActionSize() { return $this.getCompositeBarPosition() === CompositeBarPosition.TITLE ? 40 : 30; },
+			// VYBE-PATCH-START: horizontal-scrolling
+			// Set overflowActionSize to 0 to enable horizontal scrolling instead of overflow dropdown
+			overflowActionSize: 0,
+			// VYBE-PATCH-END: horizontal-scrolling
 			colors: theme => ({
 				activeBackgroundColor: theme.getColor(SIDE_BAR_BACKGROUND),
 				inactiveBackgroundColor: theme.getColor(SIDE_BAR_BACKGROUND),

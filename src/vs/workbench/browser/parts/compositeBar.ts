@@ -21,6 +21,8 @@ import { IPaneComposite } from '../../common/panecomposite.js';
 import { IComposite } from '../../common/composite.js';
 import { CompositeDragAndDropData, CompositeDragAndDropObserver, IDraggedCompositeData, ICompositeDragAndDrop, Before2D, toggleDropEffect, ICompositeDragAndDropObserverCallbacks } from '../dnd.js';
 import { Gesture, EventType as TouchEventType, GestureEvent } from '../../../base/browser/touch.js';
+import { DomScrollableElement } from '../../../base/browser/ui/scrollbar/scrollableElement.js';
+import { ScrollbarVisibility } from '../../../base/common/scrollable.js';
 
 export interface ICompositeBarItem {
 
@@ -241,6 +243,9 @@ export class CompositeBar extends Widget implements ICompositeBar {
 	private compositeSwitcherBar: ActionBar | undefined;
 	private compositeOverflowAction: CompositeOverflowActivityAction | undefined;
 	private compositeOverflowActionViewItem: CompositeOverflowActivityActionViewItem | undefined;
+	// VYBE-PATCH-START: horizontal-scrolling
+	private scrollableElement: DomScrollableElement | undefined;
+	// VYBE-PATCH-END: horizontal-scrolling
 
 	private readonly model: CompositeBarModel;
 	private readonly visibleComposites: string[];
@@ -283,7 +288,31 @@ export class CompositeBar extends Widget implements ICompositeBar {
 	}
 
 	create(parent: HTMLElement): HTMLElement {
-		const actionBarDiv = parent.appendChild($('.composite-bar'));
+		// VYBE-PATCH-START: horizontal-scrolling
+		// For horizontal orientation (auxiliary bar), wrap in scrollable element
+		let actionBarDiv: HTMLElement;
+		if (this.options.orientation === ActionsOrientation.HORIZONTAL && this.options.overflowActionSize === 0) {
+			// Create scrollable container for tabs (not yet added to DOM)
+			const scrollableContainer = $('.composite-bar-scrollable');
+			actionBarDiv = scrollableContainer.appendChild($('.composite-bar'));
+
+			// Create scrollable element with horizontal scrolling
+			this.scrollableElement = this._register(new DomScrollableElement(scrollableContainer, {
+				horizontal: ScrollbarVisibility.Auto,
+				vertical: ScrollbarVisibility.Hidden,
+				horizontalScrollbarSize: 3,
+				useShadows: false,
+				scrollYToX: true
+			}));
+
+			// Add scrollable element's DOM node to parent
+			parent.appendChild(this.scrollableElement.getDomNode());
+		} else {
+			// Original behavior for vertical orientation or with overflow
+			actionBarDiv = parent.appendChild($('.composite-bar'));
+		}
+		// VYBE-PATCH-END: horizontal-scrolling
+
 		this.compositeSwitcherBar = this._register(new ActionBar(actionBarDiv, {
 			actionViewItemProvider: (action, options) => {
 				if (action instanceof CompositeOverflowActivityAction) {
@@ -343,6 +372,13 @@ export class CompositeBar extends Widget implements ICompositeBar {
 			// Size is later used for overflow computation
 			this.computeSizes(this.model.visibleItems);
 		}
+
+		// VYBE-PATCH-START: horizontal-scrolling
+		// Update scrollable element if present
+		if (this.scrollableElement) {
+			this.scrollableElement.scanDomNode();
+		}
+		// VYBE-PATCH-END: horizontal-scrolling
 
 		this.updateCompositeSwitcher();
 	}
@@ -527,6 +563,42 @@ export class CompositeBar extends Widget implements ICompositeBar {
 			item.pinned
 			|| (this.model.activeItem && this.model.activeItem.id === item.id) /* Show the active composite even if it is not pinned */
 		).map(item => item.id);
+
+		// VYBE-PATCH-START: horizontal-scrolling
+		// If scrolling is enabled (overflowActionSize === 0), show all composites without overflow logic
+		if (this.scrollableElement && this.options.overflowActionSize === 0) {
+			// Show all composites - no overflow dropdown needed
+			const compositesToRemove: number[] = [];
+			this.visibleComposites.forEach((compositeId, index) => {
+				if (!compositesToShow.includes(compositeId)) {
+					compositesToRemove.push(index);
+				}
+			});
+			compositesToRemove.reverse().forEach(index => {
+				compositeSwitcherBar.pull(index);
+				this.visibleComposites.splice(index, 1);
+			});
+
+			// Update the positions of the composites
+			compositesToShow.forEach((compositeId, newIndex) => {
+				const currentIndex = this.visibleComposites.indexOf(compositeId);
+				if (newIndex !== currentIndex) {
+					if (currentIndex !== -1) {
+						compositeSwitcherBar.pull(currentIndex);
+						this.visibleComposites.splice(currentIndex, 1);
+					}
+
+					compositeSwitcherBar.push(this.model.findItem(compositeId).activityAction, { label: true, icon: this.options.icon, index: newIndex });
+					this.visibleComposites.splice(newIndex, 0, compositeId);
+				}
+			});
+
+			if (!donotTrigger) {
+				this._onDidChange.fire();
+			}
+			return;
+		}
+		// VYBE-PATCH-END: horizontal-scrolling
 
 		// Ensure we are not showing more composites than we have height for
 		let maxVisible = compositesToShow.length;

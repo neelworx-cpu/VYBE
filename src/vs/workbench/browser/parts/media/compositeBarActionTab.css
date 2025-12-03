@@ -55,6 +55,87 @@
 	gap: 4px;
 }
 
+/* Icon-only tabs (when hideLabel is true) - ensure icons are visible - APPLIES TO ALL LOCATIONS */
+.monaco-workbench .pane-composite-part > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab.icon .action-label:not(.codicon),
+.monaco-workbench .pane-composite-part > .header-or-footer > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab.icon .action-label:not(.codicon),
+.monaco-workbench .part.auxiliarybar > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab.icon .action-label:not(.codicon) {
+	/* Ensure URI icons with mask-image are visible */
+	width: 16px !important;
+	height: 16px !important;
+	min-width: 16px !important;
+	min-height: 16px !important;
+	max-width: 16px !important;
+	max-height: 16px !important;
+	display: flex !important;
+	align-items: center !important;
+	justify-content: center !important;
+	padding: 3px !important; /* Match the codicon padding */
+	/* CRITICAL: Set default background-color for mask-image icons to be visible */
+	/* VYBE Dark Theme: rgb(209, 211, 219) - inactive state */
+	background-color: rgb(209, 211, 219) !important;
+}
+
+/* Special override for auxiliary bar (secondary sidebar) to ensure URI icons are sized correctly */
+.monaco-workbench .part.auxiliarybar > .title > .composite-bar-container .composite-bar-scrollable .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab.icon .action-label:not(.codicon) {
+	width: 16px !important;
+	height: 16px !important;
+	min-width: 16px !important;
+	min-height: 16px !important;
+	max-width: 16px !important;
+	max-height: 16px !important;
+	display: flex !important;
+	align-items: center !important;
+	justify-content: center !important;
+	padding: 3px !important;
+	background-color: rgb(209, 211, 219) !important;
+}
+
+/* VYBE Light Theme - override icon background color for light theme - APPLIES TO ALL LOCATIONS */
+.monaco-workbench.vs .pane-composite-part > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab.icon .action-label:not(.codicon),
+.monaco-workbench.vs .pane-composite-part > .header-or-footer > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab.icon .action-label:not(.codicon),
+.monaco-workbench.vs .part.auxiliarybar > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab.icon .action-label:not(.codicon),
+.monaco-workbench.vs-light .pane-composite-part > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab.icon .action-label:not(.codicon),
+.monaco-workbench.vs-light .pane-composite-part > .header-or-footer > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab.icon .action-label:not(.codicon),
+.monaco-workbench.vs-light .part.auxiliarybar > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab.icon .action-label:not(.codicon) {
+	/* VYBE Light Theme: rgb(49, 53, 58) - inactive state */
+	background-color: rgb(49, 53, 58) !important;
+}
+
+/* Special override for auxiliary bar (secondary sidebar) - light theme */
+.monaco-workbench.vs .part.auxiliarybar > .title > .composite-bar-container .composite-bar-scrollable .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab.icon .action-label:not(.codicon),
+.monaco-workbench.vs-light .part.auxiliarybar > .title > .composite-bar-container .composite-bar-scrollable .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab.icon .action-label:not(.codicon) {
+	background-color: rgb(49, 53, 58) !important;
+}
+
+/* Icon-only codicon tabs */
+.monaco-workbench .pane-composite-part > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab.icon .action-label.codicon,
+.monaco-workbench .pane-composite-part > .header-or-footer > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab.icon .action-label.codicon {
+	/* Ensure codicons are visible */
+	font-size: 16px !important;
+	display: flex !important;
+	align-items: center !important;
+	justify-content: center !important;
+}
+
+/* Ensure URI icons in checked/active state are also visible with proper size - APPLIES TO ALL LOCATIONS */
+.monaco-workbench .pane-composite-part > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab.icon.checked .action-label:not(.codicon),
+.monaco-workbench .pane-composite-part > .header-or-footer > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab.icon.checked .action-label:not(.codicon),
+.monaco-workbench .part.auxiliarybar > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab.icon.checked .action-label:not(.codicon) {
+	/* Active/checked icons should be brighter */
+	background-color: rgb(255, 255, 255) !important;
+}
+
+/* VYBE Light Theme - checked URI icons - APPLIES TO ALL LOCATIONS */
+.monaco-workbench.vs .pane-composite-part > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab.icon.checked .action-label:not(.codicon),
+.monaco-workbench.vs .pane-composite-part > .header-or-footer > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab.icon.checked .action-label:not(.codicon),
+.monaco-workbench.vs .part.auxiliarybar > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab.icon.checked .action-label:not(.codicon),
+.monaco-workbench.vs-light .pane-composite-part > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab.icon.checked .action-label:not(.codicon),
+.monaco-workbench.vs-light .pane-composite-part > .header-or-footer > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab.icon.checked .action-label:not(.codicon),
+.monaco-workbench.vs-light .part.auxiliarybar > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab.icon.checked .action-label:not(.codicon) {
+	/* VYBE Light Theme: darker for active */
+	background-color: rgb(0, 0, 0) !important;
+}
+
 /* Action label inside wrapper - VYBE Dark Theme */
 .monaco-workbench .pane-composite-part > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab .composite-bar-action-tab-label .action-label,
 .monaco-workbench .pane-composite-part > .header-or-footer > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab .composite-bar-action-tab-label .action-label {
@@ -152,6 +233,36 @@
 	pointer-events: auto;
 }
 
+/* Close button background on hover - inactive tabs */
+.monaco-workbench .pane-composite-part > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab:not(.checked):hover .codicon-close.remove-button,
+.monaco-workbench .pane-composite-part > .header-or-footer > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab:not(.checked):hover .codicon-close.remove-button {
+	background-color: var(--vscode-sideBar-background, rgba(51, 51, 51, 0.4)) !important;
+}
+
+/* VYBE Light Theme - inactive tabs close button background */
+.monaco-workbench.vs .pane-composite-part > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab:not(.checked):hover .codicon-close.remove-button,
+.monaco-workbench.vs .pane-composite-part > .header-or-footer > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab:not(.checked):hover .codicon-close.remove-button,
+.monaco-workbench.vs-light .pane-composite-part > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab:not(.checked):hover .codicon-close.remove-button,
+.monaco-workbench.vs-light .pane-composite-part > .header-or-footer > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab:not(.checked):hover .codicon-close.remove-button {
+	background-color: var(--vscode-sideBar-background, rgba(255, 255, 255, 0.4)) !important;
+}
+
+/* Close button background on hover - active/checked tabs */
+.monaco-workbench .pane-composite-part > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab.checked:hover .codicon-close.remove-button,
+.monaco-workbench .pane-composite-part > .header-or-footer > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab.checked:hover .codicon-close.remove-button {
+	/* VYBE Dark Theme: rgba(224, 226, 242, 0.05) */
+	background-color: rgba(224, 226, 242, 0.05) !important;
+}
+
+/* VYBE Light Theme - active/checked tabs close button background */
+.monaco-workbench.vs .pane-composite-part > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab.checked:hover .codicon-close.remove-button,
+.monaco-workbench.vs .pane-composite-part > .header-or-footer > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab.checked:hover .codicon-close.remove-button,
+.monaco-workbench.vs-light .pane-composite-part > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab.checked:hover .codicon-close.remove-button,
+.monaco-workbench.vs-light .pane-composite-part > .header-or-footer > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab.checked:hover .codicon-close.remove-button {
+	/* VYBE Light Theme: rgba(86, 99, 119, 0.11) */
+	background-color: rgba(86, 99, 119, 0.11) !important;
+}
+
 /* Badge positioning for composite-bar-action-tab */
 .monaco-workbench .pane-composite-part > .title > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab .badge,
 .monaco-workbench .pane-composite-part > .header-or-footer > .composite-bar-container > .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab .badge {
@@ -185,5 +296,133 @@
 	line-height: 27px !important;
 	padding: 4px 6px !important;
 	margin: 2px !important;
+}
+
+/* VYBE: Horizontal scrolling for composite bar tabs in auxiliary bar */
+.monaco-workbench .part.auxiliarybar > .title > .composite-bar-container {
+	display: flex !important;
+	overflow: hidden !important; /* Prevent container from expanding */
+}
+
+.monaco-workbench .part.auxiliarybar > .title > .composite-bar-container .monaco-scrollable-element {
+	flex: 1 1 0% !important; /* Take available space but can shrink */
+	overflow: hidden !important;
+	display: flex !important;
+	align-items: center !important; /* Vertically center the scrollable content */
+	height: 100% !important;
+	min-width: 0 !important; /* Critical: Allow flex item to shrink below content size */
+	max-width: 100% !important; /* Prevent expansion beyond container */
+	width: 0 !important; /* Force it to use flex-basis instead of content width */
+}
+
+.monaco-workbench .part.auxiliarybar > .title > .composite-bar-container .composite-bar-scrollable {
+	display: flex !important;
+	align-items: center; /* Vertically center tabs */
+	overflow-x: scroll !important; /* Enable horizontal scrolling */
+	overflow-y: hidden !important;
+	width: 100% !important;
+	height: 100% !important;
+	scrollbar-width: none !important; /* Hide Firefox scrollbar */
+	flex-shrink: 1 !important; /* Allow shrinking */
+}
+
+.monaco-workbench .part.auxiliarybar > .title > .composite-bar-container .composite-bar-scrollable::-webkit-scrollbar {
+	display: none !important; /* Hide Chrome/Safari scrollbar */
+}
+
+.monaco-workbench .part.auxiliarybar > .title > .composite-bar-container .composite-bar-scrollable .composite-bar {
+	display: flex !important; /* Use flex, not inline-flex */
+	flex-direction: row !important;
+	align-items: center !important; /* Vertically center tabs */
+	white-space: nowrap !important;
+	height: 100% !important;
+	width: auto !important; /* Natural width based on content */
+	flex-shrink: 0 !important; /* Prevent the bar itself from shrinking */
+}
+
+/* Ensure action bar maintains proper height and alignment */
+.monaco-workbench .part.auxiliarybar > .title > .composite-bar-container .composite-bar-scrollable .composite-bar > .monaco-action-bar {
+	display: flex;
+	align-items: center;
+	height: 100%;
+	line-height: 27px; /* Maintain original line-height */
+}
+
+.monaco-workbench .part.auxiliarybar > .title > .composite-bar-container .composite-bar-scrollable .composite-bar > .monaco-action-bar > .actions-container {
+	display: flex;
+	align-items: center;
+	height: 100%;
+}
+
+/* Ensure tabs inside scrollable maintain their original styling - MORE SPECIFIC SELECTORS */
+.monaco-workbench .part.auxiliarybar > .title > .composite-bar-container .composite-bar-scrollable .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab {
+	/* Override default action-item styles with our custom tab styles */
+	position: relative !important;
+	text-transform: uppercase !important;
+	font-size: 11px !important;
+	font-weight: 600 !important;
+	font-family: -apple-system, "system-ui", sans-serif !important;
+	height: 22px !important;
+	line-height: 27px !important;
+	padding: 4px 6px !important;
+	margin: 2px !important;
+	border-radius: 4px !important;
+	box-sizing: border-box !important;
+	display: flex !important;
+	align-items: center !important;
+	justify-content: center !important;
+	cursor: pointer !important;
+	user-select: none !important;
+	white-space: nowrap !important;
+	app-region: no-drag !important;
+	-webkit-user-drag: element !important;
+	visibility: visible !important;
+	/* Remove flex-grow/shrink that's being applied */
+	flex-grow: 0 !important;
+	flex-shrink: 0 !important;
+	flex-basis: auto !important;
+	min-width: auto !important;
+	width: auto !important;
+	/* Remove default hover background */
+	background: none !important;
+}
+
+/* Remove hover background from action-label inside scrollable tabs */
+.monaco-workbench .part.auxiliarybar > .title > .composite-bar-container .composite-bar-scrollable .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab .action-label,
+.monaco-workbench .part.auxiliarybar > .title > .composite-bar-container .composite-bar-scrollable .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab:hover .action-label,
+.monaco-workbench .part.auxiliarybar > .title > .composite-bar-container .composite-bar-scrollable .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab:focus .action-label {
+	background: none !important;
+}
+
+/* Ensure checked/active tab background is visible */
+.monaco-workbench .part.auxiliarybar > .title > .composite-bar-container .composite-bar-scrollable .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab.checked {
+	background-color: rgba(224, 226, 242, 0.05) !important;
+}
+
+/* VYBE Light Theme - active tab background in scrollable */
+.monaco-workbench.vs .part.auxiliarybar > .title > .composite-bar-container .composite-bar-scrollable .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab.checked,
+.monaco-workbench.vs-light .part.auxiliarybar > .title > .composite-bar-container .composite-bar-scrollable .composite-bar > .monaco-action-bar .action-item.composite-bar-action-tab.checked {
+	background-color: rgba(86, 99, 119, 0.11) !important;
+}
+
+/* Thin horizontal scrollbar - invisible by default, visible on hover */
+.monaco-workbench .part.auxiliarybar > .title > .composite-bar-container .monaco-scrollable-element .scrollbar.horizontal {
+	height: 3px !important;
+	bottom: 0px !important;
+	opacity: 0;
+	transition: opacity 0.3s;
+}
+
+.monaco-workbench .part.auxiliarybar > .title > .composite-bar-container .monaco-scrollable-element:hover .scrollbar.horizontal,
+.monaco-workbench .part.auxiliarybar > .title > .composite-bar-container .monaco-scrollable-element .scrollbar.horizontal.active {
+	opacity: 1;
+}
+
+.monaco-workbench .part.auxiliarybar > .title > .composite-bar-container .monaco-scrollable-element .scrollbar.horizontal .slider {
+	background: rgba(121, 121, 121, 0.4) !important;
+}
+
+.monaco-workbench .part.auxiliarybar > .title > .composite-bar-container .monaco-scrollable-element:hover .scrollbar.horizontal .slider {
+	background: rgba(121, 121, 121, 0.7) !important;
 }
 

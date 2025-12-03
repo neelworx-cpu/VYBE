@@ -79,3 +79,38 @@
 	box-sizing: border-box;
 }
 /* VYBE-PATCH-END: activity-bar-separator */
+
+/* VYBE-PATCH-START: activity-bar-icon-visibility */
+/* Ensure extension icons (mask-image) are visible by default in activity bar */
+.monaco-workbench .activitybar > .content .monaco-action-bar .action-item .action-label:not(.codicon),
+.monaco-workbench .activitybar > .content .monaco-action-bar .action-label.uri-icon {
+	/* Set default background-color for mask-image icons to be visible */
+	/* VYBE Dark Theme: rgb(209, 211, 219) */
+	background-color: rgb(209, 211, 219) !important;
+}
+
+/* VYBE Light Theme - override icon background color for light theme */
+.monaco-workbench.vs .activitybar > .content .monaco-action-bar .action-item .action-label:not(.codicon),
+.monaco-workbench.vs .activitybar > .content .monaco-action-bar .action-label.uri-icon,
+.monaco-workbench.vs-light .activitybar > .content .monaco-action-bar .action-item .action-label:not(.codicon),
+.monaco-workbench.vs-light .activitybar > .content .monaco-action-bar .action-label.uri-icon {
+	/* VYBE Light Theme: rgb(49, 53, 58) */
+	background-color: rgb(49, 53, 58) !important;
+}
+
+/* Ensure active/checked icons have full opacity */
+.monaco-workbench .activitybar > .content .monaco-action-bar .action-item.checked .action-label:not(.codicon),
+.monaco-workbench .activitybar > .content .monaco-action-bar .action-item.checked .action-label.uri-icon {
+	/* Active icons should be brighter */
+	background-color: rgb(255, 255, 255) !important;
+}
+
+/* VYBE Light Theme - active icons */
+.monaco-workbench.vs .activitybar > .content .monaco-action-bar .action-item.checked .action-label:not(.codicon),
+.monaco-workbench.vs .activitybar > .content .monaco-action-bar .action-item.checked .action-label.uri-icon,
+.monaco-workbench.vs-light .activitybar > .content .monaco-action-bar .action-item.checked .action-label:not(.codicon),
+.monaco-workbench.vs-light .activitybar > .content .monaco-action-bar .action-item.checked .action-label.uri-icon {
+	/* VYBE Light Theme: darker for active */
+	background-color: rgb(0, 0, 0) !important;
+}
+/* VYBE-PATCH-END: activity-bar-icon-visibility */

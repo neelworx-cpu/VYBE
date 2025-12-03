@@ -1,0 +1,301 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* VYBE Chat Thinking Part Styling */
+
+/* ============================================
+   ANIMATIONS
+   ============================================ */
+
+/* Chevron fade-in animation */
+@keyframes chevronFadeIn {
+	from {
+		opacity: 0;
+	}
+	to {
+		opacity: 0.55; /* Visible opacity */
+	}
+}
+
+/* Loading spinner animation (for streaming state) */
+@keyframes codicon-spin {
+	0% {
+		transform: rotate(0deg);
+	}
+	100% {
+		transform: rotate(360deg);
+	}
+}
+
+/* Alternative: Use VS Code's built-in spinner animation if available */
+.codicon-modifier-spin {
+	animation: codicon-spin 1.5s linear infinite;
+}
+
+/* ============================================
+   1. ROOT CONTAINER
+   ============================================ */
+
+.collapsible-clean.collapsible-thought {
+	color: rgba(228, 228, 228, 0.55);
+	column-gap: 2px;
+	cursor: pointer;
+	display: flex;
+	flex-direction: column;
+	font-family: -apple-system, "system-ui", sans-serif;
+	font-size: 13px;
+	overflow-anchor: none;
+	row-gap: 2px;
+	user-select: none;
+	background-color: rgba(128, 128, 128, 0.1); /* Subtle background */
+	border-radius: 6px;
+	padding: 6px 10px;
+	margin: 0; /* No extra margin */
+}
+
+/* Thinking part container - minimal spacing */
+.vybe-chat-thinking-part {
+	margin-bottom: 6px; /* Small gap before next element to match reference */
+}
+
+/* ============================================
+   2. HEADER SECTION (Clickable)
+   ============================================ */
+
+/* 2.1 Header Row Container */
+.collapsible-clean.collapsible-thought > div:first-child {
+	align-items: center;
+	box-sizing: border-box;
+	column-gap: 4px;
+	cursor: pointer;
+	display: flex;
+	flex-direction: row;
+	max-width: 100%;
+	overflow: hidden;
+	row-gap: 4px;
+}
+
+/* 2.3 Header Text Container */
+.collapsible-header-text {
+	align-items: center;
+	color: rgba(228, 228, 228, 0.92);
+	column-gap: 4px;
+	display: flex;
+	flex: 0 1 auto;
+	font-size: 12px;
+	min-width: 0px;
+	overflow: hidden;
+	row-gap: 4px;
+	transition: opacity 0.1s ease-in;
+}
+
+/* 2.4 Text Wrapper Span */
+.collapsible-header-text > span {
+	flex: 0 1 auto;
+	min-width: 0px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* 2.5 Inner Text Div */
+.collapsible-header-text > span > div {
+	align-items: center;
+	display: flex;
+	overflow: hidden;
+}
+
+/* 2.6 "Thought" Text */
+.collapsible-header-text > span > div > span:first-child {
+	color: rgba(228, 228, 228, 0.55);
+	flex-shrink: 0;
+	white-space: nowrap;
+}
+
+/* 2.7 "for 3s" Duration Text */
+.collapsible-header-text > span > div > span:last-child {
+	color: rgba(228, 228, 228, 0.37);
+	margin-left: 4px;
+	white-space: nowrap;
+}
+
+/* 2.8 Chevron Icon - Small and properly aligned */
+.collapsible-header-text .codicon.codicon-chevron-right {
+	align-items: center;
+	color: var(--vscode-foreground) !important;
+	cursor: pointer;
+	display: inline-flex !important;
+	flex-shrink: 0;
+	font-family: codicon !important;
+	font-size: 12px !important;
+	height: 12px;
+	justify-content: center;
+	line-height: 12px;
+	opacity: 0.55 !important;
+	text-align: center;
+	transform-origin: 50% 50%; /* Rotate around center */
+	transition: transform 0.15s ease-in-out, opacity 0.2s ease-in-out;
+	width: 12px;
+	margin-left: 4px;
+	vertical-align: middle;
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+}
+
+/* Ensure the icon content shows via ::before */
+.collapsible-header-text .codicon.codicon-chevron-right::before {
+	display: inline-block;
+	text-rendering: auto;
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+}
+
+/* Chevron hover state */
+.collapsible-clean.collapsible-thought:hover .codicon-chevron-right {
+	opacity: 0.8 !important;
+}
+
+/* Loading spinner during streaming - Small and properly aligned */
+.collapsible-header-text .codicon.codicon-loading {
+	align-items: center;
+	color: var(--vscode-foreground) !important;
+	cursor: default;
+	display: inline-flex !important;
+	flex-shrink: 0;
+	font-family: codicon !important;
+	font-size: 12px !important;
+	height: 12px;
+	justify-content: center;
+	line-height: 12px;
+	opacity: 0.55 !important;
+	text-align: center;
+	width: 12px;
+	margin-left: 4px;
+	vertical-align: middle;
+	animation: codicon-spin 1.5s linear infinite;
+	transform-origin: 50% 50%; /* Spin around center */
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+}
+
+/* Ensure the spinner content shows via ::before */
+.collapsible-header-text .codicon.codicon-loading::before {
+	display: inline-block;
+	text-rendering: auto;
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+}
+
+/* ============================================
+   3. COLLAPSIBLE CONTENT SECTION
+   ============================================ */
+
+/* 3.1 Collapsible Children Container - Match Copilot exactly */
+.collapsible-clean-children {
+	padding-left: 0;
+	overflow-anchor: none;
+}
+
+/* Scrollable content container - HIDDEN scrollbar (ONLY for thinking block) */
+.vybe-chat-thinking-part .think-content-scrollable {
+	height: 144px !important;
+	max-height: 144px !important;
+	overflow-y: auto !important;
+	overflow-x: hidden !important;
+	scrollbar-width: none; /* Firefox: hide scrollbar */
+	-ms-overflow-style: none; /* IE/Edge: hide scrollbar */
+}
+
+/* WebKit: hide scrollbar but keep functionality (ONLY for thinking block) */
+.vybe-chat-thinking-part .think-content-scrollable::-webkit-scrollbar {
+	width: 0;
+	height: 0;
+	display: none;
+}
+
+/* Scrollable thinking content - matches header "Thought" text (scoped to thinking part only) */
+.vybe-chat-thinking-part .think-content-scrollable {
+	color: var(--vscode-foreground) !important;
+	opacity: 0.6 !important; /* Match "Thought" text */
+}
+
+/* Text inside inherits parent color and opacity */
+.think-content-scrollable div {
+	line-height: 1.4;
+}
+
+/* Markdown container */
+.think-content-scrollable .anysphere-markdown-container-root {
+	display: block;
+	user-select: text;
+	white-space: pre-wrap;
+	word-break: break-word;
+	line-height: 1.4;
+}
+
+/* 3.10 Markdown Sections */
+.markdown-section {
+	border-radius: 4px;
+	line-height: 1.4; /* Tighter line height */
+	margin: 0;
+	padding: 0;
+	position: relative;
+	user-select: text;
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
+/* 3.11 Text Spans in Sections */
+.markdown-section > span {
+	display: inline;
+	line-height: 1.4; /* Tighter line height */
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
+/* Remove extra spacing between paragraphs */
+.think-content p {
+	margin: 0;
+	padding: 0;
+	line-height: 1.4;
+}
+
+/* 3.12 Ordered Lists */
+.markdown-section > ol {
+	list-style-type: decimal;
+	margin: 4px 0 0 16px;
+	padding: 0;
+}
+
+/* 3.13 List Items */
+.markdown-section > ol > li {
+	display: list-item;
+	list-style-type: decimal;
+	margin: 2px 0;
+	padding: 2px 0;
+	line-height: 18px;
+}
+
+/* ============================================
+   4. SCROLLBARS
+   ============================================ */
+
+/* Scrollbar styling - match Copilot (minimal, hidden but functional) */
+.collapsible-clean-children .monaco-scrollable-element .scrollbar.vertical .slider {
+	background-color: rgba(121, 121, 121, 0.4);
+}
+
+/* Brighter on hover */
+.collapsible-clean-children:hover .monaco-scrollable-element .scrollbar.vertical .slider {
+	background-color: rgba(121, 121, 121, 0.7);
+}
+
+/* ============================================
+   5. FADE GRADIENTS
+   ============================================ */
+
+/* Top and bottom fade gradients are handled by inline styles in TypeScript */
+
+

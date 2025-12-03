@@ -1,0 +1,243 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* VYBE Chat Markdown Content Part Styling */
+/* Based on reference application design */
+
+/* Fade-in animation for markdown sections */
+@keyframes chat-fade-in {
+	from {
+		opacity: 0;
+		transform: translateY(4px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
+.markdown-section.chat-fade-in {
+	animation: chat-fade-in 0.2s ease-out;
+}
+
+/* Markdown container root */
+.vybe-markdown-container-root {
+	user-select: text;
+	font-size: 1em;
+	line-height: 1.5;
+	min-height: 22.2px;
+}
+
+/* Markdown sections */
+.vybe-markdown-container-root .markdown-section {
+	margin: 0.3em 0; /* Small gap between sections */
+}
+
+/* Headings - h1 with minimal spacing to match reference */
+.vybe-markdown-container-root h1 {
+	font-size: 1.6em; /* 20.8px at 13px base */
+	font-weight: 600;
+	line-height: 1.25; /* Tight line height */
+	margin: 0.3em 0 0.15em 0; /* ~4px top, ~2px bottom */
+	color: var(--vscode-foreground);
+}
+
+.vybe-markdown-container-root h2 {
+	font-size: 1.3em;
+	font-weight: 600;
+	line-height: 1.3;
+	margin: 0.3em 0 0.15em 0;
+	color: var(--vscode-foreground);
+}
+
+.vybe-markdown-container-root h3 {
+	font-size: 1.17em;
+	font-weight: 600;
+	line-height: 1.3;
+	margin: 0.3em 0 0.15em 0;
+	color: var(--vscode-foreground);
+}
+
+.vybe-markdown-container-root h4 {
+	font-size: 1em;
+	font-weight: 600;
+	line-height: 1.3;
+	margin: 0.3em 0 0.15em 0;
+	color: var(--vscode-foreground);
+}
+
+.vybe-markdown-container-root h5 {
+	font-size: 0.83em;
+	font-weight: 600;
+	line-height: 1.3;
+	margin: 0.3em 0 0.15em 0;
+	color: var(--vscode-foreground);
+}
+
+.vybe-markdown-container-root h6 {
+	font-size: 0.67em;
+	font-weight: 600;
+	line-height: 1.3;
+	margin: 0.3em 0 0.15em 0;
+	color: var(--vscode-foreground);
+}
+
+/* Paragraphs - minimal spacing */
+.vybe-markdown-container-root p {
+	margin: 0.15em 0; /* ~2px at 13px base */
+	line-height: 1.5;
+}
+
+/* Bold text */
+.vybe-markdown-container-root .markdown-bold-text,
+.vybe-markdown-container-root strong,
+.vybe-markdown-container-root b {
+	font-weight: 600;
+}
+
+/* Italic text */
+.vybe-markdown-container-root .markdown-italics-text,
+.vybe-markdown-container-root em,
+.vybe-markdown-container-root i {
+	font-style: italic;
+}
+
+/* Inline code */
+.vybe-markdown-container-root .markdown-inline-code,
+.vybe-markdown-container-root code:not(pre code) {
+	word-break: break-all;
+	font-family: Menlo, Monaco, "Courier New", monospace;
+	cursor: default;
+	color: inherit;
+	background-color: var(--vscode-textCodeBlock-background);
+	padding: 1px 4px;
+	border-radius: 3px;
+	font-size: 0.9em;
+}
+
+/* Lists */
+.vybe-markdown-container-root ul,
+.vybe-markdown-container-root ol {
+	margin: 0.25em 0px 0.25em 16px;
+	padding: 0px;
+}
+
+.vybe-markdown-container-root ul.nested,
+.vybe-markdown-container-root ol.nested {
+	margin-top: 0;
+	margin-bottom: 0;
+}
+
+.vybe-markdown-container-root li {
+	padding-top: 2px;
+	padding-bottom: 2px;
+}
+
+.vybe-markdown-container-root ul li {
+	list-style-type: disc;
+}
+
+.vybe-markdown-container-root ol li {
+	list-style-type: decimal;
+}
+
+/* Links */
+.vybe-markdown-container-root .markdown-link,
+.vybe-markdown-container-root a {
+	display: inline;
+	color: var(--vscode-textLink-foreground);
+	cursor: pointer;
+	text-decoration: none;
+}
+
+.vybe-markdown-container-root .markdown-link:hover,
+.vybe-markdown-container-root a:hover {
+	text-decoration: underline;
+}
+
+/* File links (file://) get special styling */
+.vybe-markdown-container-root .markdown-link[data-link^="file:"],
+.vybe-markdown-container-root a[href^="file:"] {
+	background-color: var(--vscode-textCodeBlock-background);
+	padding: 1px 4px;
+	border-radius: 4px;
+	word-break: break-word;
+}
+
+/* Tables - comprehensive styling to ensure borders show */
+.vybe-markdown-container-root .markdown-table,
+.vybe-markdown-container-root table {
+	border-collapse: collapse !important;
+	width: 100%;
+	margin: 0.5em 0px;
+	border: 1px solid var(--vscode-editorWidget-border);
+}
+
+.vybe-markdown-container-root .markdown-table thead,
+.vybe-markdown-container-root table thead {
+	background-color: rgba(128, 128, 128, 0.1);
+}
+
+.vybe-markdown-container-root .markdown-table th,
+.vybe-markdown-container-root table th {
+	border: 1px solid var(--vscode-editorWidget-border) !important;
+	padding: 6px 13px !important;
+	text-align: left !important;
+	font-weight: 600 !important;
+	background-color: transparent;
+}
+
+.vybe-markdown-container-root .markdown-table td,
+.vybe-markdown-container-root table td {
+	border: 1px solid var(--vscode-editorWidget-border) !important;
+	padding: 6px 13px !important;
+	text-align: left !important;
+}
+
+/* Table rows */
+.vybe-markdown-container-root .markdown-table tr,
+.vybe-markdown-container-root table tr {
+	border: 1px solid var(--vscode-editorWidget-border);
+}
+
+/* Alternate row coloring for better readability */
+.vybe-markdown-container-root .markdown-table tbody tr:nth-child(even),
+.vybe-markdown-container-root table tbody tr:nth-child(even) {
+	background-color: rgba(128, 128, 128, 0.05);
+}
+
+/* Horizontal rule */
+.vybe-markdown-container-root hr {
+	margin: 0.5em 0px;
+	border: none;
+	height: 1px;
+	background-color: var(--vscode-textSeparator-foreground);
+}
+
+/* Blockquotes */
+.vybe-markdown-container-root blockquote {
+	margin: 0px 0px 0px 16px;
+	padding-left: 12px;
+	border-left: 3px solid var(--vscode-editorWidget-border);
+	color: var(--vscode-foreground);
+	opacity: 0.8;
+}
+
+/* Code blocks (will be handled by separate CodeBlockPart) */
+.vybe-markdown-container-root pre {
+	margin: 0.5em 0;
+	padding: 12px;
+	background-color: var(--vscode-textCodeBlock-background);
+	border-radius: 6px;
+	overflow-x: auto;
+}
+
+.vybe-markdown-container-root pre code {
+	font-family: Menlo, Monaco, "Courier New", monospace;
+	font-size: 0.9em;
+	line-height: 1.4;
+}
+
+

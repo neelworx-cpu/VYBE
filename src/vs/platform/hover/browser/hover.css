@@ -9,8 +9,8 @@
 	position: relative;
 	font-size: 13px;
 	line-height: 19px;
-	/* Must be higher than sash's z-index and terminal canvases */
-	z-index: 40;
+	/* Must be higher than sash's z-index, terminal canvases, history dropdown (2548), and context view (2575) */
+	z-index: 2580;
 	overflow: hidden;
 	max-width: 700px;
 	background: var(--vscode-editorHoverWidget-background);
@@ -53,8 +53,8 @@
 
 .workbench-hover-pointer {
 	position: absolute;
-	/* Must be higher than workbench hover z-index */
-	z-index: 41;
+	/* Must be higher than workbench hover z-index (2580) */
+	z-index: 2581;
 	pointer-events: none;
 }
 

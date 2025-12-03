@@ -140,7 +140,9 @@ export class SidebarPart extends AbstractPaneCompositePart {
 		container.style.backgroundColor = this.getColor(SIDE_BAR_BACKGROUND) || '';
 		container.style.color = this.getColor(SIDE_BAR_FOREGROUND) || '';
 
-		const borderColor = this.getColor(SIDE_BAR_BORDER) || this.getColor(contrastBorder);
+		// VYBE-PATCH-START: transparent-sidebar-border
+		const borderColor = 'transparent'; // VYBE: Make sidebar border transparent
+		// VYBE-PATCH-END: transparent-sidebar-border
 		const isPositionLeft = this.layoutService.getSideBarPosition() === SideBarPosition.LEFT;
 		container.style.borderRightWidth = borderColor && isPositionLeft ? '1px' : '';
 		container.style.borderRightStyle = borderColor && isPositionLeft ? 'solid' : '';

@@ -1,0 +1,123 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* VYBE Chat Code Block Styling - Simple Design */
+/* ALL rules scoped to AI response area to prevent affecting composer */
+
+/* Outer container for code blocks in markdown */
+.vybe-chat-response-area .markdown-code-outer-container {
+	display: flex;
+	flex-direction: column;
+	justify-content: center;
+	align-items: center;
+	position: relative;
+	margin: 0.5em 0;
+}
+
+/* Code block container */
+.vybe-chat-response-area .composer-code-block-container {
+	width: 100%;
+	transition: border-color 0.1s ease-in-out;
+	border: 1px solid var(--vscode-panel-border);
+	border-radius: 6px;
+	overflow: hidden;
+	background-color: var(--vscode-titleBar-activeBackground);
+	position: relative;
+}
+
+/* Code content wrapper - SCOPED */
+.vybe-chat-response-area .composer-code-block-container .composer-code-block-content {
+	display: block;
+	position: relative;
+}
+
+/* Scrollable container for Monaco editor - SCOPED */
+.vybe-chat-response-area .composer-code-block-container .scrollable-div-container {
+	position: relative;
+	overflow: hidden;
+	background-color: var(--vscode-titleBar-activeBackground);
+}
+
+/* Show scrollbars only on hover - SCOPED */
+.vybe-chat-response-area .composer-code-block-container .show-only-on-hover .monaco-scrollable-element .scrollbar {
+	opacity: 0;
+	transition: opacity 0.2s ease;
+}
+
+.vybe-chat-response-area .composer-code-block-container .show-only-on-hover:hover .monaco-scrollable-element .scrollbar {
+	opacity: 1;
+}
+
+/* Monaco editor overrides for code blocks */
+.vybe-chat-response-area .composer-code-block-container .monaco-editor {
+	background-color: var(--vscode-titleBar-activeBackground);
+}
+
+.vybe-chat-response-area .composer-code-block-container .monaco-editor .margin {
+	background-color: var(--vscode-titleBar-activeBackground);
+}
+
+.vybe-chat-response-area .composer-code-block-container .monaco-editor-background {
+	background-color: var(--vscode-titleBar-activeBackground);
+}
+
+.vybe-chat-response-area .composer-code-block-container .lines-content {
+	background-color: var(--vscode-titleBar-activeBackground);
+}
+
+.vybe-chat-response-area .composer-code-block-container .monaco-editor .view-lines {
+	padding-left: 0;
+}
+
+/* Copy button overlay (top-right, vertically centered for single-line blocks) */
+.vybe-chat-response-area .composer-codeblock-copy-overlay {
+	position: absolute;
+	top: 3px;
+	right: 3px;
+	z-index: 10;
+	pointer-events: none;
+}
+
+.vybe-chat-response-area .composer-codeblock-copy-overlay > div {
+	pointer-events: auto;
+}
+
+/* Icon button styling - SCOPED to code blocks only */
+.vybe-chat-response-area .composer-codeblock-copy-overlay .anysphere-icon-button {
+	height: 20px;
+	width: 20px;
+	background: transparent;
+	border: none;
+	color: var(--vscode-foreground);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	cursor: pointer;
+	opacity: 0.7;
+	transition: opacity 0.1s ease, background-color 0.1s ease;
+	border-radius: 4px;
+	padding: 2px;
+}
+
+.vybe-chat-response-area .composer-codeblock-copy-overlay .anysphere-icon-button:hover {
+	opacity: 1;
+	background-color: rgba(128, 128, 128, 0.15);
+}
+
+.vybe-chat-response-area .composer-codeblock-copy-overlay .anysphere-icon-button:active {
+	opacity: 0.8;
+	transform: scale(0.95);
+}
+
+/* Copy icon */
+.vybe-chat-response-area .composer-codeblock-copy-overlay .anysphere-icon-button .codicon {
+	font-size: 12px;
+}
+
+/* Copy button always visible */
+.vybe-chat-response-area .composer-codeblock-copy-overlay > div > div > div {
+	opacity: 1 !important;
+	pointer-events: auto !important;
+}

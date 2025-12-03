@@ -1,0 +1,22 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* VYBE Chat Main Styles */
+
+/* Chat messages area - HIDDEN scrollbar (invisible but functional) */
+.vybe-chat-messages-area {
+	/* Hide scrollbar for Firefox */
+	scrollbar-width: none;
+	/* Hide scrollbar for IE/Edge */
+	-ms-overflow-style: none;
+	/* No padding needed - hidden scrollbar doesn't take space */
+}
+
+/* Hide scrollbar for WebKit browsers (Chrome, Safari, Edge) */
+.vybe-chat-messages-area::-webkit-scrollbar {
+	width: 0;
+	height: 0;
+	display: none;
+}

@@ -11,6 +11,9 @@
 .monaco-workbench .part.panel.bottom .composite.title {
 	border-top-width: 1px;
 	border-top-style: solid;
+	/* VYBE-PATCH-START: transparent-panel-border */
+	border-top-color: transparent;
+	/* VYBE-PATCH-END: transparent-panel-border */
 }
 
 .monaco-workbench.nomaineditorarea .part.panel.bottom .composite.title {
@@ -20,6 +23,9 @@
 .monaco-workbench .part.panel.top {
 	border-bottom-width: 1px;
 	border-bottom-style: solid;
+	/* VYBE-PATCH-START: transparent-panel-border */
+	border-bottom-color: transparent;
+	/* VYBE-PATCH-END: transparent-panel-border */
 }
 
 .monaco-workbench.nomaineditorarea .part.panel.top {
@@ -29,6 +35,9 @@
 .monaco-workbench .part.panel.right {
 	border-left-width: 1px;
 	border-left-style: solid;
+	/* VYBE-PATCH-START: transparent-panel-border */
+	border-left-color: transparent;
+	/* VYBE-PATCH-END: transparent-panel-border */
 }
 
 .monaco-workbench.nomaineditorarea .part.panel.right {
@@ -38,6 +47,9 @@
 .monaco-workbench .part.panel.left {
 	border-right-width: 1px;
 	border-right-style: solid;
+	/* VYBE-PATCH-START: transparent-panel-border */
+	border-right-color: transparent;
+	/* VYBE-PATCH-END: transparent-panel-border */
 }
 
 .monaco-workbench.nomaineditorarea .part.panel.left {

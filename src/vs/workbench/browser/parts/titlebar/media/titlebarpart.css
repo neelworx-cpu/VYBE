@@ -474,13 +474,20 @@
 .monaco-workbench .part.titlebar > .titlebar-container > .titlebar-left > .vybe-mode-toggle-host {
 	display: flex !important;
 	align-items: center;
-	margin-left: 8px;
+	margin-left: 5px; /* VYBE-PATCH: Aligned with activity bar icons - moved 3px left from original 8px */
 	margin-right: 4px;
 	-webkit-app-region: no-drag;
 	transition: margin-left 0s; /* Instant movement to match macOS buttons */
 	visibility: visible;
 	opacity: 1;
 }
+
+/* VYBE-PATCH-START: vybe-mode-toggle-macos-positioning */
+/* Move toggle right on macOS when not in fullscreen to avoid window controls */
+.monaco-workbench.mac:not(.web):not(.fullscreen) .part.titlebar > .titlebar-container > .titlebar-left > .vybe-mode-toggle-host {
+	margin-left: 75px; /* Move right to clear macOS window controls (70px + 5px spacing) */
+}
+/* VYBE-PATCH-END: vybe-mode-toggle-macos-positioning */
 
 .monaco-workbench .part.titlebar > .titlebar-container > .titlebar-left > .vybe-mode-toggle-host > .vybe-mode-tab-container {
 	outline: 0;
