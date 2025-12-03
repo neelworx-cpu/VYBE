@@ -1,0 +1,148 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* Text Edit Content Part - File edits with diff view */
+
+/* Scope all styles to response area to prevent affecting composer */
+.vybe-chat-response-area .composer-code-block-container {
+	position: relative;
+	margin-bottom: 8px;
+	border-radius: 4px;
+	overflow: hidden;
+}
+
+/* Header (always visible) */
+.vybe-chat-response-area .composer-code-block-header {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	padding: 8px 12px;
+	background: var(--vscode-editor-background);
+	cursor: pointer;
+	user-select: none;
+	transition: background-color 0.1s ease-in-out;
+}
+
+.vybe-chat-response-area .composer-code-block-header:hover {
+	background: var(--vscode-list-hoverBackground);
+}
+
+/* File info section */
+.vybe-chat-response-area .composer-code-block-file-info {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex: 1;
+	min-width: 0;
+}
+
+/* File icon */
+.vybe-chat-response-area .composer-primary-toolcall-icon {
+	flex-shrink: 0;
+	display: flex;
+	align-items: center;
+}
+
+/* Filename */
+.vybe-chat-response-area .composer-code-block-filename {
+	font-size: 13px;
+	font-weight: 500;
+	color: var(--vscode-foreground);
+	flex-shrink: 1;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+/* Stats (+2/-2) */
+.vybe-chat-response-area .composer-code-block-status {
+	flex-shrink: 0;
+	margin-left: 8px;
+}
+
+/* Diff container (collapsible) */
+.vybe-chat-response-area .composer-diff-block {
+	transition: height 0.2s ease-in-out;
+}
+
+/* Expand/collapse button */
+.vybe-chat-response-area .composer-message-codeblock-expand {
+	position: absolute;
+	bottom: 0;
+	left: 50%;
+	transform: translateX(-50%);
+	background: var(--vscode-editor-background);
+	border: 1px solid var(--vscode-panel-border);
+	border-bottom: none;
+	border-radius: 4px 4px 0 0;
+	padding: 2px 8px;
+	cursor: pointer;
+	opacity: 0.7;
+	transition: opacity 0.1s ease-in-out;
+}
+
+.vybe-chat-response-area .composer-message-codeblock-expand:hover {
+	opacity: 1;
+}
+
+.vybe-chat-response-area .composer-message-codeblock-expand .codicon {
+	font-size: 14px;
+	color: var(--vscode-foreground);
+}
+
+/* Monaco diff editor styling */
+.vybe-chat-response-area .monaco-diff-editor .editor {
+	background: var(--vscode-editor-background);
+}
+
+/* Diff gutter colors */
+.vybe-chat-response-area .monaco-diff-editor .gutter-insert {
+	background: var(--vscode-diffEditor-insertedLineBackground, rgba(155, 185, 85, 0.2));
+}
+
+.vybe-chat-response-area .monaco-diff-editor .gutter-delete {
+	background: var(--vscode-diffEditor-removedLineBackground, rgba(255, 0, 0, 0.2));
+}
+
+/* Diff line colors */
+.vybe-chat-response-area .monaco-diff-editor .line-insert {
+	background: var(--vscode-diffEditor-insertedLineBackground, rgba(155, 185, 85, 0.2));
+}
+
+.vybe-chat-response-area .monaco-diff-editor .line-delete {
+	background: var(--vscode-diffEditor-removedLineBackground, rgba(255, 0, 0, 0.2));
+}
+
+/* Diff character colors (inline changes) */
+.vybe-chat-response-area .monaco-diff-editor .char-insert {
+	background: var(--vscode-diffEditor-insertedTextBackground, rgba(155, 185, 85, 0.4));
+}
+
+.vybe-chat-response-area .monaco-diff-editor .char-delete {
+	background: var(--vscode-diffEditor-removedTextBackground, rgba(255, 0, 0, 0.4));
+}
+
+/* Diagonal fill for unchanged areas */
+.vybe-chat-response-area .monaco-diff-editor .diagonal-fill {
+	background: repeating-linear-gradient(
+		-45deg,
+		transparent,
+		transparent 4px,
+		var(--vscode-diffEditor-diagonalFill, rgba(128, 128, 128, 0.1)) 4px,
+		var(--vscode-diffEditor-diagonalFill, rgba(128, 128, 128, 0.1)) 5px
+	);
+}
+
+/* Hide scrollbars in diff editor */
+.vybe-chat-response-area .monaco-diff-editor .scrollbar {
+	scrollbar-width: none;
+	-ms-overflow-style: none;
+}
+
+.vybe-chat-response-area .monaco-diff-editor .scrollbar::-webkit-scrollbar {
+	width: 0;
+	height: 0;
+	display: none;
+}
+

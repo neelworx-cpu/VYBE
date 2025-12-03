@@ -83,6 +83,21 @@ export interface IVybeChatCodeBlockContent {
 }
 
 /**
+ * Data for text edit content parts (file edits with diff view).
+ */
+export interface IVybeChatTextEditContent {
+	kind: 'textEdit';
+	fileName: string;       // Name of the file being edited
+	filePath?: string;      // Full path (optional)
+	originalContent: string; // Original file content
+	modifiedContent: string; // Modified file content
+	language: string;       // Programming language
+	addedLines: number;     // Number of lines added
+	deletedLines: number;   // Number of lines deleted
+	isApplied?: boolean;    // Whether the edit has been applied
+}
+
+/**
  * Data for progress content parts.
  */
 export interface IVybeChatProgressContent {
@@ -107,6 +122,7 @@ export type IVybeChatContentData =
 	| IVybeChatMarkdownContent
 	| IVybeChatThinkingContent
 	| IVybeChatCodeBlockContent
+	| IVybeChatTextEditContent
 	| IVybeChatProgressContent
 	| IVybeChatErrorContent;
 

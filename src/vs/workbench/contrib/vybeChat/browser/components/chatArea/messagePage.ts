@@ -15,6 +15,7 @@ import { IVybeChatContentPart, IVybeChatContentData } from '../../contentParts/v
 import { VybeChatMarkdownPart } from '../../contentParts/vybeChatMarkdownPart.js';
 import { VybeChatThinkingPart } from '../../contentParts/vybeChatThinkingPart.js';
 import { VybeChatCodeBlockPart } from '../../contentParts/vybeChatCodeBlockPart.js';
+import { VybeChatTextEditPart } from '../../contentParts/vybeChatTextEditPart.js';
 import { IMarkdownRendererService } from '../../../../../../platform/markdown/browser/markdownRenderer.js';
 import { IModelService } from '../../../../../../editor/common/services/model.js';
 import { ILanguageService } from '../../../../../../editor/common/languages/language.js';
@@ -387,6 +388,17 @@ export class MessagePage extends Disposable {
 					this.modelService,
 					this.languageService,
 					this.clipboardService
+				));
+
+			case 'textEdit':
+				if (!this.instantiationService || !this.modelService || !this.languageService) {
+					return null;
+				}
+				return this._register(new VybeChatTextEditPart(
+					contentData,
+					this.instantiationService,
+					this.modelService,
+					this.languageService
 				));
 
 			// TODO: Add more content types (errors, progress, etc.)

@@ -7,6 +7,7 @@ import './media/vybeChat.css';
 import './contentParts/media/vybeChatThinking.css';
 import './contentParts/media/vybeChatMarkdown.css';
 import './contentParts/media/vybeChatCodeBlock.css';
+import './contentParts/media/vybeChatTextEdit.css';
 import { ViewPane, IViewPaneOptions } from '../../../browser/parts/views/viewPane.js';
 import { IKeybindingService } from '../../../../platform/keybinding/common/keybinding.js';
 import { IContextMenuService } from '../../../../platform/contextview/browser/contextView.js';
@@ -483,6 +484,23 @@ Use examples when possible.
 ## H2: Summary
 
 ✅ All markdown elements are now rendering correctly! Phase 1 complete! 🚀`
+						},
+						{
+							kind: 'textEdit' as const,
+							fileName: 'greet.ts',
+							filePath: '/src/utils/greet.ts',
+							originalContent: `function greet(name: string) {
+    console.log('Hello, World!');
+    return 'Done';
+}`,
+							modifiedContent: `function greet(name: string) {
+    console.log(\`Hello, \${name}!\`);
+    return \`Greeted \${name}\`;
+}`,
+							language: 'typescript',
+							addedLines: 2,
+							deletedLines: 2,
+							isApplied: false
 						}
 					]);
 				}, 200); // Small delay before showing final state
