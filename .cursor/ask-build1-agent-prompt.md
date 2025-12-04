@@ -48,3 +48,4 @@ I'm working on Build 2 and trying to integrate the VYBE Chat panel. The contribu
 Please provide the exact code/configuration that worked in Build 1.
 
 
+

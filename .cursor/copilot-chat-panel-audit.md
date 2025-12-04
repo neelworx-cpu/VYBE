@@ -542,3 +542,4 @@ When replacing the Copilot Chat panel, ensure:
 - Extension compatibility should be considered
 
 
+
