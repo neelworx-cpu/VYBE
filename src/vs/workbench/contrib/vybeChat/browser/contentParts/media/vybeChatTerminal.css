@@ -1,0 +1,402 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* Terminal Tool Call Container */
+.composer-terminal-tool-call-block-container {
+	position: relative;
+}
+
+/* Ping Border Animation (pending state) */
+.composer-terminal-ping-border {
+	animation: composer-border-ping 2s infinite cubic-bezier(0, 0, 0.2, 1);
+}
+
+@keyframes composer-border-ping {
+	0%, 100% {
+		outline: 2px solid rgba(62, 207, 142, 0.3);
+		outline-offset: -1px;
+	}
+	50% {
+		outline: 2px solid rgba(62, 207, 142, 0.6);
+		outline-offset: -1px;
+	}
+}
+
+/* Top Header */
+.composer-tool-call-top-header {
+	position: relative;
+}
+
+/* Action Buttons Container */
+.terminal-action-buttons {
+	opacity: 0;
+	transition: opacity 0.15s ease;
+}
+
+.composer-tool-call-top-header:hover .terminal-action-buttons {
+	opacity: 1 !important;
+}
+
+/* Action Button */
+.anysphere-icon-button {
+	opacity: 0.6;
+	transition: opacity 0.15s ease;
+}
+
+.anysphere-icon-button:hover {
+	opacity: 1 !important;
+}
+
+/* Top Header (with code block background) */
+.composer-tool-call-top-header {
+	background: var(--vscode-titleBar-activeBackground) !important;
+	border-radius: 7px 7px 0 0;
+}
+
+/* Command Header (panel background) */
+.composer-tool-call-header {
+	background: var(--vscode-editor-background) !important;
+}
+
+/* Control Row */
+.composer-tool-call-control-row {
+	background: var(--vscode-editor-background) !important;
+}
+
+/* Command Prefix */
+.terminal-command-prefix {
+	font-family: Menlo, Monaco, "Courier New", monospace;
+	font-size: 12px;
+	line-height: 18px;
+	color: var(--vscode-terminal-ansiGreen);
+	font-weight: 600;
+	flex-shrink: 0;
+}
+
+.composer-terminal-command-editor {
+	flex: 1;
+	min-width: 0;
+}
+
+/* Terminal Output */
+.composer-terminal-output {
+	width: 100%;
+}
+
+.composer-terminal-output pre {
+	color: var(--vscode-terminal-foreground);
+	background: var(--vscode-terminal-background) !important;
+}
+
+/* Scrollable Container */
+.scrollable-div-container {
+	position: relative;
+}
+
+/* Tool Call Body */
+.composer-tool-call-body {
+	margin-top: 4px;
+}
+
+.composer-tool-call-body.non-compact {
+	display: block;
+}
+
+.composer-tool-call-body-inner {
+	position: relative;
+}
+
+.composer-tool-call-body-content {
+	position: relative;
+}
+
+/* Control Row */
+.composer-tool-call-control-row {
+	margin-top: 4px;
+	padding-top: 0px;
+	/* No border - removed per user request */
+}
+
+/* Output Expand Button in Top Header */
+.terminal-action-buttons .composer-terminal-expand-button {
+	transition: opacity 0.15s ease;
+}
+
+.terminal-action-buttons .composer-terminal-expand-button:hover {
+	opacity: 1 !important;
+}
+
+/* Expand button chevron rotation */
+.terminal-action-buttons .codicon-chevron-up,
+.terminal-action-buttons .codicon-chevron-down {
+	transition: transform 0.2s ease;
+}
+
+/* Loading Spinner */
+.composer-tool-call-control-row .codicon-loading {
+	animation: codicon-spin 1.5s linear infinite;
+}
+
+@keyframes codicon-spin {
+	from {
+		transform: rotate(0deg);
+	}
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+/* Permission Dropdown Button */
+.composer-tool-call-allowlist-button {
+	transition: background-color 0.15s ease;
+}
+
+.composer-tool-call-allowlist-button:hover {
+	background-color: var(--vscode-list-hoverBackground) !important;
+}
+
+/* Permission Dropdown Menu */
+.terminal-permission-dropdown {
+	animation: fade-in-fast 0.1s ease;
+}
+
+.permission-dropdown-option {
+	transition: background-color 0.15s ease;
+	padding: 2px 8px !important;
+	height: 20px !important;
+	min-height: 18px !important;
+}
+
+/* Ensure dropdown has proper background - text edit header colors */
+.terminal-permission-dropdown {
+	background: transparent !important;
+}
+
+/* VYBE Dark */
+.vs-dark .terminal-permission-dropdown > div {
+	background-color: #212427 !important;
+	background: #212427 !important;
+	border: 1px solid #383838 !important;
+}
+
+.vs-dark .terminal-permission-dropdown > div[tabindex="0"] {
+	background-color: #212427 !important;
+	background: #212427 !important;
+	border: 1px solid #383838 !important;
+}
+
+/* VYBE Light */
+.vs .terminal-permission-dropdown > div {
+	background-color: #eceff2 !important;
+	background: #eceff2 !important;
+	border: 1px solid #d9d9d9 !important;
+}
+
+.vs .terminal-permission-dropdown > div[tabindex="0"] {
+	background-color: #eceff2 !important;
+	background: #eceff2 !important;
+	border: 1px solid #d9d9d9 !important;
+}
+
+/* Dropdown items */
+.terminal-permission-dropdown .permission-dropdown-option {
+	font-family: -apple-system, "system-ui", sans-serif !important;
+	font-size: 12px !important;
+	line-height: 16px !important;
+}
+
+/* Modal Buttons */
+.pretty-dialog-button {
+	transition: all 0.15s ease;
+}
+
+.anysphere-text-button:hover {
+	background-color: var(--vscode-list-hoverBackground) !important;
+}
+
+.anysphere-secondary-button:hover {
+	opacity: 0.9;
+}
+
+.pretty-dialog-button-primary:hover {
+	background-color: #35b87d !important;
+}
+
+.composer-tool-call-button-content {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+}
+
+/* Action Buttons */
+.composer-skip-button {
+	transition: background-color 0.15s ease;
+}
+
+.composer-skip-button:hover {
+	background-color: var(--vscode-list-hoverBackground) !important;
+}
+
+.composer-run-button {
+	background: #3ecf8e !important;
+	transition: background-color 0.15s ease;
+}
+
+.composer-run-button:hover {
+	background: #35b87d !important;
+}
+
+.keybinding-font-settings {
+	font-feature-settings: "cv05";
+}
+
+/* Status Indicator */
+.composer-tool-call-status-indicator {
+	font-size: 12px;
+	line-height: 16px;
+	display: flex;
+	align-items: center;
+	gap: 4px;
+}
+
+.composer-tool-call-status-indicator .codicon {
+	font-size: 14px;
+}
+
+/* Monaco Editor in Command */
+.composer-terminal-command-editor .monaco-editor {
+	background: transparent !important;
+}
+
+.composer-terminal-command-editor .monaco-editor-background {
+	background: transparent !important;
+}
+
+.composer-terminal-command-editor .margin {
+	background: transparent !important;
+}
+
+.composer-terminal-command-editor .lines-content {
+	background: transparent !important;
+}
+
+.composer-terminal-command-editor .view-lines {
+	background: transparent !important;
+}
+
+/* Scrollbar Styling */
+.scrollable-div-container .monaco-scrollable-element .scrollbar {
+	background: transparent;
+}
+
+.scrollable-div-container .monaco-scrollable-element .scrollbar.vertical {
+	width: 10px;
+}
+
+.scrollable-div-container .monaco-scrollable-element .slider {
+	background: var(--vscode-scrollbarSlider-background);
+	border-radius: 5px;
+}
+
+.scrollable-div-container .monaco-scrollable-element .slider:hover {
+	background: var(--vscode-scrollbarSlider-hoverBackground);
+}
+
+.scrollable-div-container .monaco-scrollable-element .slider:active {
+	background: var(--vscode-scrollbarSlider-activeBackground);
+}
+
+/* Collapsed State */
+.composer-terminal-tool-call-block-container:not(.expanded) .composer-tool-call-body {
+	display: none;
+}
+
+.composer-terminal-tool-call-block-container:not(.expanded) .composer-tool-call-control-row {
+	display: none;
+}
+
+/* Loading State */
+.composer-terminal-tool-call-block-container .codicon-loading {
+	animation: codicon-spin 1.5s linear infinite;
+}
+
+@keyframes codicon-spin {
+	from {
+		transform: rotate(0deg);
+	}
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+/* Permission Dropdown */
+.terminal-permission-dropdown {
+	animation: fade-in-fast 0.1s ease;
+}
+
+.fade-in-fast {
+	animation: fade-in-fast 0.1s ease;
+}
+
+@keyframes fade-in-fast {
+	from {
+		opacity: 0;
+		transform: translateY(-4px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
+/* Warning Modal */
+.pretty-dialog-overlay {
+	animation: fade-in-fast 0.15s ease;
+	background-color: rgba(0, 0, 0, 0.5) !important;
+}
+
+.pretty-dialog-modal {
+	animation: modal-slide-in 0.2s ease;
+}
+
+/* Force modal to have visible background - text edit header colors */
+.pretty-dialog-modal.fade-in-fast {
+	background-color: var(--vscode-titleBar-activeBackground) !important;
+	background: var(--vscode-titleBar-activeBackground) !important;
+}
+
+/* VYBE Dark */
+.vs-dark .pretty-dialog-modal.fade-in-fast {
+	background-color: #212427 !important;
+	background: #212427 !important;
+}
+
+/* VYBE Light */
+.vs .pretty-dialog-modal.fade-in-fast {
+	background-color: #eceff2 !important;
+	background: #eceff2 !important;
+}
+
+@keyframes modal-slide-in {
+	from {
+		opacity: 0;
+		transform: translateY(-20px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
+.pretty-dialog-title.select-text {
+	user-select: text;
+	-webkit-user-select: text;
+}
+
+.pretty-dialog-message {
+	user-select: text;
+	-webkit-user-select: text;
+}
+

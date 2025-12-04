@@ -1,0 +1,1449 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+import { VybeChatContentPart, IVybeChatTerminalContent } from './vybeChatContentPart.js';
+import { $, addDisposableListener } from '../../../../../base/browser/dom.js';
+import { CodeEditorWidget } from '../../../../../editor/browser/widget/codeEditor/codeEditorWidget.js';
+import { ICodeEditor } from '../../../../../editor/browser/editorBrowser.js';
+import { IModelService } from '../../../../../editor/common/services/model.js';
+import { ILanguageService } from '../../../../../editor/common/languages/language.js';
+import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
+import { URI } from '../../../../../base/common/uri.js';
+import { DomScrollableElement } from '../../../../../base/browser/ui/scrollbar/scrollableElement.js';
+import { ScrollbarVisibility } from '../../../../../base/common/scrollable.js';
+
+/**
+ * Terminal Tool Call Content Part
+ *
+ * Displays terminal command execution with streaming output.
+ * Structure matches TextEdit component but adapted for terminal:
+ * - Command display with syntax highlighting (Monaco editor)
+ * - Terminal output in scrollable <pre> element
+ * - Permission dropdown instead of expand button
+ * - Status indicator (Success/Failed/Running) instead of diff stats
+ */
+export class VybeChatTerminalPart extends VybeChatContentPart {
+	private commandEditor: ICodeEditor | null = null;
+	private outputStreamIntervalId: ReturnType<typeof setInterval> | null = null;
+	private currentContent: IVybeChatTerminalContent;
+	private readonly uniqueId: string;
+	private onStreamingUpdate?: () => void;
+
+	// DOM elements
+	private mainContainer: HTMLElement | null = null;
+	private topHeader: HTMLElement | null = null;
+	private commandSummary: HTMLElement | null = null;
+	private actionButtonsContainer: HTMLElement | null = null;
+	private commandContainer: HTMLElement | null = null;
+	private outputBody: HTMLElement | null = null;
+	private outputContainer: HTMLElement | null = null;
+	private outputScrollableWrapper: HTMLElement | null = null;
+	private outputPre: HTMLElement | null = null;
+	private outputScrollable: DomScrollableElement | null = null;
+	private controlRow: HTMLElement | null = null;
+	private leftControls: HTMLElement | null = null;
+	private statusRow: HTMLElement | null = null;
+	private permissionButton: HTMLElement | null = null;
+	private permissionDropdownMenu: HTMLElement | null = null;
+	private statusIndicator: HTMLElement | null = null;
+	private warningModal: HTMLElement | null = null;
+	private selectedPermission: string = 'Ask Every Time';
+	private isOutputExpanded: boolean = false; // Default to collapsed (limited height)
+	private outputExpandButton: HTMLElement | null = null;
+
+	private readonly LINE_HEIGHT = 18;
+	private readonly INITIAL_OUTPUT_HEIGHT = 94; // ~5 lines of output
+
+	constructor(
+		content: IVybeChatTerminalContent,
+		@IInstantiationService private readonly instantiationService: IInstantiationService,
+		@IModelService private readonly modelService: IModelService,
+		@ILanguageService private readonly languageService: ILanguageService
+	) {
+		super('terminal');
+		this.currentContent = content;
+		this.uniqueId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+	}
+
+	public setStreamingUpdateCallback(callback: () => void): void {
+		this.onStreamingUpdate = callback;
+	}
+
+	protected createDomNode(): HTMLElement {
+		// Main container (matches TextEdit structure)
+		this.mainContainer = $('.composer-tool-call-container.composer-terminal-tool-call-block-container');
+
+		// Add ping border animation in pending state
+		if (this.currentContent.phase === 'pending') {
+			this.mainContainer.classList.add('composer-terminal-ping-border');
+		}
+
+		this.mainContainer.style.cssText = `
+			background: var(--vscode-editor-background);
+			border-radius: 8px;
+			border: 1px solid var(--vscode-commandCenter-inactiveBorder);
+			contain: paint;
+			width: 100%;
+			box-sizing: border-box;
+			font-size: 12px;
+			margin: 6px 0px;
+			display: flex;
+			flex-direction: column;
+			overflow: hidden;
+		`;
+
+		// Top header with action buttons
+		this.topHeader = this.createTopHeader();
+		this.mainContainer.appendChild(this.topHeader);
+
+		// Command header
+		const commandHeader = this.createCommandHeader();
+		this.mainContainer.appendChild(commandHeader);
+
+		// Tool call body (output)
+		this.outputBody = this.createOutputBody();
+		this.mainContainer.appendChild(this.outputBody);
+
+		// Control row (permission dropdown + status)
+		this.controlRow = this.createControlRow();
+		this.mainContainer.appendChild(this.controlRow);
+
+		return this.mainContainer;
+	}
+
+	private createTopHeader(): HTMLElement {
+		const topHeader = $('.composer-tool-call-top-header');
+		topHeader.style.cssText = `
+			display: flex;
+			justify-content: space-between;
+			background: var(--vscode-titleBar-activeBackground);
+			padding: 6px 8px;
+		`;
+
+		// Left side - command summary
+		const leftSide = $('div');
+		leftSide.style.cssText = 'flex: 1 1 0%; min-width: 0px;';
+
+		this.commandSummary = $('div');
+		this.commandSummary.style.cssText = `
+			display: flex;
+			gap: 6px;
+			font-size: 12px;
+			color: var(--cursor-text-secondary);
+			padding-right: 4px;
+		`;
+
+		const summaryText = $('span');
+		// Dynamic text based on phase
+		const headerText = this.getPhaseHeaderText();
+		summaryText.textContent = `${headerText} ${this.getCommandSummary()}`;
+		this.commandSummary.appendChild(summaryText);
+
+		leftSide.appendChild(this.commandSummary);
+
+		// Right side - action buttons
+		this.actionButtonsContainer = this.createActionButtons();
+
+		topHeader.appendChild(leftSide);
+		topHeader.appendChild(this.actionButtonsContainer);
+
+		// Show buttons on hover
+		this._register(addDisposableListener(topHeader, 'mouseenter', () => {
+			if (this.actionButtonsContainer) {
+				this.actionButtonsContainer.style.opacity = '1';
+			}
+		}));
+
+		this._register(addDisposableListener(topHeader, 'mouseleave', () => {
+			if (this.actionButtonsContainer) {
+				this.actionButtonsContainer.style.opacity = '0';
+			}
+		}));
+
+		return topHeader;
+	}
+
+	private getPhaseHeaderText(): string {
+		switch (this.currentContent.phase) {
+			case 'pending':
+				return 'Run command:';
+			case 'running':
+				return 'Running command:';
+			case 'completed':
+				return 'Ran command:';
+			default:
+				return 'Ran command:';
+		}
+	}
+
+	private createActionButtons(): HTMLElement {
+		const container = $('div');
+		container.style.cssText = 'display: flex; gap: 4px; align-items: center; opacity: 0; transition: opacity 0.15s ease;';
+		container.classList.add('terminal-action-buttons');
+
+		// Expand button (leftmost) - only show if output exists and not in pending phase
+		if (this.currentContent.phase !== 'pending' && this.currentContent.output) {
+			const expandButton = this.createIconButton('codicon-chevron-down', 'Expand/Collapse output');
+			this._register(addDisposableListener(expandButton, 'click', () => {
+				this.toggleOutputExpansion();
+			}));
+			this.outputExpandButton = expandButton;
+			container.appendChild(expandButton);
+		}
+
+		// External link button
+		const externalButton = this.createIconButton('codicon-terminal', 'Open in terminal');
+		this._register(addDisposableListener(externalButton, 'click', () => {
+			this.handleOpenInTerminal();
+		}));
+		container.appendChild(externalButton);
+
+		// Copy button (right)
+		const copyButton = this.createIconButton('codicon-copy', 'Copy terminal output');
+		this._register(addDisposableListener(copyButton, 'click', () => {
+			this.handleCopy();
+		}));
+		container.appendChild(copyButton);
+
+		return container;
+	}
+
+	private createIconButton(iconClass: string, tooltip: string): HTMLElement {
+		const button = $('.anysphere-icon-button');
+		button.style.cssText = `
+			background: transparent;
+			border: none;
+			color: var(--cursor-text-primary);
+			display: flex;
+			width: 16px;
+			height: 16px;
+			align-items: center;
+			justify-content: center;
+			cursor: pointer;
+			opacity: 0.6;
+			transition: opacity 0.15s ease;
+		`;
+		button.title = tooltip;
+
+		const icon = $(`span.codicon.${iconClass}`);
+		icon.style.cssText = 'font-size: 14px;';
+		button.appendChild(icon);
+
+		// Hover effect
+		this._register(addDisposableListener(button, 'mouseenter', () => {
+			button.style.opacity = '1';
+		}));
+
+		this._register(addDisposableListener(button, 'mouseleave', () => {
+			button.style.opacity = '0.6';
+		}));
+
+		return button;
+	}
+
+	private createCommandHeader(): HTMLElement {
+		const header = $('.composer-tool-call-header');
+		header.style.cssText = `
+			display: flex;
+			align-items: center;
+			gap: 6px;
+			padding: 4px 8px;
+			background: var(--vscode-editor-background);
+		`;
+
+		// Command prefix "$"
+		const prefix = $('span.terminal-command-prefix');
+		prefix.textContent = '$';
+		prefix.style.cssText = `
+			font-family: Menlo, Monaco, "Courier New", monospace;
+			font-size: 12px;
+			line-height: 18px;
+			color: var(--vscode-terminal-ansiGreen);
+			font-weight: 600;
+			flex-shrink: 0;
+		`;
+
+		// Command editor (Monaco with shell syntax highlighting)
+		this.commandContainer = this.createCommandEditor();
+		this.commandContainer.style.cssText = 'flex: 1; min-width: 0;';
+
+		header.appendChild(prefix);
+		header.appendChild(this.commandContainer);
+
+		return header;
+	}
+
+	private createCommandEditor(): HTMLElement {
+		const container = $('.simple-code-render.composer-terminal-command-editor');
+		container.style.cssText = 'position: relative; text-align: left; width: 100%; height: 18px;';
+
+		const editorWrapper = $('div');
+		editorWrapper.style.cssText = 'width: 100%; height: 100%; box-sizing: border-box;';
+		editorWrapper.setAttribute('data-mode-id', 'shellscript');
+
+		// Create Monaco editor for command
+		this.commandEditor = this.instantiationService.createInstance(
+			CodeEditorWidget,
+			editorWrapper,
+			{
+				readOnly: true,
+				lineNumbers: 'off',
+				minimap: { enabled: false },
+				scrollBeyondLastLine: false,
+				wordWrap: 'off',
+				fontSize: 12,
+				fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+				lineHeight: 18,
+				padding: { top: 0, bottom: 0 },
+				overviewRulerLanes: 0,
+				scrollbar: {
+					vertical: 'hidden',
+					horizontal: 'hidden',
+					verticalScrollbarSize: 0,
+					horizontalScrollbarSize: 0
+				},
+				glyphMargin: false,
+				folding: false,
+				selectOnLineNumbers: false,
+				selectionHighlight: false,
+				automaticLayout: true,
+				renderLineHighlight: 'none',
+				contextmenu: false,
+				renderWhitespace: 'none',
+				domReadOnly: true
+			},
+			{
+				isSimpleWidget: true,
+				contributions: []
+			}
+		);
+
+		const commandUri = URI.parse(`vybe-chat-terminal-command:///${this.uniqueId}`);
+		const model = this.modelService.createModel(
+			this.currentContent.command,
+			this.languageService.createById('shellscript'),
+			commandUri
+		);
+
+		this.commandEditor.setModel(model);
+		this._register(model);
+
+		// Layout
+		setTimeout(() => {
+			if (this.commandEditor && editorWrapper.parentElement) {
+				const width = editorWrapper.parentElement.clientWidth || 497;
+				this.commandEditor.layout({ width, height: 18 });
+			}
+		}, 0);
+
+		container.appendChild(editorWrapper);
+		return container;
+	}
+
+	private createOutputBody(): HTMLElement {
+		const body = $('.composer-tool-call-body.non-compact');
+
+		// Start collapsed in pending state, visible in running/completed
+		if (this.currentContent.phase === 'pending') {
+			body.style.cssText = 'height: 0px; overflow: hidden; display: none;';
+		} else {
+			body.style.cssText = 'display: flex; flex-direction: column;';
+		}
+
+		const bodyInner = $('.composer-tool-call-body-inner');
+		const bodyContent = $('.composer-tool-call-body-content');
+
+		// Output container
+		const outputWrapper = $('div');
+		outputWrapper.style.cssText = 'position: relative; overflow: hidden; background: var(--vscode-editor-background);';
+
+		this.outputContainer = $('div');
+		this.outputContainer.style.cssText = `height: ${this.INITIAL_OUTPUT_HEIGHT}px; overflow: hidden;`;
+
+		// Scrollable container
+		const scrollableContainer = $('.scrollable-div-container');
+		scrollableContainer.style.cssText = 'height: 100%;';
+
+		// Create scrollable element wrapper
+		this.outputScrollableWrapper = $('div');
+		this.outputScrollableWrapper.style.cssText = `width: 100%; overflow: hidden; height: ${this.INITIAL_OUTPUT_HEIGHT}px;`;
+
+		const innerContent = $('.masked-scrollable-inner');
+		innerContent.style.cssText = 'display: inline-block; width: 100%; min-height: 100%;';
+
+		// Terminal output (pre)
+		const outputDiv = $('.composer-terminal-output');
+		this.outputPre = $('pre');
+		this.outputPre.style.cssText = `
+			margin: 0px;
+			padding: 4px 8px;
+			font-family: Menlo, Monaco, "Courier New", monospace;
+			white-space: pre-wrap;
+			word-break: break-all;
+			font-size: 12px;
+			line-height: 18px;
+			color: var(--vscode-terminal-foreground);
+			background: var(--vscode-terminal-background);
+		`;
+
+		// Start with empty or partial output
+		this.outputPre.textContent = this.currentContent.isStreaming ? '' : this.currentContent.output;
+
+		outputDiv.appendChild(this.outputPre);
+		innerContent.appendChild(outputDiv);
+		this.outputScrollableWrapper.appendChild(innerContent);
+
+		// Create DomScrollableElement for proper scrolling
+		this.outputScrollable = this._register(new DomScrollableElement(this.outputScrollableWrapper, {
+			horizontal: ScrollbarVisibility.Auto,
+			vertical: ScrollbarVisibility.Auto,
+			verticalScrollbarSize: 10,
+			horizontalScrollbarSize: 0,
+			useShadows: false
+		}));
+
+		scrollableContainer.appendChild(this.outputScrollable.getDomNode());
+		this.outputContainer.appendChild(scrollableContainer);
+		outputWrapper.appendChild(this.outputContainer);
+
+		bodyContent.appendChild(outputWrapper);
+		bodyInner.appendChild(bodyContent);
+		body.appendChild(bodyInner);
+
+		// Start streaming if needed
+		if (this.currentContent.isStreaming) {
+			setTimeout(() => {
+				this.startOutputStreaming();
+			}, 300);
+		}
+
+		return body;
+	}
+
+	private toggleOutputExpansion(): void {
+		if (!this.outputContainer || !this.outputScrollableWrapper || !this.outputExpandButton) {
+			return;
+		}
+
+		const chevron = this.outputExpandButton.querySelector('.codicon');
+		if (!chevron) {
+			return;
+		}
+
+		if (this.isOutputExpanded) {
+			// Collapse to limited height (94px / ~5 lines)
+			const collapsedHeight = `${this.INITIAL_OUTPUT_HEIGHT}px`;
+			this.outputContainer.style.height = collapsedHeight;
+			this.outputScrollableWrapper.style.height = collapsedHeight;
+			chevron.className = 'codicon codicon-chevron-down';
+			this.isOutputExpanded = false;
+		} else {
+			// Expand to full height
+			const fullHeight = this.calculateFullOutputHeight();
+			const fullHeightPx = `${fullHeight}px`;
+			this.outputContainer.style.height = fullHeightPx;
+			this.outputScrollableWrapper.style.height = fullHeightPx;
+			chevron.className = 'codicon codicon-chevron-up';
+			this.isOutputExpanded = true;
+		}
+
+		// Update scrollable element
+		if (this.outputScrollable) {
+			this.outputScrollable.scanDomNode();
+		}
+	}
+
+	private calculateFullOutputHeight(): number {
+		if (!this.outputPre) {
+			return this.INITIAL_OUTPUT_HEIGHT;
+		}
+
+		const outputText = this.outputPre.textContent || '';
+		const lineCount = outputText.split('\n').length;
+		const contentHeight = lineCount * this.LINE_HEIGHT + 16; // 16px for padding
+		const maxHeight = 400; // Cap at 400px
+
+		return Math.min(contentHeight, maxHeight);
+	}
+
+	private startOutputStreaming(): void {
+		const fullOutput = this.currentContent.output || '';
+		const lines = fullOutput.split('\n');
+		let currentLineIndex = 0;
+		let currentOutput = '';
+
+		console.log('[Terminal Streaming] Starting with', lines.length, 'lines');
+
+		const STREAM_DELAY_MS = 100; // 100ms per line
+
+		const streamNextLine = () => {
+			if (currentLineIndex >= lines.length) {
+				console.log('[Terminal Streaming] Complete!');
+				if (this.outputStreamIntervalId) {
+					clearInterval(this.outputStreamIntervalId);
+					this.outputStreamIntervalId = null;
+				}
+				// Update to completed phase with success status
+				this.currentContent.phase = 'completed';
+				this.currentContent.status = 'success';
+				this.currentContent.isStreaming = false;
+
+				// Update top header text
+				if (this.commandSummary) {
+					const headerText = this.getPhaseHeaderText();
+					const summaryText = this.commandSummary.querySelector('span');
+					if (summaryText) {
+						summaryText.textContent = `${headerText} ${this.getCommandSummary()}`;
+					}
+				}
+
+				// Rebuild control row to show "Success" status
+				this.rebuildControlRow();
+
+				// Rebuild action buttons to show expand button
+				if (this.actionButtonsContainer && this.topHeader) {
+					// Remove old buttons
+					while (this.actionButtonsContainer.firstChild) {
+						this.actionButtonsContainer.removeChild(this.actionButtonsContainer.firstChild);
+					}
+					// Replace with new buttons (now includes expand button)
+					const newButtons = this.createActionButtons();
+					this.actionButtonsContainer.replaceWith(newButtons);
+					this.actionButtonsContainer = newButtons;
+
+					// Re-attach hover listeners
+					this._register(addDisposableListener(this.topHeader, 'mouseenter', () => {
+						if (this.actionButtonsContainer) {
+							this.actionButtonsContainer.style.opacity = '1';
+						}
+					}));
+
+					this._register(addDisposableListener(this.topHeader, 'mouseleave', () => {
+						if (this.actionButtonsContainer) {
+							this.actionButtonsContainer.style.opacity = '0';
+						}
+					}));
+				}
+
+				return;
+			}
+
+			// Add next line
+			currentOutput += (currentLineIndex > 0 ? '\n' : '') + lines[currentLineIndex];
+			currentLineIndex++;
+
+			if (this.outputPre) {
+				this.outputPre.textContent = currentOutput;
+			}
+
+			// Scroll to bottom
+			if (this.outputScrollable) {
+				this.outputScrollable.scanDomNode();
+				const scrollHeight = this.outputScrollable.getScrollDimensions().scrollHeight;
+				this.outputScrollable.setScrollPosition({ scrollTop: scrollHeight });
+			}
+
+			// Notify parent for page-level scrolling
+			if (this.onStreamingUpdate) {
+				this.onStreamingUpdate();
+			}
+
+			this.outputStreamIntervalId = setTimeout(streamNextLine, STREAM_DELAY_MS) as any;
+		};
+
+		// Start streaming
+		this.outputStreamIntervalId = setTimeout(streamNextLine, 200) as any;
+	}
+
+	private createControlRow(): HTMLElement {
+		const row = $('.composer-tool-call-control-row');
+		row.style.cssText = 'display: flex; justify-content: space-between; align-items: center; padding: 4px 8px 6px 8px;';
+
+		// Left side - permission dropdown (or empty if skipped)
+		this.leftControls = $('.composer-tool-call-left-controls');
+		if (this.currentContent.status !== 'cancelled') {
+			const permissionDropdown = this.createPermissionDropdown();
+			this.leftControls.appendChild(permissionDropdown);
+		}
+
+		// Right side - different content based on phase
+		this.statusRow = $('.composer-tool-call-status-row');
+		if (this.currentContent.phase === 'pending') {
+			// Show Skip + Run buttons
+			this.statusRow.appendChild(this.createSkipRunButtons());
+		} else {
+			// Show status indicator
+			this.statusIndicator = this.createStatusIndicator();
+			this.statusRow.appendChild(this.statusIndicator);
+		}
+
+		row.appendChild(this.leftControls);
+		row.appendChild(this.statusRow);
+
+		return row;
+	}
+
+	private rebuildControlRow(): void {
+		if (!this.controlRow || !this.leftControls || !this.statusRow) {
+			return;
+		}
+
+		// Clear left controls
+		while (this.leftControls.firstChild) {
+			this.leftControls.removeChild(this.leftControls.firstChild);
+		}
+
+		// Clear status row
+		while (this.statusRow.firstChild) {
+			this.statusRow.removeChild(this.statusRow.firstChild);
+		}
+
+		// Rebuild based on current state
+		if (this.currentContent.status === 'cancelled') {
+			// Skipped: empty left, just status on right
+			this.statusIndicator = this.createStatusIndicator();
+			this.statusRow.appendChild(this.statusIndicator);
+		} else if (this.currentContent.phase === 'pending') {
+			// Pending: permission dropdown + Skip/Run buttons
+			const permissionDropdown = this.createPermissionDropdown();
+			this.leftControls.appendChild(permissionDropdown);
+			this.statusRow.appendChild(this.createSkipRunButtons());
+		} else if (this.currentContent.phase === 'running') {
+			// Running: permission dropdown + loading spinner
+			const permissionDropdown = this.createPermissionDropdown();
+			this.leftControls.appendChild(permissionDropdown);
+			this.statusRow.appendChild(this.createLoadingSpinner());
+		} else {
+			// Completed: permission dropdown + status
+			const permissionDropdown = this.createPermissionDropdown();
+			this.leftControls.appendChild(permissionDropdown);
+			this.statusIndicator = this.createStatusIndicator();
+			this.statusRow.appendChild(this.statusIndicator);
+		}
+	}
+
+	private createLoadingSpinner(): HTMLElement {
+		const container = $('div');
+		container.style.cssText = 'display: flex; gap: 8px; align-items: center;';
+
+		// Spinner icon (using codicon-loading with spin animation)
+		const spinner = $('span.codicon.codicon-loading.codicon-modifier-spin');
+		spinner.style.cssText = `
+			font-size: 14px;
+			color: var(--vscode-foreground);
+			opacity: 0.8;
+		`;
+
+		// "Running" text
+		const text = $('span');
+		text.textContent = 'Running';
+		text.style.cssText = `
+			font-size: 12px;
+			color: var(--cursor-text-secondary);
+		`;
+
+		container.appendChild(spinner);
+		container.appendChild(text);
+
+		return container;
+	}
+
+	private createSkipRunButtons(): HTMLElement {
+		const container = $('div');
+		container.style.cssText = 'display: flex; gap: 4px; align-items: center;';
+
+		// Skip button
+		const skipButton = $('.anysphere-text-button.composer-skip-button');
+		skipButton.style.cssText = `
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			gap: 4px;
+			padding: 0 6px;
+			border-radius: 4px;
+			cursor: pointer;
+			font-size: 12px;
+			line-height: 16px;
+			min-height: 20px;
+			background: transparent;
+			color: var(--cursor-text-secondary);
+			border: none;
+		`;
+		const skipText = $('span');
+		skipText.textContent = 'Skip';
+		skipButton.appendChild(skipText);
+
+		this._register(addDisposableListener(skipButton, 'click', () => {
+			this.handleSkip();
+		}));
+
+		// Run button
+		const runButton = $('.anysphere-button.composer-run-button');
+		runButton.style.cssText = `
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			gap: 4px;
+			padding: 0 6px;
+			border-radius: 4px;
+			cursor: pointer;
+			font-size: 12px;
+			line-height: 16px;
+			min-height: 20px;
+			background: #3ecf8e;
+			color: white;
+			border: none;
+		`;
+		const runText = $('span');
+		runText.textContent = 'Run';
+		const keybinding = $('span.keybinding-font-settings');
+		keybinding.textContent = '⏎';
+		keybinding.style.cssText = 'font-size: 10px; opacity: 0.5; margin-left: 2px;';
+
+		runButton.appendChild(runText);
+		runButton.appendChild(keybinding);
+
+		this._register(addDisposableListener(runButton, 'click', () => {
+			this.handleRun();
+		}));
+
+		container.appendChild(skipButton);
+		container.appendChild(runButton);
+
+		return container;
+	}
+
+	private createPermissionDropdown(): HTMLElement {
+		const controls = $('.composer-tool-call-allowlist-controls-wide');
+
+		this.permissionButton = $('.anysphere-text-button.composer-tool-call-allowlist-button');
+		this.permissionButton.setAttribute('data-click-ready', 'true');
+		this.permissionButton.style.cssText = `
+			display: flex;
+			flex-nowrap: nowrap;
+			align-items: center;
+			justify-content: center;
+			gap: 4px;
+			padding: 0 6px;
+			border-radius: 4px;
+			cursor: pointer;
+			white-space: nowrap;
+			flex-shrink: 0;
+			font-size: 12px;
+			line-height: 16px;
+			box-sizing: border-box;
+			min-height: 20px;
+			background: transparent;
+			border: none;
+			color: var(--cursor-text-primary);
+			transition: background-color 0.15s ease;
+		`;
+
+		const span = $('span');
+		span.style.cssText = 'display: inline-flex; align-items: baseline; gap: 2px; min-width: 0; overflow: hidden;';
+
+		const textSpan = $('span');
+		textSpan.style.cssText = 'truncate';
+
+		const content = $('span.composer-tool-call-button-content');
+		content.textContent = this.selectedPermission;
+
+		const chevron = $('div.codicon.codicon-chevron-down');
+		content.appendChild(chevron);
+
+		textSpan.appendChild(content);
+		span.appendChild(textSpan);
+		this.permissionButton.appendChild(span);
+
+		this._register(addDisposableListener(this.permissionButton, 'click', (e) => {
+			e.stopPropagation();
+			this.togglePermissionMenu();
+		}));
+
+		controls.appendChild(this.permissionButton);
+		return controls;
+	}
+
+	private togglePermissionMenu(): void {
+		if (this.permissionDropdownMenu) {
+			// Close existing menu
+			this.closePermissionMenu();
+		} else {
+			// Open menu
+			this.openPermissionMenu();
+		}
+	}
+
+	private isDarkTheme(): boolean {
+		const workbench = document.querySelector('.monaco-workbench');
+		if (workbench) {
+			return workbench.classList.contains('vs-dark') || workbench.classList.contains('hc-black');
+		}
+		return document.body.classList.contains('vs-dark') || document.body.classList.contains('hc-black');
+	}
+
+	private openPermissionMenu(): void {
+		if (!this.permissionButton) {
+			return;
+		}
+
+		const isDarkTheme = this.isDarkTheme();
+
+		// Create dropdown menu - use text edit header background
+		this.permissionDropdownMenu = $('.terminal-permission-dropdown');
+		this.permissionDropdownMenu.style.cssText = `
+			box-sizing: border-box;
+			padding: 0px;
+			border-radius: 6px;
+			background: transparent;
+			border: none;
+			align-items: stretch;
+			font-family: -apple-system, "system-ui", sans-serif;
+			font-size: 10px;
+			display: flex;
+			flex-direction: column;
+			gap: 0px;
+			position: fixed;
+			visibility: visible;
+			width: 180px;
+			min-width: 180px;
+			transform-origin: left top;
+			box-shadow: 0 0 8px 2px rgba(0, 0, 0, 0.12);
+			z-index: 2548;
+		`;
+
+		// Inner container - VYBE text edit header colors
+		const inner = $('div');
+		inner.setAttribute('tabindex', '0');
+		inner.style.cssText = `
+			box-sizing: border-box;
+			border-radius: 6px;
+			background-color: ${isDarkTheme ? '#212427' : '#eceff2'} !important;
+			border: 1px solid ${isDarkTheme ? '#383838' : '#d9d9d9'} !important;
+			align-items: stretch;
+			font-family: -apple-system, "system-ui", sans-serif;
+			font-size: 12px;
+			display: flex;
+			flex-direction: column;
+			gap: 2px;
+			padding: 2px;
+			contain: paint;
+			outline: none;
+			pointer-events: auto;
+		`;
+
+		// Options container
+		const options = $('div');
+		options.style.cssText = 'display: flex; flex-direction: column; gap: 2px;';
+
+		// Option 1: Ask Every Time
+		const option1 = this.createDropdownOption('Ask Every Time', this.selectedPermission === 'Ask Every Time');
+		this._register(addDisposableListener(option1, 'click', () => {
+			this.selectPermission('Ask Every Time');
+		}));
+		options.appendChild(option1);
+
+		// Option 2: Run in Sandbox
+		const option2 = this.createDropdownOption('Run in Sandbox', this.selectedPermission === 'Run in Sandbox');
+		this._register(addDisposableListener(option2, 'click', () => {
+			this.selectPermission('Run in Sandbox');
+		}));
+		options.appendChild(option2);
+
+		// Option 3: Run Everything
+		const option3 = this.createDropdownOption('Run Everything', this.selectedPermission === 'Run Everything');
+		this._register(addDisposableListener(option3, 'click', () => {
+			this.showRunEverythingModal();
+		}));
+		options.appendChild(option3);
+
+		inner.appendChild(options);
+		this.permissionDropdownMenu.appendChild(inner);
+		document.body.appendChild(this.permissionDropdownMenu);
+
+		// Position menu - OPEN DOWNWARD with more spacing
+		const rect = this.permissionButton.getBoundingClientRect();
+		this.permissionDropdownMenu.style.top = `${rect.bottom + 8}px`;
+		this.permissionDropdownMenu.style.left = `${rect.left}px`;
+
+		// Close on click outside
+		const closeHandler = (e: MouseEvent) => {
+			if (this.permissionDropdownMenu && !this.permissionDropdownMenu.contains(e.target as Node) && !this.permissionButton?.contains(e.target as Node)) {
+				this.closePermissionMenu();
+				document.removeEventListener('click', closeHandler, true);
+				document.removeEventListener('keydown', escapeHandler);
+			}
+		};
+
+		// Close on Escape key
+		const escapeHandler = (e: KeyboardEvent) => {
+			if (e.key === 'Escape') {
+				this.closePermissionMenu();
+				document.removeEventListener('click', closeHandler, true);
+				document.removeEventListener('keydown', escapeHandler);
+			}
+		};
+
+		setTimeout(() => {
+			document.addEventListener('click', closeHandler, true);
+			document.addEventListener('keydown', escapeHandler);
+		}, 0);
+	}
+
+	private createDropdownOption(text: string, isSelected: boolean): HTMLElement {
+		const isDarkTheme = this.isDarkTheme();
+
+		const option = $('.permission-dropdown-option');
+		option.style.cssText = `
+			display: flex;
+			justify-content: space-between;
+			align-items: center;
+			padding: 2px 8px;
+			border-radius: 4px;
+			cursor: pointer;
+			min-height: 18px;
+			height: 20px;
+			gap: 8px;
+			font-family: -apple-system, "system-ui", sans-serif;
+			font-size: 12px;
+			background-color: ${isSelected ? (isDarkTheme ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.04)') : 'transparent'};
+			transition: background-color 0.15s ease;
+		`;
+
+		const label = $('span');
+		label.textContent = text;
+		label.style.cssText = `
+			color: ${isDarkTheme ? 'rgba(228, 228, 228, 0.92)' : 'rgba(51, 51, 51, 0.9)'};
+			font-size: 12px;
+			line-height: 16px;
+			white-space: nowrap;
+			text-overflow: ellipsis;
+			overflow: hidden;
+			flex: 1;
+		`;
+
+		const checkmark = $('span.codicon.codicon-check');
+		checkmark.style.cssText = `
+			font-size: 12px;
+			color: ${isDarkTheme ? 'rgba(228, 228, 228, 0.92)' : 'rgba(51, 51, 51, 0.9)'};
+			opacity: ${isSelected ? '1' : '0'};
+		`;
+
+		option.appendChild(label);
+		option.appendChild(checkmark);
+
+		// Hover effect
+		const hoverColor = isDarkTheme ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.04)';
+		this._register(addDisposableListener(option, 'mouseenter', () => {
+			option.style.backgroundColor = hoverColor;
+		}));
+
+		this._register(addDisposableListener(option, 'mouseleave', () => {
+			option.style.backgroundColor = isSelected ? hoverColor : 'transparent';
+		}));
+
+		return option;
+	}
+
+	private closePermissionMenu(): void {
+		if (this.permissionDropdownMenu) {
+			this.permissionDropdownMenu.remove();
+			this.permissionDropdownMenu = null;
+		}
+	}
+
+	private selectPermission(permission: string): void {
+		console.log('[Terminal] Selected permission:', permission);
+		this.selectedPermission = permission;
+
+		// Update button text
+		if (this.permissionButton) {
+			const content = this.permissionButton.querySelector('.composer-tool-call-button-content');
+			if (content) {
+				// Clear and rebuild
+				while (content.firstChild) {
+					content.removeChild(content.firstChild);
+				}
+				content.appendChild(document.createTextNode(permission));
+				const chevron = $('div.codicon.codicon-chevron-down');
+				content.appendChild(chevron);
+			}
+		}
+
+		// Close menu
+		this.closePermissionMenu();
+
+		// TODO: Store preference (will be handled in settings later)
+	}
+
+	private showRunEverythingModal(): void {
+		// Close dropdown first
+		this.closePermissionMenu();
+
+		const isDarkTheme = this.isDarkTheme();
+
+		// Create modal overlay
+		this.warningModal = $('.fade-in-fast');
+		this.warningModal.style.cssText = `
+			position: fixed;
+			top: 0;
+			left: 0;
+			width: 100%;
+			height: 100%;
+			background-color: rgba(0, 0, 0, 0.5);
+			display: flex;
+			flex-direction: column;
+			justify-content: flex-start;
+			align-items: center;
+			z-index: 2551;
+			backdrop-filter: blur(1px);
+		`;
+
+		// Modal container - use VYBE text edit header background
+		const modal = $('.pretty-dialog-modal.fade-in-fast');
+		modal.style.cssText = `
+			background-color: ${isDarkTheme ? '#212427' : '#eceff2'} !important;
+			padding: 0px;
+			border-radius: 8px;
+			box-shadow: rgba(0, 0, 0, 0.15) 0px 4px 20px;
+			display: flex;
+			flex-direction: column;
+			gap: 0px;
+			z-index: 2552;
+			border: 1px solid ${isDarkTheme ? '#383838' : '#d9d9d9'};
+			min-width: 300px;
+			margin-top: 200px;
+			font-family: -apple-system, "system-ui", sans-serif;
+			color: ${isDarkTheme ? 'rgba(228, 228, 228, 0.92)' : 'rgba(51, 51, 51, 0.9)'};
+		`;
+
+		// Content area
+		const content = $('div');
+		content.style.cssText = `
+			padding: 12px 8px 12px 8px;
+			display: flex;
+			gap: 6px;
+			contain: inline-size;
+		`;
+
+		// Warning icon
+		const icon = $('div.codicon.codicon-warning.pretty-dialog-icon');
+		icon.style.cssText = 'color: var(--vscode-editorWarning-foreground); font-size: 16px; flex-shrink: 0;';
+
+		// Text container
+		const textContainer = $('div');
+		textContainer.style.cssText = 'display: flex; flex-direction: column; gap: 4px; flex: 1; width: 100%;';
+
+		const title = $('h1.pretty-dialog-title.select-text');
+		title.textContent = 'Disclaimer';
+		title.style.cssText = `
+			font-size: 13px;
+			font-weight: 600;
+			margin: 0;
+			color: ${isDarkTheme ? 'rgba(228, 228, 228, 0.92)' : 'rgba(51, 51, 51, 0.9)'};
+			font-family: -apple-system, "system-ui", sans-serif;
+			user-select: text;
+		`;
+
+		const messageWrapper = $('.pretty-dialog-message');
+		messageWrapper.style.cssText = 'width: 100%;';
+
+		const messageText = $('div');
+		messageText.textContent = 'Run Everything runs all commands automatically. Be cautious of potential prompt injection risks from external sources and use at your own risk.';
+		messageText.style.cssText = `
+			font-size: 12px;
+			color: ${isDarkTheme ? 'rgba(228, 228, 228, 0.7)' : 'rgba(51, 51, 51, 0.7)'};
+			line-height: 18px;
+			font-family: -apple-system, "system-ui", sans-serif;
+		`;
+
+		messageWrapper.appendChild(messageText);
+		textContainer.appendChild(title);
+		textContainer.appendChild(messageWrapper);
+
+		content.appendChild(icon);
+		content.appendChild(textContainer);
+
+		// Buttons area
+		const buttons = $('div');
+		buttons.style.cssText = 'padding: 2px 12px 12px 12px; display: flex; justify-content: flex-end; gap: 4px; height: 25px; align-items: center;';
+
+		// Cancel button
+		const cancelBtn = $('.anysphere-text-button.pretty-dialog-button.tab-focusable');
+		cancelBtn.setAttribute('tabindex', '0');
+		cancelBtn.style.cssText = `
+			display: flex;
+			flex-wrap: nowrap;
+			align-items: center;
+			justify-content: center;
+			gap: 4px;
+			padding: 0 6px;
+			border-radius: 4px;
+			font-size: 12px;
+			line-height: 16px;
+			min-height: 20px;
+			box-sizing: border-box;
+			cursor: pointer;
+			background: transparent;
+			color: ${isDarkTheme ? 'rgba(228, 228, 228, 0.7)' : 'rgba(51, 51, 51, 0.7)'};
+			border: none;
+			font-family: -apple-system, "system-ui", sans-serif;
+			transition: background-color 0.15s ease;
+		`;
+		const cancelWrapper = $('span');
+		cancelWrapper.style.cssText = 'display: inline-flex; align-items: baseline; gap: 2px; min-width: 0; overflow: hidden;';
+		const cancelText = $('span');
+		cancelText.style.cssText = 'text-overflow: ellipsis; overflow: hidden;';
+		cancelText.textContent = 'Cancel (esc)';
+		cancelWrapper.appendChild(cancelText);
+		cancelBtn.appendChild(cancelWrapper);
+
+		this._register(addDisposableListener(cancelBtn, 'click', () => {
+			this.closeWarningModal();
+		}));
+
+		// Do not show again button (stores permanent preference)
+		const doNotShowBtn = $('.anysphere-secondary-button.pretty-dialog-button.tab-focusable');
+		doNotShowBtn.setAttribute('tabindex', '0');
+		doNotShowBtn.style.cssText = `
+			display: flex;
+			flex-wrap: nowrap;
+			align-items: center;
+			justify-content: center;
+			gap: 4px;
+			padding: 0 6px;
+			border-radius: 4px;
+			font-size: 12px;
+			line-height: 16px;
+			min-height: 20px;
+			box-sizing: border-box;
+			cursor: pointer;
+			background: ${isDarkTheme ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)'};
+			color: ${isDarkTheme ? 'rgba(228, 228, 228, 0.92)' : 'rgba(51, 51, 51, 0.9)'};
+			border: none;
+			font-family: -apple-system, "system-ui", sans-serif;
+			transition: opacity 0.15s ease;
+		`;
+		const doNotShowWrapper = $('span');
+		doNotShowWrapper.style.cssText = 'display: inline-flex; align-items: baseline; gap: 2px; min-width: 0; overflow: hidden;';
+		const doNotShowText = $('span');
+		doNotShowText.style.cssText = 'text-overflow: ellipsis; overflow: hidden;';
+		doNotShowText.textContent = 'Do not show again';
+		doNotShowWrapper.appendChild(doNotShowText);
+		doNotShowBtn.appendChild(doNotShowWrapper);
+
+		this._register(addDisposableListener(doNotShowBtn, 'click', () => {
+			// "Do not show again" = always allow all terminal commands across all messages
+			this.selectPermission('Run Everything');
+			// TODO: Store global preference in settings
+			console.log('[Terminal] Run Everything enabled globally (all messages)');
+			this.closeWarningModal();
+		}));
+
+		// Continue button (only for this message)
+		const continueBtn = $('.anysphere-button.pretty-dialog-button.pretty-dialog-button-primary.tab-focusable');
+		continueBtn.setAttribute('tabindex', '0');
+		continueBtn.style.cssText = `
+			display: flex;
+			flex-wrap: nowrap;
+			align-items: center;
+			justify-content: center;
+			gap: 4px;
+			padding: 0 6px;
+			border-radius: 4px;
+			font-size: 12px;
+			line-height: 16px;
+			min-height: 20px;
+			box-sizing: border-box;
+			cursor: pointer;
+			background: #3ecf8e;
+			color: white;
+			border: none;
+			font-family: -apple-system, "system-ui", sans-serif;
+			transition: background-color 0.15s ease;
+		`;
+
+		const continueTextWrapper = $('span');
+		continueTextWrapper.style.cssText = 'display: inline-flex; align-items: baseline; gap: 2px; min-width: 0; overflow: hidden;';
+
+		const continueText = $('span');
+		continueText.style.cssText = 'text-overflow: ellipsis; overflow: hidden;';
+		continueText.textContent = 'Continue';
+
+		const continueKey = $('span.keybinding-font-settings');
+		continueKey.textContent = '⏎';
+		continueKey.style.cssText = 'font-size: 10px; opacity: 0.5; flex-shrink: 0;';
+
+		continueTextWrapper.appendChild(continueText);
+		continueTextWrapper.appendChild(continueKey);
+		continueBtn.appendChild(continueTextWrapper);
+
+		this._register(addDisposableListener(continueBtn, 'click', () => {
+			// "Continue" = allow Run Everything only for this message's terminal commands
+			this.selectPermission('Run Everything');
+			console.log('[Terminal] Run Everything enabled for this message only');
+			this.closeWarningModal();
+		}));
+
+		buttons.appendChild(cancelBtn);
+		buttons.appendChild(doNotShowBtn);
+		buttons.appendChild(continueBtn);
+
+		modal.appendChild(content);
+		modal.appendChild(buttons);
+		this.warningModal.appendChild(modal);
+
+		document.body.appendChild(this.warningModal);
+
+		// Close on Escape key
+		const escapeHandler = (e: KeyboardEvent) => {
+			if (e.key === 'Escape') {
+				this.closeWarningModal();
+				document.removeEventListener('keydown', escapeHandler);
+			} else if (e.key === 'Enter') {
+				this.selectPermission('Run Everything');
+				console.log('[Terminal] Run Everything enabled for this message only (Enter key)');
+				this.closeWarningModal();
+				document.removeEventListener('keydown', escapeHandler);
+			}
+		};
+		document.addEventListener('keydown', escapeHandler);
+
+		// Close on click outside modal
+		const clickHandler = (e: MouseEvent) => {
+			if (this.warningModal && e.target === this.warningModal) {
+				this.closeWarningModal();
+				document.removeEventListener('click', clickHandler);
+			}
+		};
+		document.addEventListener('click', clickHandler);
+	}
+
+	private closeWarningModal(): void {
+		if (this.warningModal) {
+			this.warningModal.remove();
+			this.warningModal = null;
+		}
+	}
+
+	private createStatusIndicator(): HTMLElement {
+		const indicator = $('span.composer-tool-call-status-indicator');
+		indicator.style.cssText = 'color: var(--cursor-text-secondary); display: flex; align-items: center; gap: 4px;';
+
+		// Determine status based on phase
+		const displayStatus = this.getDisplayStatus();
+		this.updateStatusContent(indicator, displayStatus);
+
+		return indicator;
+	}
+
+	private getDisplayStatus(): string {
+		// Map phase + status to display status
+		switch (this.currentContent.phase) {
+			case 'pending':
+				return 'pending';
+			case 'running':
+				return 'running';
+			case 'completed':
+				return this.currentContent.status || 'success';
+			default:
+				return 'running';
+		}
+	}
+
+
+	private updateStatusContent(element: HTMLElement, status: string): void {
+		// Clear existing content using DOM methods (not innerHTML due to Trusted Types)
+		while (element.firstChild) {
+			element.removeChild(element.firstChild);
+		}
+
+		let iconClass = 'codicon-check';
+		let statusText = 'Success';
+		let color = 'var(--cursor-text-secondary)';
+
+		switch (status) {
+			case 'pending':
+				iconClass = 'codicon-clock';
+				statusText = 'Waiting for approval';
+				color = 'var(--cursor-text-secondary)';
+				break;
+			case 'success':
+				iconClass = 'codicon-check';
+				statusText = 'Success';
+				color = 'var(--cursor-text-secondary)';
+				break;
+			case 'failed':
+				iconClass = 'codicon-circle-slash';
+				statusText = 'Failed';
+				color = 'var(--vscode-testing-iconFailed)';
+				break;
+			case 'running':
+				iconClass = 'codicon-loading codicon-modifier-spin';
+				statusText = 'Running';
+				color = 'var(--cursor-text-secondary)';
+				break;
+			case 'cancelled':
+				iconClass = 'codicon-debug-step-over';
+				statusText = 'Skipped';
+				color = 'var(--cursor-text-secondary)';
+				break;
+		}
+
+		const icon = $(`span.codicon.${iconClass}`);
+		element.appendChild(icon);
+
+		const text = document.createTextNode(statusText);
+		element.appendChild(text);
+
+		element.style.color = color;
+	}
+
+	private getCommandSummary(): string {
+		// Extract command names from full command string
+		const command = this.currentContent.command;
+		const parts = command.split('&&').map(c => c.trim());
+		const commands = parts.map(p => p.split(' ')[0]).filter(c => c.length > 0);
+		return commands.join(', ');
+	}
+
+	private handleCopy(): void {
+		// TODO: Implement copy to clipboard
+		console.log('[Terminal] Copy output:', this.currentContent.output?.substring(0, 50) + '...');
+	}
+
+	private handleOpenInTerminal(): void {
+		// TODO: Implement open in terminal
+		console.log('[Terminal] Open in terminal:', this.currentContent.command);
+	}
+
+	private handleSkip(): void {
+		console.log('[Terminal] Skip clicked');
+
+		// Update state to skipped
+		this.currentContent.phase = 'completed';
+		this.currentContent.status = 'cancelled';
+
+		// Remove ping border
+		if (this.mainContainer) {
+			this.mainContainer.classList.remove('composer-terminal-ping-border');
+		}
+
+		// Update top header text
+		if (this.commandSummary) {
+			const headerText = this.getPhaseHeaderText();
+			const summaryText = this.commandSummary.querySelector('span');
+			if (summaryText) {
+				summaryText.textContent = `${headerText} ${this.getCommandSummary()}`;
+			}
+		}
+
+		// Rebuild control row to show "Skipped" status
+		this.rebuildControlRow();
+	}
+
+	private handleRun(): void {
+		console.log('[Terminal] Run clicked');
+
+		// Transition to running phase
+		this.currentContent.phase = 'running';
+		this.currentContent.status = null;
+
+		// Remove ping border
+		if (this.mainContainer) {
+			this.mainContainer.classList.remove('composer-terminal-ping-border');
+		}
+
+		// Update top header text
+		if (this.commandSummary) {
+			const headerText = this.getPhaseHeaderText();
+			const summaryText = this.commandSummary.querySelector('span');
+			if (summaryText) {
+				summaryText.textContent = `${headerText} ${this.getCommandSummary()}`;
+			}
+		}
+
+		// Show output area
+		if (this.outputBody) {
+			this.outputBody.style.cssText = 'display: flex; flex-direction: column;';
+		}
+
+		// Rebuild control row to show "Running" status
+		this.rebuildControlRow();
+
+		// Start streaming output (demo animation)
+		this.currentContent.isStreaming = true;
+		setTimeout(() => {
+			this.startOutputStreaming();
+		}, 300);
+	}
+
+	override hasSameContent(other: VybeChatTerminalPart): boolean {
+		if (!(other instanceof VybeChatTerminalPart)) {
+			return false;
+		}
+		return this.currentContent.command === other.currentContent.command &&
+			this.currentContent.output === other.currentContent.output;
+	}
+
+	updateContent(newContent: IVybeChatTerminalContent): void {
+		this.currentContent = newContent;
+
+		// Update command if changed
+		if (this.commandEditor) {
+			const model = this.commandEditor.getModel();
+			if (model) {
+				model.setValue(newContent.command);
+			}
+		}
+
+		// Update output if changed
+		if (this.outputPre && !newContent.isStreaming) {
+			this.outputPre.textContent = newContent.output;
+		}
+
+		// Update status
+		if (this.statusIndicator) {
+			this.updateStatusContent(this.statusIndicator, newContent.status || 'success');
+		}
+	}
+
+	override dispose(): void {
+		// Clean up streaming interval
+		if (this.outputStreamIntervalId) {
+			clearInterval(this.outputStreamIntervalId);
+			this.outputStreamIntervalId = null;
+		}
+
+		// Dispose command editor
+		if (this.commandEditor) {
+			try {
+				this.commandEditor.setModel(null);
+				this.commandEditor.dispose();
+			} catch (e) {
+				// Ignore
+			}
+			this.commandEditor = null;
+		}
+
+		// Clear references
+		this.headerElement = null;
+		this.topHeader = null;
+		this.commandSummary = null;
+		this.actionButtonsContainer = null;
+		this.contentArea = null;
+		this.commandContainer = null;
+		this.outputContainer = null;
+		this.outputScrollableWrapper = null;
+		this.outputPre = null;
+		this.outputScrollable = null;
+		this.controlRow = null;
+		this.permissionDropdownMenu = null;
+		this.statusIndicator = null;
+
+		super.dispose();
+	}
+}
+

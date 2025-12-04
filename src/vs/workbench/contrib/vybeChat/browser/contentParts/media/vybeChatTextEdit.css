@@ -24,7 +24,7 @@
 	cursor: pointer;
 	user-select: none;
 	column-gap: 6px;
-	background: #1a1d1f; /* VYBE Dark */
+	background: #212427; /* VYBE Dark */
 	border-bottom: none;
 	position: sticky;
 	top: 0;
@@ -33,7 +33,7 @@
 
 /* Header - VYBE Light theme */
 .vs .vybe-chat-response-area .text-edit-block .composer-code-block-header {
-	background: #f2f4f6;
+	background: #eceff2;
 }
 
 /* File info section */
@@ -209,12 +209,12 @@
 	cursor: pointer;
 	user-select: none;
 	z-index: 1;
-	background: #1a1d1f; /* VYBE Dark */
+	background: #212427; /* VYBE Dark */
 }
 
 /* Bottom expand bar - VYBE Light theme */
 .vs .vybe-chat-response-area .text-edit-block .composer-message-codeblock-expand {
-	background: #f2f4f6;
+	background: #eceff2;
 }
 
 /* Chevron icon in expand bar */

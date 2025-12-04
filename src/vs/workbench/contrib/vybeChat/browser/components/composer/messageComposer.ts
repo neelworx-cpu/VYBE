@@ -204,7 +204,9 @@ export class MessageComposer extends Disposable {
 
 		// Update agent dropdown background
 		if (this.agentDropdown) {
-			this.agentDropdown.style.backgroundColor = isDarkTheme ? '#272727' : 'rgba(0, 0, 0, 0.05)';
+			// Panel background
+			const panelBg = getComputedStyle(document.body).getPropertyValue('--vscode-editor-background').trim() || (isDarkTheme ? '#1e1f21' : '#ffffff');
+			this.agentDropdown.style.backgroundColor = panelBg;
 		}
 
 		// Update send button (if we add theme-specific styling later)
@@ -244,7 +246,7 @@ export class MessageComposer extends Disposable {
 		this.inputBox.style.position = 'relative';
 		this.inputBox.style.borderRadius = '8px';
 		// Dark mode: #1e1f21, Light mode: #f8f8f9
-		this.inputBox.style.backgroundColor = isDarkTheme ? '#1e1f21' : '#f8f8f9';
+		this.inputBox.style.backgroundColor = isDarkTheme ? '#212427' : '#eceff2';
 		// Dark mode: #383838, Light mode: #d9d9d9
 		this.inputBox.style.border = isDarkTheme
 			? '1px solid #383838'
@@ -557,10 +559,9 @@ export class MessageComposer extends Disposable {
 		this.agentDropdown.style.flexShrink = '0';
 		this.agentDropdown.style.cursor = 'pointer';
 		this.agentDropdown.style.border = 'none';
-		// Default background - Dark: #272727, Light: rgba(0, 0, 0, 0.05)
-		this.agentDropdown.style.backgroundColor = isDarkTheme
-			? '#272727'
-			: 'rgba(0, 0, 0, 0.05)';
+		// Default background - panel color
+		const panelBg = getComputedStyle(document.body).getPropertyValue('--vscode-editor-background').trim() || (isDarkTheme ? '#1e1f21' : '#ffffff');
+		this.agentDropdown.style.backgroundColor = panelBg;
 		this.agentDropdown.style.transition = 'background-color 0.15s ease';
 
 		// Agent inner content

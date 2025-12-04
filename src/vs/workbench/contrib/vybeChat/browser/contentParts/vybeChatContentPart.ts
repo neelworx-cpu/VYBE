@@ -34,6 +34,12 @@ export interface IVybeChatContentPart extends Disposable {
 	 * Called when streaming updates arrive.
 	 */
 	updateContent?(data: any): void;
+
+	/**
+	 * Callback for streaming updates.
+	 * Called when content is streaming to trigger parent scroll updates.
+	 */
+	onStreamingUpdate?: () => void;
 }
 
 /**
@@ -52,6 +58,7 @@ export type VybeChatContentPartKind =
 	| 'textEdit'       // File edit suggestions
 	| 'diff'           // Side-by-side diff view
 	// Phase 4: Advanced (coming soon)
+	| 'terminal'       // Terminal command execution
 	| 'reference'      // File references
 	| 'command';       // Command buttons
 
@@ -103,6 +110,20 @@ export interface IVybeChatTextEditContent {
 }
 
 /**
+ * Data for terminal content parts (command execution).
+ */
+export interface IVybeChatTerminalContent {
+	kind: 'terminal';
+	command: string;           // The shell command executed
+	output: string;            // Terminal output (final or target for streaming)
+	phase: 'pending' | 'running' | 'completed'; // Execution phase (pending = ask permission, running = executing, completed = done)
+	status: 'success' | 'failed' | 'cancelled' | null; // Final status (null when pending/running)
+	permission?: string;       // Permission level (e.g., "Ask Every Time", "Always Allow")
+	isStreaming?: boolean;     // Whether output is currently streaming
+	exitCode?: number;         // Command exit code
+}
+
+/**
  * Data for progress content parts.
  */
 export interface IVybeChatProgressContent {
@@ -128,6 +149,7 @@ export type IVybeChatContentData =
 	| IVybeChatThinkingContent
 	| IVybeChatCodeBlockContent
 	| IVybeChatTextEditContent
+	| IVybeChatTerminalContent
 	| IVybeChatProgressContent
 	| IVybeChatErrorContent;
 

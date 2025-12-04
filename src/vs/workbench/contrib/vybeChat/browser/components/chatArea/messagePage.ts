@@ -16,6 +16,7 @@ import { VybeChatMarkdownPart } from '../../contentParts/vybeChatMarkdownPart.js
 import { VybeChatThinkingPart } from '../../contentParts/vybeChatThinkingPart.js';
 import { VybeChatCodeBlockPart } from '../../contentParts/vybeChatCodeBlockPart.js';
 import { VybeChatTextEditPart } from '../../contentParts/vybeChatTextEditPart.js';
+import { VybeChatTerminalPart } from '../../contentParts/vybeChatTerminalPart.js';
 import { IMarkdownRendererService } from '../../../../../../platform/markdown/browser/markdownRenderer.js';
 import { IModelService } from '../../../../../../editor/common/services/model.js';
 import { ILanguageService } from '../../../../../../editor/common/languages/language.js';
@@ -415,27 +416,44 @@ export class MessagePage extends Disposable {
 				return codeBlockPart;
 			}
 
-			case 'textEdit': {
-				if (!this.instantiationService) {
-					return null;
-				}
-				const textEditPart = this._register(this.instantiationService.createInstance(
-					VybeChatTextEditPart,
-					contentData
-				));
+		case 'textEdit': {
+			if (!this.instantiationService) {
+				return null;
+			}
+			const textEditPart = this._register(this.instantiationService.createInstance(
+				VybeChatTextEditPart,
+				contentData
+			));
 
-				// Wire up streaming callback for smart scrolling
-				if (textEditPart && this.options.onContentUpdate) {
-					textEditPart.setStreamingUpdateCallback(this.options.onContentUpdate);
-				}
-
-				return textEditPart;
+			// Wire up streaming callback for smart scrolling
+			if (textEditPart && this.options.onContentUpdate) {
+				textEditPart.setStreamingUpdateCallback(this.options.onContentUpdate);
 			}
 
-			// TODO: Add more content types (errors, progress, etc.)
+			return textEditPart;
+		}
 
-			default:
+		case 'terminal': {
+			if (!this.instantiationService) {
 				return null;
+			}
+			const terminalPart = this._register(this.instantiationService.createInstance(
+				VybeChatTerminalPart,
+				contentData
+			));
+
+			// Wire up streaming callback for smart scrolling
+			if (terminalPart && this.options.onContentUpdate) {
+				terminalPart.setStreamingUpdateCallback(this.options.onContentUpdate);
+			}
+
+			return terminalPart;
+		}
+
+		// TODO: Add more content types (errors, progress, etc.)
+
+		default:
+			return null;
 		}
 	}
 

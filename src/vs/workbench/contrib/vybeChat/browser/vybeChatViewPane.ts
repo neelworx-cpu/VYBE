@@ -8,7 +8,9 @@ import './contentParts/media/vybeChatThinking.css';
 import './contentParts/media/vybeChatMarkdown.css';
 import './contentParts/media/vybeChatCodeBlock.css';
 import './contentParts/media/vybeChatTextEdit.css';
+import './contentParts/media/vybeChatTerminal.css';
 import { ViewPane, IViewPaneOptions } from '../../../browser/parts/views/viewPane.js';
+import { addDisposableListener } from '../../../../base/browser/dom.js';
 import { IKeybindingService } from '../../../../platform/keybinding/common/keybinding.js';
 import { IContextMenuService } from '../../../../platform/contextview/browser/contextView.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
@@ -44,6 +46,8 @@ export class VybeChatViewPane extends ViewPane {
 	private messagePages: Map<string, MessagePage> = new Map();
 	private messageIndex: number = 0;
 	private currentStreamingMessageId: string | null = null;
+	private autoScrollDisabled: boolean = false;
+	private wheelCheckTimeout: any = null;
 
 	constructor(
 		options: IViewPaneOptions,
@@ -131,6 +135,49 @@ export class VybeChatViewPane extends ViewPane {
 			scroll-behavior: smooth;
 		`;
 		container.appendChild(this.chatArea);
+
+		// Track when user manually scrolls with wheel
+		this._register(addDisposableListener(this.chatArea, 'wheel', (e) => {
+			if (!this.chatArea) {
+				return;
+			}
+
+			const deltaY = (e as WheelEvent).deltaY;
+
+			// If scrolling UP (negative delta), disable auto-scroll immediately
+			if (deltaY < 0) {
+				if (!this.autoScrollDisabled) {
+					console.log('[Scroll] User scrolled UP - auto-scroll disabled');
+					this.autoScrollDisabled = true;
+				}
+			}
+
+			// Clear any pending check
+			if (this.wheelCheckTimeout) {
+				clearTimeout(this.wheelCheckTimeout);
+			}
+
+			// After wheel events stop (200ms debounce), check if at bottom to re-enable
+			this.wheelCheckTimeout = setTimeout(() => {
+				if (!this.chatArea) {
+					return;
+				}
+
+				const scrollTop = this.chatArea.scrollTop;
+				const scrollHeight = this.chatArea.scrollHeight;
+				const clientHeight = this.chatArea.clientHeight;
+				const distanceFromBottom = scrollHeight - (scrollTop + clientHeight);
+
+				// Only re-enable if truly at bottom
+				if (distanceFromBottom < 50) {
+					if (this.autoScrollDisabled) {
+						console.log('[Scroll] User at bottom - auto-scroll re-enabled');
+					}
+					this.autoScrollDisabled = false;
+				}
+			}, 200);
+		}));
+
 
 		// Render composer at the bottom
 		this.composer = this._register(new MessageComposer(container, this._speechService));
@@ -272,27 +319,23 @@ export class VybeChatViewPane extends ViewPane {
 	 * Smart auto-scroll: Only scrolls if new content extends beyond visible viewport.
 	 * This keeps the latest content visible during streaming without unnecessary scrolling.
 	 */
+	public resetScrollState(): void {
+		this.autoScrollDisabled = false;
+		// Scroll to bottom
+		if (this.chatArea) {
+			this.chatArea.scrollTop = this.chatArea.scrollHeight;
+		}
+	}
+
 	public scrollToShowLatestContent(): void {
-		if (!this.chatArea) {
+		if (!this.chatArea || this.autoScrollDisabled) {
 			return;
 		}
 
+		// Auto-scroll enabled: scroll to bottom to reveal new content
 		requestAnimationFrame(() => {
-			if (!this.chatArea) {
-				return;
-			}
-
-			const chatAreaHeight = this.chatArea.clientHeight;
-			const chatAreaScrollTop = this.chatArea.scrollTop;
-			const chatAreaScrollHeight = this.chatArea.scrollHeight;
-
-			// Calculate how much content is below the current view
-			const contentBelowView = chatAreaScrollHeight - (chatAreaScrollTop + chatAreaHeight);
-
-			// Only scroll if there's content below the view (threshold: 50px)
-			// This prevents unnecessary scrolling when content is already fully visible
-			if (contentBelowView > 50) {
-				this.chatArea.scrollTop = chatAreaScrollHeight;
+			if (this.chatArea && !this.autoScrollDisabled) {
+				this.chatArea.scrollTop = this.chatArea.scrollHeight;
 			}
 		});
 	}
@@ -565,8 +608,10 @@ if (typeof window !== 'undefined') {
 		}
 	};
 
-	// Test function for streaming markdown and code blocks
-	(window as any).__vybeTestStreaming = function () {
+	// Test function for pending terminal
+	// Test with a real command that will execute - SIMPLE VERSION
+	// Test terminal in pending state with dummy data
+	(window as any).__vybeTestTerminalPending = function () {
 		const allElements = document.querySelectorAll('*');
 		for (const el of allElements) {
 			if ((el as any).__vybePane) {
@@ -576,47 +621,99 @@ if (typeof window !== 'undefined') {
 					return;
 				}
 
-				// Demo: Streaming markdown
+				const testOutput = `npm WARN deprecated inflight@1.0.6: This module is not supported
+npm WARN deprecated glob@7.2.3: Glob versions prior to v9 are no longer supported
+npm WARN deprecated rimraf@3.0.2: Rimraf versions prior to v4 are no longer supported
+
+added 57 packages, and audited 58 packages in 3s
+
+7 packages are looking for funding
+  run \`npm fund\` for details
+
+found 0 vulnerabilities
+
+Installation complete! ✓`;
+
 				(lastPage as any).renderContentParts([
 					{
-						kind: 'markdown' as const,
-						content: '# Streaming Demo\n\nThis markdown text is streaming character-by-character at 15ms per character. Watch it type out smoothly!',
-						isStreaming: true
+						kind: 'terminal' as const,
+						command: 'npm install express mongoose dotenv',
+						output: testOutput,
+						phase: 'pending' as const,
+						status: null,
+						permission: 'Ask Every Time',
+						isStreaming: false
 					}
 				]);
-
-				// After markdown completes, show streaming code block
-				setTimeout(() => {
-					const code = `function fibonacci(n: number): number {
-    if (n <= 1) return n;
-    return fibonacci(n - 1) + fibonacci(n - 2);
-}
-
-console.log(fibonacci(10));`;
-
-					(lastPage as any).renderContentParts([
-						{
-							kind: 'markdown' as const,
-							content: '# Streaming Demo\n\nThis markdown text is streaming character-by-character at 15ms per character. Watch it type out smoothly!',
-							isStreaming: false
-						},
-						{
-							kind: 'markdown' as const,
-							content: '\n\n**Now watch the code stream:**'
-						},
-						{
-							kind: 'codeBlock' as const,
-							language: 'typescript',
-							code: code,
-							isStreaming: true
-						}
-					]);
-				}, 2000);
 
 				return;
 			}
 		}
 	};
+
+	// Test with ls command
+	(window as any).__vybeTestTerminalLs = function () {
+		const allElements = document.querySelectorAll('*');
+		for (const el of allElements) {
+			if ((el as any).__vybePane) {
+				const pane = (el as any).__vybePane as VybeChatViewPane;
+				const lastPage = Array.from((pane as any).messagePages.values()).pop();
+				if (!lastPage) {
+					return;
+				}
+
+				(lastPage as any).renderContentParts([
+					{
+						kind: 'terminal' as const,
+						command: 'ls -la',
+						output: '',
+						phase: 'pending' as const,
+						status: null,
+						permission: 'Ask Every Time',
+						isStreaming: false
+					}
+				]);
+
+				return;
+			}
+		}
+	};
+
+	// Test with git log command
+	// Test terminal with git log output (completed state)
+	(window as any).__vybeTestTerminalGit = function () {
+		const allElements = document.querySelectorAll('*');
+		for (const el of allElements) {
+			if ((el as any).__vybePane) {
+				const pane = (el as any).__vybePane as VybeChatViewPane;
+				const lastPage = Array.from((pane as any).messagePages.values()).pop();
+				if (!lastPage) {
+					return;
+				}
+
+				const gitOutput = `f9e9f35 (HEAD -> main, origin/main) Point 12 Patch v4: Shell-Free Execution
+c1afa9f Point 12 Patch v3: Strict Sandbox Hardening
+aba80a2 Point 12 Patch v2: Hardened Execution Sandbox
+d0c4cb2 Point 12 Patch: Fix Sandbox Mutating Command
+ebbe25e Point 12: Implemented Execution Sandbox Plane`;
+
+				(lastPage as any).renderContentParts([
+					{
+						kind: 'terminal' as const,
+						command: 'git log --oneline -5',
+						output: gitOutput,
+						phase: 'completed' as const,
+						status: 'success' as const,
+						permission: 'Ask Every Time',
+						isStreaming: false
+					}
+				]);
+
+				return;
+			}
+		}
+	};
+
 
 	// Test function for spacing inspection
 	(window as any).__vybeTestSpacing = function () {
@@ -823,6 +920,9 @@ Final paragraph. Inspect all transitions.`
 					return;
 				}
 
+				// Reset scroll state and position at bottom before starting
+				pane.resetScrollState();
+
 				// CONTENT DEFINITIONS
 				const thought1 = 'Analyzing your request and scanning the codebase for relevant files. Identifying key components that need refactoring. Checking type definitions and interface consistency across modules. Examining the architecture patterns used in the project. Looking for opportunities to improve code quality and maintainability. Reviewing best practices and design patterns. Preparing comprehensive analysis with specific recommendations. This will take a moment to ensure accuracy and completeness of the suggestions I provide.';
 
@@ -883,6 +983,34 @@ export class AuthMiddleware {
         }
     };
 }`;
+
+				const terminalCommand = 'cd /Users/neel/VYBE && npm run build && npm test -- --coverage';
+				const terminalOutput = `> vybe@1.0.0 build
+> tsc && webpack --mode production
+
+Compiled successfully!
+Build completed in 2.34s
+
+> vybe@1.0.0 test
+> jest --coverage
+
+ PASS  src/auth/__tests__/AuthMiddleware.test.ts
+ PASS  src/user/__tests__/UserManager.test.ts
+ PASS  src/database/__tests__/DatabaseManager.test.ts
+
+Test Suites: 3 passed, 3 total
+Tests:       24 passed, 24 total
+Snapshots:   0 total
+Time:        3.892 s
+Ran all test suites.
+
+Coverage summary:
+  Statements   : 94.2% ( 245/260 )
+  Branches     : 88.5% ( 92/104 )
+  Functions    : 95.1% ( 77/81 )
+  Lines        : 94.8% ( 238/251 )
+
+All tests passed! ✓`;
 
 				const textEdit1Original = `class UserManager {
     private users = [];
@@ -1155,7 +1283,7 @@ All changes are ready to commit! 🎉`;
 
 							const cb1Time = codeBlock1.split('\n').length * 70 + 500;
 
-							// PHASE 5: Complete code, stream text edit (100 lines)
+							// PHASE 5: Complete code, stream terminal
 							setTimeout(() => {
 								(lastPage as any).renderContentParts([
 									{
@@ -1182,25 +1310,20 @@ All changes are ready to commit! 🎉`;
 										isStreaming: false
 									},
 									{
-										kind: 'textEdit' as const,
-										fileName: 'userManager.ts',
-										filePath: '/src/userManager.ts',
-										originalContent: textEdit1Original,
-										modifiedContent: textEdit1Modified,
-										streamingContent: textEdit1Modified,
-										language: 'typescript',
-										addedLines: 78,
-										deletedLines: 6,
-										isApplied: false,
-										isLoading: true,
+										kind: 'terminal' as const,
+										command: terminalCommand,
+										output: terminalOutput,
+										phase: 'running' as const,
+										status: null,
+										permission: 'Ask Every Time',
 										isStreaming: true
 									}
 								]);
-								pane.scrollToShowLatestContent(); // Scroll to show text edit 1
+								pane.scrollToShowLatestContent(); // Scroll to show terminal
 
-								const te1Time = textEdit1Modified.split('\n').length * 70 + 1000;
+								const terminalTime = terminalOutput.split('\n').length * 100 + 500;
 
-								// PHASE 6: Complete text edit, show thought3
+								// PHASE 6: Complete terminal, stream text edit (100 lines)
 								setTimeout(() => {
 									(lastPage as any).renderContentParts([
 										{
@@ -1227,30 +1350,34 @@ All changes are ready to commit! 🎉`;
 											isStreaming: false
 										},
 										{
+											kind: 'terminal' as const,
+											command: terminalCommand,
+											output: terminalOutput,
+											phase: 'completed' as const,
+											status: 'success' as const,
+											permission: 'Ask Every Time',
+											isStreaming: false
+										},
+										{
 											kind: 'textEdit' as const,
 											fileName: 'userManager.ts',
 											filePath: '/src/userManager.ts',
 											originalContent: textEdit1Original,
 											modifiedContent: textEdit1Modified,
+											streamingContent: textEdit1Modified,
 											language: 'typescript',
 											addedLines: 78,
 											deletedLines: 6,
 											isApplied: false,
-											isLoading: false,
-											isStreaming: false
-										},
-										{
-											kind: 'thinking' as const,
-											value: thought3,
-											duration: 0,
+											isLoading: true,
 											isStreaming: true
 										}
 									]);
-									pane.scrollToShowLatestContent(); // Scroll to show thought3
+									pane.scrollToShowLatestContent(); // Scroll to show text edit 1
 
-									const t3Time = thought3.length * 15 + 500;
+									const te1Time = textEdit1Modified.split('\n').length * 70 + 1000;
 
-									// PHASE 7: Complete thought3, stream text edit 2
+									// PHASE 7: Complete text edit, show thought3
 									setTimeout(() => {
 										(lastPage as any).renderContentParts([
 											{
@@ -1277,6 +1404,15 @@ All changes are ready to commit! 🎉`;
 												isStreaming: false
 											},
 											{
+												kind: 'terminal' as const,
+												command: terminalCommand,
+												output: terminalOutput,
+												phase: 'completed' as const,
+												status: 'success' as const,
+												permission: 'Ask Every Time',
+												isStreaming: false
+											},
+											{
 												kind: 'textEdit' as const,
 												fileName: 'userManager.ts',
 												filePath: '/src/userManager.ts',
@@ -1292,29 +1428,15 @@ All changes are ready to commit! 🎉`;
 											{
 												kind: 'thinking' as const,
 												value: thought3,
-												duration: t3Time,
-												isStreaming: false
-											},
-											{
-												kind: 'textEdit' as const,
-												fileName: 'database.ts',
-												filePath: '/src/database.ts',
-												originalContent: '',
-												modifiedContent: textEdit2Modified,
-												streamingContent: textEdit2Modified,
-												language: 'typescript',
-												addedLines: 58,
-												deletedLines: 0,
-												isApplied: false,
-												isLoading: true,
+												duration: 0,
 												isStreaming: true
 											}
 										]);
-										pane.scrollToShowLatestContent(); // Scroll to show text edit 2
+										pane.scrollToShowLatestContent(); // Scroll to show thought3
 
-										const te2Time = textEdit2Modified.split('\n').length * 70 + 1000;
+										const t3Time = thought3.length * 15 + 500;
 
-										// PHASE 8: Complete text edit 2, show summary markdown
+										// PHASE 8: Complete thought3, stream text edit 2
 										setTimeout(() => {
 											(lastPage as any).renderContentParts([
 												{
@@ -1338,6 +1460,15 @@ All changes are ready to commit! 🎉`;
 													kind: 'codeBlock' as const,
 													language: 'typescript',
 													code: codeBlock1,
+													isStreaming: false
+												},
+												{
+													kind: 'terminal' as const,
+													command: terminalCommand,
+													output: terminalOutput,
+													phase: 'completed' as const,
+													status: 'success' as const,
+													permission: 'Ask Every Time',
 													isStreaming: false
 												},
 												{
@@ -1365,23 +1496,97 @@ All changes are ready to commit! 🎉`;
 													filePath: '/src/database.ts',
 													originalContent: '',
 													modifiedContent: textEdit2Modified,
+													streamingContent: textEdit2Modified,
 													language: 'typescript',
 													addedLines: 58,
 													deletedLines: 0,
 													isApplied: false,
-													isLoading: false,
-													isStreaming: false
-												},
-												{
-													kind: 'markdown' as const,
-													content: markdownSummary,
+													isLoading: true,
 													isStreaming: true
 												}
 											]);
-											pane.scrollToShowLatestContent(); // Scroll to show summary
-										}, te2Time);
-									}, t3Time);
-								}, te1Time);
+											pane.scrollToShowLatestContent(); // Scroll to show text edit 2
+
+											const te2Time = textEdit2Modified.split('\n').length * 70 + 1000;
+
+											// PHASE 9: Complete text edit 2, show summary markdown
+											setTimeout(() => {
+												(lastPage as any).renderContentParts([
+													{
+														kind: 'thinking' as const,
+														value: thought1,
+														duration: t1Time,
+														isStreaming: false
+													},
+													{
+														kind: 'markdown' as const,
+														content: markdown1,
+														isStreaming: false
+													},
+													{
+														kind: 'thinking' as const,
+														value: thought2,
+														duration: t2Time,
+														isStreaming: false
+													},
+													{
+														kind: 'codeBlock' as const,
+														language: 'typescript',
+														code: codeBlock1,
+														isStreaming: false
+													},
+													{
+														kind: 'terminal' as const,
+														command: terminalCommand,
+														output: terminalOutput,
+														phase: 'completed' as const,
+														status: 'success' as const,
+														permission: 'Ask Every Time',
+														isStreaming: false
+													},
+													{
+														kind: 'textEdit' as const,
+														fileName: 'userManager.ts',
+														filePath: '/src/userManager.ts',
+														originalContent: textEdit1Original,
+														modifiedContent: textEdit1Modified,
+														language: 'typescript',
+														addedLines: 78,
+														deletedLines: 6,
+														isApplied: false,
+														isLoading: false,
+														isStreaming: false
+													},
+													{
+														kind: 'thinking' as const,
+														value: thought3,
+														duration: t3Time,
+														isStreaming: false
+													},
+													{
+														kind: 'textEdit' as const,
+														fileName: 'database.ts',
+														filePath: '/src/database.ts',
+														originalContent: '',
+														modifiedContent: textEdit2Modified,
+														language: 'typescript',
+														addedLines: 58,
+														deletedLines: 0,
+														isApplied: false,
+														isLoading: false,
+														isStreaming: false
+													},
+													{
+														kind: 'markdown' as const,
+														content: markdownSummary,
+														isStreaming: true
+													}
+												]);
+												pane.scrollToShowLatestContent(); // Scroll to show summary
+											}, te2Time);
+										}, t3Time);
+									}, te1Time);
+								}, terminalTime);
 							}, cb1Time);
 						}, t2Time);
 					}, m1Time);

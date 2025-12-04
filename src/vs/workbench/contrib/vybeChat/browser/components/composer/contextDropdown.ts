@@ -59,8 +59,8 @@ export class ContextDropdown extends Disposable {
 		// Detect theme
 		const isDark = isDarkTheme(this.themeService, this.anchorElement);
 
-		// Theme colors matching other dropdowns
-		const bgColor = isDark ? '#1e1f21' : '#f8f8f9';
+		// Theme colors - use text edit header colors
+		const bgColor = isDark ? '#212427' : '#eceff2';
 		const borderColor = isDark ? '#383838' : '#d9d9d9';
 		const textColor = isDark ? 'rgba(228, 228, 228, 0.92)' : 'rgba(51, 51, 51, 0.9)';
 

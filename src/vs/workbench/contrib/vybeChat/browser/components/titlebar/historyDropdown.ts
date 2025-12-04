@@ -10,7 +10,7 @@ import { DomScrollableElement } from '../../../../../../base/browser/ui/scrollba
 import { ScrollbarVisibility } from '../../../../../../base/common/scrollable.js';
 import { VYBE_CHAT_NEW_CHAT_LABEL } from '../../../common/vybeChatConstants.js';
 import { IThemeService } from '../../../../../../platform/theme/common/themeService.js';
-import { quickInputBackground, quickInputForeground, quickInputListFocusBackground, pickerGroupBorder, pickerGroupForeground, widgetBorder } from '../../../../../../platform/theme/common/colorRegistry.js';
+import { quickInputForeground, quickInputListFocusBackground, pickerGroupBorder, pickerGroupForeground, widgetBorder } from '../../../../../../platform/theme/common/colorRegistry.js';
 
 export interface ChatHistoryItem {
 	id: string;
@@ -188,9 +188,9 @@ export class HistoryDropdown extends Disposable {
 			return;
 		}
 
-		// Get theme colors (same as command palette)
+		// Get theme colors - use text edit header colors
 		const theme = this.themeService.getColorTheme();
-		const bgColor = theme.getColor(quickInputBackground)?.toString() || (this.isDarkTheme() ? '#1e1f21' : '#f8f8f9');
+		const bgColor = this.isDarkTheme() ? '#212427' : '#eceff2';
 		const borderColor = theme.getColor(widgetBorder)?.toString() || (this.isDarkTheme() ? '#383838' : '#d9d9d9');
 		const textColor = theme.getColor(quickInputForeground)?.toString() || (this.isDarkTheme() ? '#cccccc' : '#333333');
 

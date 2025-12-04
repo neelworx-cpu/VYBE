@@ -100,12 +100,12 @@ export class AgentModeDropdown extends Disposable {
 			this.dropdownContainer.style.transform = 'translateY(-100%)';
 		}
 
-		// Inner container with background and border - matches history dropdown
+		// Inner container with background and border - use text edit header colors
 		const innerContainer = append(this.dropdownContainer, $('.agent-mode-dropdown-inner'));
 		innerContainer.style.cssText = `
 			box-sizing: border-box;
 			border-radius: 6px;
-			background-color: ${isDarkTheme ? '#1e1f21' : '#f8f8f9'};
+			background-color: ${isDarkTheme ? '#212427' : '#eceff2'};
 			border: 1px solid ${isDarkTheme ? '#383838' : '#d9d9d9'};
 			align-items: stretch;
 			font-family: -apple-system, "system-ui", sans-serif;

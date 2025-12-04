@@ -199,22 +199,22 @@ export class CompositeBarActionViewItem extends BaseActionViewItem {
 
 			if (!isCompositeBarActionTab) {
 				// Original styling for non-composite-bar-action-tab items
-				if (this.options.icon) {
-					const foreground = this._action.checked ? colors.activeForegroundColor : colors.inactiveForegroundColor;
-					if (this.compositeBarActionItem.iconUrl) {
-						// Apply background color to activity bar item provided with iconUrls
-						this.label.style.backgroundColor = foreground ? foreground.toString() : '';
-						this.label.style.color = '';
-					} else {
-						// Apply foreground color to activity bar items provided with codicons
-						this.label.style.color = foreground ? foreground.toString() : '';
-						this.label.style.backgroundColor = '';
-					}
+			if (this.options.icon) {
+				const foreground = this._action.checked ? colors.activeForegroundColor : colors.inactiveForegroundColor;
+				if (this.compositeBarActionItem.iconUrl) {
+					// Apply background color to activity bar item provided with iconUrls
+					this.label.style.backgroundColor = foreground ? foreground.toString() : '';
+					this.label.style.color = '';
 				} else {
-					const foreground = this._action.checked ? colors.activeForegroundColor : colors.inactiveForegroundColor;
-					const borderBottomColor = this._action.checked ? colors.activeBorderBottomColor : null;
+					// Apply foreground color to activity bar items provided with codicons
 					this.label.style.color = foreground ? foreground.toString() : '';
-					this.label.style.borderBottomColor = borderBottomColor ? borderBottomColor.toString() : '';
+					this.label.style.backgroundColor = '';
+				}
+			} else {
+				const foreground = this._action.checked ? colors.activeForegroundColor : colors.inactiveForegroundColor;
+				const borderBottomColor = this._action.checked ? colors.activeBorderBottomColor : null;
+				this.label.style.color = foreground ? foreground.toString() : '';
+				this.label.style.borderBottomColor = borderBottomColor ? borderBottomColor.toString() : '';
 				}
 			} else {
 				// For composite-bar-action-tab, only set border-bottom-color to transparent for active

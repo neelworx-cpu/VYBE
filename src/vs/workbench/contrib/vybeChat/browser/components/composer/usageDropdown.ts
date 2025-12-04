@@ -70,7 +70,7 @@ export class UsageDropdown extends Disposable {
 		this.dropdownElement.style.boxSizing = 'border-box';
 		this.dropdownElement.style.padding = '0';
 		this.dropdownElement.style.borderRadius = '6px';
-		this.dropdownElement.style.backgroundColor = isDark ? '#1e1f21' : '#f8f8f9';
+		this.dropdownElement.style.backgroundColor = isDark ? '#212427' : '#eceff2';
 		// Match border styling from model/agent dropdowns
 		this.dropdownElement.style.border = isDark ? '1px solid #383838' : '1px solid #d9d9d9';
 		this.dropdownElement.style.alignItems = 'stretch';

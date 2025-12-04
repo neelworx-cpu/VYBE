@@ -118,11 +118,11 @@ export class ModelDropdown extends Disposable {
 		innerContainer.setAttribute('tabindex', '0');
 		innerContainer.setAttribute('data-testid', 'model-picker-menu');
 		innerContainer.style.cssText = `
-			box-sizing: border-box;
-			border-radius: 6px;
-			background-color: ${isDarkTheme ? '#1e1f21' : '#f8f8f9'};
-			border: 1px solid ${isDarkTheme ? '#383838' : '#d9d9d9'};
-			align-items: stretch;
+		box-sizing: border-box;
+		border-radius: 6px;
+		background-color: ${isDarkTheme ? '#212427' : '#eceff2'};
+		border: 1px solid ${isDarkTheme ? '#383838' : '#d9d9d9'};
+		align-items: stretch;
 			font-family: -apple-system, "system-ui", sans-serif;
 			font-size: 12px;
 			display: flex;
