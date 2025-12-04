@@ -19,30 +19,39 @@ export class VybeChatThinkingPart extends VybeChatContentPart {
 	private contentElement: HTMLElement | undefined; // Now the scrollable container itself
 	private thoughtTextElement: HTMLElement | undefined;
 	private durationTextElement: HTMLElement | undefined;
+	private textContentElement: HTMLElement | undefined; // The actual text div for streaming
 
 	private isExpanded = false;
 	private isStreaming = false;
 	private currentContent: string = '';
+	private targetContent: string = ''; // Full content for streaming towards
 	private duration: number = 0;
+	private streamingIntervalId: ReturnType<typeof setTimeout> | null = null;
+	private onStreamingUpdate?: () => void; // Callback for parent to handle scrolling
 
 	constructor(
 		content: IVybeChatThinkingContent
 	) {
 		super('thinking');
-		this.currentContent = Array.isArray(content.value) ? content.value.join('\n\n') : content.value;
+		this.targetContent = Array.isArray(content.value) ? content.value.join('\n\n') : content.value;
+		this.currentContent = content.isStreaming ? '' : this.targetContent; // Start empty if streaming
 		this.duration = content.duration || 0;
 		this.isStreaming = content.isStreaming ?? false;
 	}
 
+	public setStreamingUpdateCallback(callback: () => void): void {
+		this.onStreamingUpdate = callback;
+	}
+
 	protected createDomNode(): HTMLElement {
-		// Main container with consistent padding (6px = 9px - 3px for +3px content width on each side)
+		// Main container - NO horizontal padding (AI response area already has 18px)
 		const outerContainer = $('.vybe-chat-thinking-part', {
 			'data-message-role': 'ai',
 			'data-message-kind': 'thinking',
 			style: `
 				display: block;
 				outline: none;
-				padding: 0px 6px;
+				padding: 0;
 				background-color: var(--vscode-sideBar-background);
 				opacity: 1;
 				z-index: 99;
@@ -217,7 +226,7 @@ export class VybeChatThinkingPart extends VybeChatContentPart {
 		// Scrollable content container with HIDDEN scrollbar (but scrolling still works)
 		this.contentElement = $('.think-content-scrollable', {
 			style: `
-				height: 144px;
+				height: auto;
 				max-height: 144px;
 				overflow-y: auto;
 				overflow-x: hidden;
@@ -268,7 +277,7 @@ export class VybeChatThinkingPart extends VybeChatContentPart {
 	}
 
 	/**
-	 * Render thinking content as PLAIN TEXT (for debugging scrolling).
+	 * Render thinking content as PLAIN TEXT with streaming animation.
 	 */
 	private renderThinkingContent(container: HTMLElement): void {
 		// Clear existing
@@ -277,15 +286,20 @@ export class VybeChatThinkingPart extends VybeChatContentPart {
 		}
 
 		// Render as plain text (inherit color from parent)
-		const textDiv = $('div', {
+		this.textContentElement = $('div', {
 			style: `
 				white-space: pre-wrap;
 				word-break: break-word;
 				line-height: 1.4;
 			`
 		});
-		textDiv.textContent = this.currentContent;
-		container.appendChild(textDiv);
+		this.textContentElement.textContent = this.currentContent;
+		container.appendChild(this.textContentElement);
+
+		// Start streaming animation if streaming
+		if (this.isStreaming && this.targetContent && this.targetContent !== this.currentContent) {
+			this.startStreamingAnimation();
+		}
 
 		// AUTO-SCROLL to bottom during streaming (simple CSS scrolling)
 		if (this.isStreaming && this.contentElement) {
@@ -295,6 +309,54 @@ export class VybeChatThinkingPart extends VybeChatContentPart {
 				}
 			}, 50);
 		}
+	}
+
+	/**
+	 * Stream thinking content character by character (legible speed).
+	 */
+	private startStreamingAnimation(): void {
+		// Clear any existing animation
+		if (this.streamingIntervalId) {
+			clearTimeout(this.streamingIntervalId);
+			this.streamingIntervalId = null;
+		}
+
+		const fullText = this.targetContent;
+		let charIndex = this.currentContent.length; // Start from where we left off
+		const CHAR_DELAY_MS = 15; // 15ms per character (fast but legible)
+
+		const streamNextChar = () => {
+			if (charIndex >= fullText.length || !this.isStreaming) {
+				// Streaming complete
+				this.streamingIntervalId = null;
+				return;
+			}
+
+			// Add next character
+			this.currentContent = fullText.substring(0, charIndex + 1);
+			charIndex++;
+
+			// Update text display
+			if (this.textContentElement) {
+				this.textContentElement.textContent = this.currentContent;
+			}
+
+			// Auto-scroll to bottom (internal)
+			if (this.contentElement && this.contentElement.scrollHeight > this.contentElement.clientHeight) {
+				this.contentElement.scrollTop = this.contentElement.scrollHeight;
+			}
+
+			// Notify parent for page-level scroll
+			if (this.onStreamingUpdate) {
+				this.onStreamingUpdate();
+			}
+
+			// Schedule next character
+			this.streamingIntervalId = setTimeout(streamNextChar, CHAR_DELAY_MS);
+		};
+
+		// Start streaming
+		this.streamingIntervalId = setTimeout(streamNextChar, CHAR_DELAY_MS);
 	}
 
 	/**
@@ -340,12 +402,21 @@ export class VybeChatThinkingPart extends VybeChatContentPart {
 		const isNowStreaming = newContent.isStreaming ?? false;
 
 		// CRITICAL: Only update if content actually changed
-		const contentChanged = this.currentContent !== newText;
+		const contentChanged = this.targetContent !== newText;
 
 		// Update state
-		this.currentContent = newText;
+		this.targetContent = newText; // Target for streaming
 		this.duration = newContent.duration || this.duration;
 		this.isStreaming = isNowStreaming;
+
+		// If streaming, animate towards target; if complete, show all at once
+		if (!isNowStreaming) {
+			this.currentContent = newText; // Show complete text immediately
+			if (this.streamingIntervalId) {
+				clearTimeout(this.streamingIntervalId);
+				this.streamingIntervalId = null;
+			}
+		}
 
 		// Re-render content ONLY if it changed
 		if (contentChanged) {
@@ -405,10 +476,16 @@ export class VybeChatThinkingPart extends VybeChatContentPart {
 		if (other.kind !== 'thinking') {
 			return false;
 		}
-		return (other as VybeChatThinkingPart).currentContent === this.currentContent;
+		return (other as VybeChatThinkingPart).targetContent === this.targetContent;
 	}
 
 	override dispose(): void {
+		// Clean up streaming interval
+		if (this.streamingIntervalId) {
+			clearTimeout(this.streamingIntervalId);
+			this.streamingIntervalId = null;
+		}
+
 		super.dispose();
 		this.container = undefined;
 		this.headerElement = undefined;
@@ -416,5 +493,6 @@ export class VybeChatThinkingPart extends VybeChatContentPart {
 		this.contentElement = undefined;
 		this.thoughtTextElement = undefined;
 		this.durationTextElement = undefined;
+		this.textContentElement = undefined;
 	}
 }

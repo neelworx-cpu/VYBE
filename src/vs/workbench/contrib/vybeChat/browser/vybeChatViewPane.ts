@@ -232,6 +232,10 @@ export class VybeChatViewPane extends ViewPane {
 					page.updateContent(content, pills, images, agentMode, modelState);
 				}
 				// TODO: Send updated message to AI service
+			},
+			onContentUpdate: () => {
+				// Smart scroll when content changes (streaming, new elements, etc.)
+				this.scrollToShowLatestContent();
 			}
 		};
 
@@ -262,6 +266,35 @@ export class VybeChatViewPane extends ViewPane {
 
 		// TODO: Send message to AI service and start streaming
 		// For now, message stays in streaming state until stop button is clicked
+	}
+
+	/**
+	 * Smart auto-scroll: Only scrolls if new content extends beyond visible viewport.
+	 * This keeps the latest content visible during streaming without unnecessary scrolling.
+	 */
+	public scrollToShowLatestContent(): void {
+		if (!this.chatArea) {
+			return;
+		}
+
+		requestAnimationFrame(() => {
+			if (!this.chatArea) {
+				return;
+			}
+
+			const chatAreaHeight = this.chatArea.clientHeight;
+			const chatAreaScrollTop = this.chatArea.scrollTop;
+			const chatAreaScrollHeight = this.chatArea.scrollHeight;
+
+			// Calculate how much content is below the current view
+			const contentBelowView = chatAreaScrollHeight - (chatAreaScrollTop + chatAreaHeight);
+
+			// Only scroll if there's content below the view (threshold: 50px)
+			// This prevents unnecessary scrolling when content is already fully visible
+			if (contentBelowView > 50) {
+				this.chatArea.scrollTop = chatAreaScrollHeight;
+			}
+		});
 	}
 
 	private handleStopGeneration(): void {
@@ -532,6 +565,59 @@ if (typeof window !== 'undefined') {
 		}
 	};
 
+	// Test function for streaming markdown and code blocks
+	(window as any).__vybeTestStreaming = function () {
+		const allElements = document.querySelectorAll('*');
+		for (const el of allElements) {
+			if ((el as any).__vybePane) {
+				const pane = (el as any).__vybePane as VybeChatViewPane;
+				const lastPage = Array.from((pane as any).messagePages.values()).pop();
+				if (!lastPage) {
+					return;
+				}
+
+				// Demo: Streaming markdown
+				(lastPage as any).renderContentParts([
+					{
+						kind: 'markdown' as const,
+						content: '# Streaming Demo\n\nThis markdown text is streaming character-by-character at 15ms per character. Watch it type out smoothly!',
+						isStreaming: true
+					}
+				]);
+
+				// After markdown completes, show streaming code block
+				setTimeout(() => {
+					const code = `function fibonacci(n: number): number {
+    if (n <= 1) return n;
+    return fibonacci(n - 1) + fibonacci(n - 2);
+}
+
+console.log(fibonacci(10));`;
+
+					(lastPage as any).renderContentParts([
+						{
+							kind: 'markdown' as const,
+							content: '# Streaming Demo\n\nThis markdown text is streaming character-by-character at 15ms per character. Watch it type out smoothly!',
+							isStreaming: false
+						},
+						{
+							kind: 'markdown' as const,
+							content: '\n\n**Now watch the code stream:**'
+						},
+						{
+							kind: 'codeBlock' as const,
+							language: 'typescript',
+							code: code,
+							isStreaming: true
+						}
+					]);
+				}, 2000);
+
+				return;
+			}
+		}
+	};
+
 	// Test function for spacing inspection
 	(window as any).__vybeTestSpacing = function () {
 		// Find any element with __vybePane attached
@@ -724,5 +810,585 @@ Final paragraph. Inspect all transitions.`
 				);
 			}, index * 300); // 300ms delay between each file
 		});
+	};
+
+	// Comprehensive streaming test - shows all content parts with streaming
+	(window as any).__vybeTestStreaming = function () {
+		const allElements = document.querySelectorAll('*');
+		for (const el of allElements) {
+			if ((el as any).__vybePane) {
+				const pane = (el as any).__vybePane as VybeChatViewPane;
+				const lastPage = Array.from((pane as any).messagePages.values()).pop();
+				if (!lastPage) {
+					return;
+				}
+
+				// CONTENT DEFINITIONS
+				const thought1 = 'Analyzing your request and scanning the codebase for relevant files. Identifying key components that need refactoring. Checking type definitions and interface consistency across modules. Examining the architecture patterns used in the project. Looking for opportunities to improve code quality and maintainability. Reviewing best practices and design patterns. Preparing comprehensive analysis with specific recommendations. This will take a moment to ensure accuracy and completeness of the suggestions I provide.';
+
+				const markdown1 = `# Code Analysis Complete
+
+I've thoroughly analyzed your codebase and identified several areas for improvement. Here's what I found:
+
+## Key Findings
+
+| Component | Issues Found | Priority |
+|-----------|--------------|----------|
+| UserManager | Type safety | HIGH |
+| Auth | Error handling | MEDIUM |
+| API | Validation | HIGH |
+
+### Recommendations
+
+1. **Add TypeScript interfaces** for better type safety
+2. **Implement proper error handling** with try-catch blocks
+3. **Add input validation** to prevent security issues
+4. **Use dependency injection** for better testability
+
+Check out the [TypeScript Handbook](https://www.typescriptlang.org/docs/handbook/intro.html) for more information.
+
+Let me start implementing these changes:`;
+
+				const thought2 = 'Preparing the authentication middleware implementation. Considering security best practices for JWT token handling. Planning proper error handling for expired and invalid tokens. Designing role-based access control system.';
+
+				const codeBlock1 = `// Authentication middleware implementation
+import { Request, Response, NextFunction } from 'express';
+import jwt from 'jsonwebtoken';
+
+interface JWTPayload {
+    userId: string;
+    email: string;
+    role: 'admin' | 'user';
+}
+
+export class AuthMiddleware {
+    private secret: string;
+
+    constructor(secret: string) {
+        this.secret = secret;
+    }
+
+    verifyToken = async (req: Request, res: Response, next: NextFunction) => {
+        try {
+            const token = req.headers.authorization?.split(' ')[1];
+            if (!token) {
+                return res.status(401).json({ error: 'No token' });
+            }
+
+            const decoded = jwt.verify(token, this.secret) as JWTPayload;
+            (req as any).user = decoded;
+            next();
+        } catch (error) {
+            res.status(401).json({ error: 'Invalid token' });
+        }
+    };
+}`;
+
+				const textEdit1Original = `class UserManager {
+    private users = [];
+
+    addUser(user) {
+        this.users.push(user);
+    }
+}`;
+
+				const textEdit1Modified = `interface User {
+    id: string;
+    name: string;
+    email: string;
+    role: 'admin' | 'user' | 'guest';
+    createdAt: Date;
+}
+
+interface UserManagerConfig {
+    maxUsers: number;
+    enableCache: boolean;
+}
+
+class UserManager {
+    private users: Map<string, User>;
+    private config: UserManagerConfig;
+    private cache: Map<string, User>;
+
+    constructor(config: UserManagerConfig) {
+        this.users = new Map();
+        this.config = config;
+        this.cache = new Map();
+    }
+
+    addUser(user: User): boolean {
+        if (this.users.size >= this.config.maxUsers) {
+            throw new Error('Max users reached');
+        }
+
+        this.users.set(user.id, user);
+
+        if (this.config.enableCache) {
+            this.cache.set(user.id, user);
+        }
+
+        return true;
+    }
+
+    getUser(id: string): User | undefined {
+        if (this.config.enableCache && this.cache.has(id)) {
+            return this.cache.get(id);
+        }
+
+        const user = this.users.get(id);
+
+        if (user && this.config.enableCache) {
+            this.cache.set(id, user);
+        }
+
+        return user;
+    }
+
+    updateUser(id: string, updates: Partial<User>): boolean {
+        const user = this.users.get(id);
+        if (!user) return false;
+
+        const updated = { ...user, ...updates };
+        this.users.set(id, updated);
+
+        if (this.config.enableCache) {
+            this.cache.set(id, updated);
+        }
+
+        return true;
+    }
+
+    deleteUser(id: string): boolean {
+        const deleted = this.users.delete(id);
+        if (deleted && this.config.enableCache) {
+            this.cache.delete(id);
+        }
+        return deleted;
+    }
+
+    getAllUsers(): User[] {
+        return Array.from(this.users.values());
+    }
+
+    clearCache(): void {
+        this.cache.clear();
+    }
+}`;
+
+				const thought3 = 'Excellent progress! Now preparing database integration layer with proper connection pooling and error recovery mechanisms.';
+
+				const textEdit2Modified = `import { Pool, QueryResult } from 'pg';
+
+interface DatabaseConfig {
+    host: string;
+    port: number;
+    database: string;
+    user: string;
+    password: string;
+    max: number;
+}
+
+export class DatabaseManager {
+    private pool: Pool;
+
+    constructor(config: DatabaseConfig) {
+        this.pool = new Pool(config);
+        this.setupErrorHandlers();
+    }
+
+    private setupErrorHandlers(): void {
+        this.pool.on('error', (err) => {
+            console.error('Unexpected database error:', err);
+        });
+    }
+
+    async query<T = any>(text: string, params?: any[]): Promise<QueryResult<T>> {
+        const client = await this.pool.connect();
+        try {
+            const result = await client.query<T>(text, params);
+            return result;
+        } catch (error) {
+            console.error('Query error:', error);
+            throw error;
+        } finally {
+            client.release();
+        }
+    }
+
+    async transaction<T>(callback: (client: any) => Promise<T>): Promise<T> {
+        const client = await this.pool.connect();
+        try {
+            await client.query('BEGIN');
+            const result = await callback(client);
+            await client.query('COMMIT');
+            return result;
+        } catch (error) {
+            await client.query('ROLLBACK');
+            throw error;
+        } finally {
+            client.release();
+        }
+    }
+
+    async close(): Promise<void> {
+        await this.pool.end();
+    }
+}`;
+
+				const markdownSummary = `# Implementation Complete!
+
+## Summary of Changes
+
+I've successfully implemented the following improvements:
+
+### 1. Authentication System
+- JWT-based authentication middleware
+- Role-based access control
+- Proper error handling
+
+### 2. User Management
+- Type-safe User interface
+- Configuration-based UserManager
+- Caching system for performance
+- Full CRUD operations
+
+### 3. Database Layer
+- Connection pooling with pg
+- Transaction support
+- Error recovery mechanisms
+
+## Next Steps
+
+You can now:
+1. Run the application with \`npm start\`
+2. Test the authentication endpoints
+3. Verify user management operations
+4. Check database connectivity
+
+All changes are ready to commit! 🎉`;
+
+				// PHASE 1: Thinking block (15s)
+				(lastPage as any).renderContentParts([
+					{
+						kind: 'thinking' as const,
+						value: thought1,
+						duration: 0,
+						isStreaming: true
+					}
+				]);
+				pane.scrollToShowLatestContent(); // Scroll to show thinking block
+
+				const t1Time = thought1.length * 15 + 500;
+
+				// PHASE 2: Complete thinking, stream markdown
+				setTimeout(() => {
+					(lastPage as any).renderContentParts([
+						{
+							kind: 'thinking' as const,
+							value: thought1,
+							duration: t1Time,
+							isStreaming: false
+						},
+						{
+							kind: 'markdown' as const,
+							content: markdown1,
+							isStreaming: true
+						}
+					]);
+					pane.scrollToShowLatestContent(); // Scroll to show markdown
+
+					const m1Time = markdown1.length * 15 + 500;
+
+					// PHASE 3: Complete markdown, stream thought2
+					setTimeout(() => {
+						(lastPage as any).renderContentParts([
+							{
+								kind: 'thinking' as const,
+								value: thought1,
+								duration: t1Time,
+								isStreaming: false
+							},
+							{
+								kind: 'markdown' as const,
+								content: markdown1,
+								isStreaming: false
+							},
+							{
+								kind: 'thinking' as const,
+								value: thought2,
+								duration: 0,
+								isStreaming: true
+							}
+						]);
+						pane.scrollToShowLatestContent(); // Scroll to show thought2
+
+						const t2Time = thought2.length * 15 + 500;
+
+						// PHASE 4: Complete thought2, stream code block
+						setTimeout(() => {
+							(lastPage as any).renderContentParts([
+								{
+									kind: 'thinking' as const,
+									value: thought1,
+									duration: t1Time,
+									isStreaming: false
+								},
+								{
+									kind: 'markdown' as const,
+									content: markdown1,
+									isStreaming: false
+								},
+								{
+									kind: 'thinking' as const,
+									value: thought2,
+									duration: t2Time,
+									isStreaming: false
+								},
+								{
+									kind: 'codeBlock' as const,
+									language: 'typescript',
+									code: codeBlock1,
+									isStreaming: true
+								}
+							]);
+							pane.scrollToShowLatestContent(); // Scroll to show code block
+
+							const cb1Time = codeBlock1.split('\n').length * 70 + 500;
+
+							// PHASE 5: Complete code, stream text edit (100 lines)
+							setTimeout(() => {
+								(lastPage as any).renderContentParts([
+									{
+										kind: 'thinking' as const,
+										value: thought1,
+										duration: t1Time,
+										isStreaming: false
+									},
+									{
+										kind: 'markdown' as const,
+										content: markdown1,
+										isStreaming: false
+									},
+									{
+										kind: 'thinking' as const,
+										value: thought2,
+										duration: t2Time,
+										isStreaming: false
+									},
+									{
+										kind: 'codeBlock' as const,
+										language: 'typescript',
+										code: codeBlock1,
+										isStreaming: false
+									},
+									{
+										kind: 'textEdit' as const,
+										fileName: 'userManager.ts',
+										filePath: '/src/userManager.ts',
+										originalContent: textEdit1Original,
+										modifiedContent: textEdit1Modified,
+										streamingContent: textEdit1Modified,
+										language: 'typescript',
+										addedLines: 78,
+										deletedLines: 6,
+										isApplied: false,
+										isLoading: true,
+										isStreaming: true
+									}
+								]);
+								pane.scrollToShowLatestContent(); // Scroll to show text edit 1
+
+								const te1Time = textEdit1Modified.split('\n').length * 70 + 1000;
+
+								// PHASE 6: Complete text edit, show thought3
+								setTimeout(() => {
+									(lastPage as any).renderContentParts([
+										{
+											kind: 'thinking' as const,
+											value: thought1,
+											duration: t1Time,
+											isStreaming: false
+										},
+										{
+											kind: 'markdown' as const,
+											content: markdown1,
+											isStreaming: false
+										},
+										{
+											kind: 'thinking' as const,
+											value: thought2,
+											duration: t2Time,
+											isStreaming: false
+										},
+										{
+											kind: 'codeBlock' as const,
+											language: 'typescript',
+											code: codeBlock1,
+											isStreaming: false
+										},
+										{
+											kind: 'textEdit' as const,
+											fileName: 'userManager.ts',
+											filePath: '/src/userManager.ts',
+											originalContent: textEdit1Original,
+											modifiedContent: textEdit1Modified,
+											language: 'typescript',
+											addedLines: 78,
+											deletedLines: 6,
+											isApplied: false,
+											isLoading: false,
+											isStreaming: false
+										},
+										{
+											kind: 'thinking' as const,
+											value: thought3,
+											duration: 0,
+											isStreaming: true
+										}
+									]);
+									pane.scrollToShowLatestContent(); // Scroll to show thought3
+
+									const t3Time = thought3.length * 15 + 500;
+
+									// PHASE 7: Complete thought3, stream text edit 2
+									setTimeout(() => {
+										(lastPage as any).renderContentParts([
+											{
+												kind: 'thinking' as const,
+												value: thought1,
+												duration: t1Time,
+												isStreaming: false
+											},
+											{
+												kind: 'markdown' as const,
+												content: markdown1,
+												isStreaming: false
+											},
+											{
+												kind: 'thinking' as const,
+												value: thought2,
+												duration: t2Time,
+												isStreaming: false
+											},
+											{
+												kind: 'codeBlock' as const,
+												language: 'typescript',
+												code: codeBlock1,
+												isStreaming: false
+											},
+											{
+												kind: 'textEdit' as const,
+												fileName: 'userManager.ts',
+												filePath: '/src/userManager.ts',
+												originalContent: textEdit1Original,
+												modifiedContent: textEdit1Modified,
+												language: 'typescript',
+												addedLines: 78,
+												deletedLines: 6,
+												isApplied: false,
+												isLoading: false,
+												isStreaming: false
+											},
+											{
+												kind: 'thinking' as const,
+												value: thought3,
+												duration: t3Time,
+												isStreaming: false
+											},
+											{
+												kind: 'textEdit' as const,
+												fileName: 'database.ts',
+												filePath: '/src/database.ts',
+												originalContent: '',
+												modifiedContent: textEdit2Modified,
+												streamingContent: textEdit2Modified,
+												language: 'typescript',
+												addedLines: 58,
+												deletedLines: 0,
+												isApplied: false,
+												isLoading: true,
+												isStreaming: true
+											}
+										]);
+										pane.scrollToShowLatestContent(); // Scroll to show text edit 2
+
+										const te2Time = textEdit2Modified.split('\n').length * 70 + 1000;
+
+										// PHASE 8: Complete text edit 2, show summary markdown
+										setTimeout(() => {
+											(lastPage as any).renderContentParts([
+												{
+													kind: 'thinking' as const,
+													value: thought1,
+													duration: t1Time,
+													isStreaming: false
+												},
+												{
+													kind: 'markdown' as const,
+													content: markdown1,
+													isStreaming: false
+												},
+												{
+													kind: 'thinking' as const,
+													value: thought2,
+													duration: t2Time,
+													isStreaming: false
+												},
+												{
+													kind: 'codeBlock' as const,
+													language: 'typescript',
+													code: codeBlock1,
+													isStreaming: false
+												},
+												{
+													kind: 'textEdit' as const,
+													fileName: 'userManager.ts',
+													filePath: '/src/userManager.ts',
+													originalContent: textEdit1Original,
+													modifiedContent: textEdit1Modified,
+													language: 'typescript',
+													addedLines: 78,
+													deletedLines: 6,
+													isApplied: false,
+													isLoading: false,
+													isStreaming: false
+												},
+												{
+													kind: 'thinking' as const,
+													value: thought3,
+													duration: t3Time,
+													isStreaming: false
+												},
+												{
+													kind: 'textEdit' as const,
+													fileName: 'database.ts',
+													filePath: '/src/database.ts',
+													originalContent: '',
+													modifiedContent: textEdit2Modified,
+													language: 'typescript',
+													addedLines: 58,
+													deletedLines: 0,
+													isApplied: false,
+													isLoading: false,
+													isStreaming: false
+												},
+												{
+													kind: 'markdown' as const,
+													content: markdownSummary,
+													isStreaming: true
+												}
+											]);
+											pane.scrollToShowLatestContent(); // Scroll to show summary
+										}, te2Time);
+									}, t3Time);
+								}, te1Time);
+							}, cb1Time);
+						}, t2Time);
+					}, m1Time);
+				}, t1Time);
+
+				return;
+			}
+		}
 	};
 }

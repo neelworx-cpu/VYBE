@@ -47,6 +47,7 @@ export interface MessagePageOptions {
 	isStreaming?: boolean;
 	onStop?: () => void;
 	onComposerSend?: (content: string, pills: ContextPillData[], images: ImageAttachmentData[], agentMode: AgentMode, modelState: ModelDropdownState) => void;
+	onContentUpdate?: () => void; // Callback when content changes (for smart scrolling)
 	speechService?: ISpeechService;
 	instantiationService?: IInstantiationService;
 }
@@ -252,7 +253,7 @@ export class MessagePage extends Disposable {
 		this.aiResponseArea.style.cssText = `
 			flex: 1;
 			overflow: auto;
-			padding: 0 10px 16px 18px;
+			padding: 0 18px 16px 18px;
 			box-sizing: border-box;
 		`;
 		page.appendChild(this.aiResponseArea);
@@ -368,20 +369,36 @@ export class MessagePage extends Disposable {
 		}
 
 		switch (contentData.kind) {
-			case 'thinking':
-				return this._register(new VybeChatThinkingPart(contentData));
+			case 'thinking': {
+				const thinkingPart = this._register(new VybeChatThinkingPart(contentData));
 
-			case 'markdown':
+				// Wire up streaming callback for smart scrolling
+				if (thinkingPart && this.options.onContentUpdate) {
+					thinkingPart.setStreamingUpdateCallback(this.options.onContentUpdate);
+				}
+
+				return thinkingPart;
+			}
+
+			case 'markdown': {
 				if (!this.instantiationService) {
 					return null;
 				}
-				return this._register(new VybeChatMarkdownPart(contentData, this.markdownRendererService, this.instantiationService));
+				const markdownPart = this._register(new VybeChatMarkdownPart(contentData, this.markdownRendererService, this.instantiationService));
 
-			case 'codeBlock':
+				// Wire up streaming callback for smart scrolling
+				if (markdownPart && this.options.onContentUpdate) {
+					markdownPart.setStreamingUpdateCallback(this.options.onContentUpdate);
+				}
+
+				return markdownPart;
+			}
+
+			case 'codeBlock': {
 				if (!this.instantiationService || !this.modelService || !this.languageService || !this.clipboardService) {
 					return null;
 				}
-				return this._register(new VybeChatCodeBlockPart(
+				const codeBlockPart = this._register(new VybeChatCodeBlockPart(
 					contentData,
 					this.codeBlockIndex++,
 					this.instantiationService,
@@ -390,16 +407,30 @@ export class MessagePage extends Disposable {
 					this.clipboardService
 				));
 
-			case 'textEdit':
-				if (!this.instantiationService || !this.modelService || !this.languageService) {
+				// Wire up streaming callback for smart scrolling
+				if (codeBlockPart && this.options.onContentUpdate) {
+					codeBlockPart.setStreamingUpdateCallback(this.options.onContentUpdate);
+				}
+
+				return codeBlockPart;
+			}
+
+			case 'textEdit': {
+				if (!this.instantiationService) {
 					return null;
 				}
-				return this._register(new VybeChatTextEditPart(
-					contentData,
-					this.instantiationService,
-					this.modelService,
-					this.languageService
+				const textEditPart = this._register(this.instantiationService.createInstance(
+					VybeChatTextEditPart,
+					contentData
 				));
+
+				// Wire up streaming callback for smart scrolling
+				if (textEditPart && this.options.onContentUpdate) {
+					textEditPart.setStreamingUpdateCallback(this.options.onContentUpdate);
+				}
+
+				return textEditPart;
+			}
 
 			// TODO: Add more content types (errors, progress, etc.)
 

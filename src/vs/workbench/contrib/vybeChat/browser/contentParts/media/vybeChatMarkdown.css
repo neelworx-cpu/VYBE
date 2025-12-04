@@ -177,7 +177,13 @@
 
 .vybe-markdown-container-root .markdown-table thead,
 .vybe-markdown-container-root table thead {
-	background-color: rgba(128, 128, 128, 0.1);
+	background-color: #1a1d1f; /* VYBE Dark - matches code block/text edit header */
+}
+
+/* VYBE Light theme override */
+.vs .vybe-markdown-container-root .markdown-table thead,
+.vs .vybe-markdown-container-root table thead {
+	background-color: #f2f4f6; /* VYBE Light - matches code block/text edit header */
 }
 
 .vybe-markdown-container-root .markdown-table th,
@@ -186,7 +192,7 @@
 	padding: 6px 13px !important;
 	text-align: left !important;
 	font-weight: 600 !important;
-	background-color: transparent;
+	background-color: transparent; /* Inherit from thead */
 }
 
 .vybe-markdown-container-root .markdown-table td,
@@ -196,16 +202,23 @@
 	text-align: left !important;
 }
 
-/* Table rows */
+/* Table rows - use panel background */
 .vybe-markdown-container-root .markdown-table tr,
 .vybe-markdown-container-root table tr {
 	border: 1px solid var(--vscode-editorWidget-border);
+	background-color: var(--vscode-editor-background); /* Panel background for all body rows */
 }
 
-/* Alternate row coloring for better readability */
-.vybe-markdown-container-root .markdown-table tbody tr:nth-child(even),
-.vybe-markdown-container-root table tbody tr:nth-child(even) {
-	background-color: rgba(128, 128, 128, 0.05);
+/* Header row keeps its own background (overrides tr default) */
+.vybe-markdown-container-root .markdown-table thead tr,
+.vybe-markdown-container-root table thead tr {
+	background-color: transparent; /* Let thead background show through */
+}
+
+/* Remove alternate row coloring - all rows use panel background now */
+.vybe-markdown-container-root .markdown-table tbody tr,
+.vybe-markdown-container-root table tbody tr {
+	background-color: var(--vscode-editor-background); /* Panel background - consistent */
 }
 
 /* Horizontal rule */

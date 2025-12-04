@@ -8,6 +8,7 @@ import { $, addDisposableListener } from '../../../../../base/browser/dom.js';
 import { ICodeEditor } from '../../../../../editor/browser/editorBrowser.js';
 import { CodeEditorWidget } from '../../../../../editor/browser/widget/codeEditor/codeEditorWidget.js';
 import { IModelService } from '../../../../../editor/common/services/model.js';
+import { ITextModel } from '../../../../../editor/common/model.js';
 import { ILanguageService } from '../../../../../editor/common/languages/language.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { IClipboardService } from '../../../../../platform/clipboard/common/clipboardService.js';
@@ -19,6 +20,10 @@ import { IClipboardService } from '../../../../../platform/clipboard/common/clip
 export class VybeChatCodeBlockPart extends VybeChatContentPart {
 	private editor: ICodeEditor | null = null;
 	private currentContent: IVybeChatCodeBlockContent;
+	private targetCode: string = ''; // Full code for streaming towards
+	private isStreaming: boolean = false;
+	private streamingIntervalId: ReturnType<typeof setTimeout> | null = null;
+	private onStreamingUpdate?: () => void; // Callback for parent to handle scrolling
 	private editorContainer: HTMLElement | null = null;
 	private copyButton: HTMLElement | null = null;
 
@@ -32,6 +37,12 @@ export class VybeChatCodeBlockPart extends VybeChatContentPart {
 	) {
 		super('codeBlock');
 		this.currentContent = content;
+		this.targetCode = content.code;
+		this.isStreaming = content.isStreaming ?? false;
+	}
+
+	public setStreamingUpdateCallback(callback: () => void): void {
+		this.onStreamingUpdate = callback;
 	}
 
 	protected createDomNode(): HTMLElement {
@@ -55,11 +66,11 @@ export class VybeChatCodeBlockPart extends VybeChatContentPart {
 
 		// Position wrapper
 		const positionWrapper = $('div');
-		positionWrapper.style.cssText = 'position: relative;';
+		positionWrapper.style.cssText = 'position: relative; overflow: hidden;';
 
 		// Content container
 		const contentContainer = $('.composer-code-block-content');
-		contentContainer.style.cssText = 'display: block;';
+		contentContainer.style.cssText = 'display: block; overflow: hidden;';
 
 		// Scrollable container for Monaco editor
 		this.editorContainer = $('.scrollable-div-container.show-only-on-hover');
@@ -67,7 +78,13 @@ export class VybeChatCodeBlockPart extends VybeChatContentPart {
 		const lineHeight = 18;
 		const padding = 12; // Top + bottom
 		const height = lineCount * lineHeight + padding;
-		this.editorContainer.style.cssText = `height: ${height}px;`;
+		this.editorContainer.style.cssText = `
+			height: ${height}px;
+			min-height: ${height}px;
+			max-height: ${height}px;
+			overflow-y: hidden;
+			overflow-x: visible;
+		`;
 
 		// Create Monaco editor
 		this.createEditor(this.editorContainer);
@@ -89,8 +106,10 @@ export class VybeChatCodeBlockPart extends VybeChatContentPart {
 	private createEditor(container: HTMLElement): void {
 		// Create text model with proper language
 		const languageId = this.currentContent.language || 'plaintext';
+		// Start with empty content if streaming
+		const initialCode = this.isStreaming ? '' : this.currentContent.code;
 		const model = this.modelService.createModel(
-			this.currentContent.code,
+			initialCode,
 			this.languageService.createById(languageId),
 			undefined
 		);
@@ -104,18 +123,18 @@ export class VybeChatCodeBlockPart extends VybeChatContentPart {
 				lineNumbers: 'off', // No line numbers in simple code blocks
 				minimap: { enabled: false },
 				scrollBeyondLastLine: false,
-				wordWrap: 'off',
+				wordWrap: 'off', // No wrapping - horizontal scroll is necessary
 				fontSize: 12,
 				fontFamily: 'Menlo, Monaco, "Courier New", monospace',
 				lineHeight: 18,
 				padding: { top: 6, bottom: 6 },
 				overviewRulerLanes: 0,
 				scrollbar: {
-					vertical: 'auto',
-					horizontal: 'auto',
+					vertical: 'hidden', // Disable vertical scroll completely (fixed height)
+					horizontal: 'auto', // Keep horizontal scroll for long lines
 					verticalScrollbarSize: 0,
 					horizontalScrollbarSize: 6,
-					alwaysConsumeMouseWheel: false
+					alwaysConsumeMouseWheel: false // Let page scroll work over code blocks
 				},
 				glyphMargin: false,
 				folding: false,
@@ -127,25 +146,87 @@ export class VybeChatCodeBlockPart extends VybeChatContentPart {
 				renderWhitespace: 'none',
 				domReadOnly: true
 			},
-			{}
+			{
+				isSimpleWidget: true,
+				contributions: []
+			}
 		);
 
 		this.editor.setModel(model);
 		this._register(this.editor);
 		this._register(model);
 
-		// Calculate and set height based on content
+		// Calculate and set EXACT height to prevent any vertical scroll
 		const lineCount = model.getLineCount();
 		const height = lineCount * 18 + 12;
 		container.style.height = `${height}px`;
+		container.style.minHeight = `${height}px`;
+		container.style.maxHeight = `${height}px`;
+		container.style.overflow = 'hidden'; // Prevent any overflow
 
 		// Initial layout with proper width
 		setTimeout(() => {
 			if (this.editor && container.parentElement) {
 				const width = container.parentElement.clientWidth || 507;
 				this.editor.layout({ width, height });
+
+				// Start streaming if needed
+				if (this.isStreaming && this.targetCode) {
+					setTimeout(() => {
+						this.startStreamingAnimation(model, container);
+					}, 300); // Small delay before starting
+				}
 			}
 		}, 0);
+	}
+
+	/**
+	 * Stream code content line-by-line (like text edit streaming).
+	 */
+	private startStreamingAnimation(model: ITextModel, container: HTMLElement): void {
+		const lines = this.targetCode.split('\n');
+		let currentLineIndex = 0;
+		let currentCode = '';
+		const STREAM_DELAY_MS = 70; // 70ms per line (consistent with text edit)
+
+		const streamNextLine = () => {
+			if (currentLineIndex >= lines.length || !this.isStreaming) {
+				// Streaming complete
+				this.streamingIntervalId = null;
+				return;
+			}
+
+			// Add 1 line at a time
+			currentCode += (currentLineIndex > 0 ? '\n' : '') + lines[currentLineIndex];
+			currentLineIndex++;
+
+			// Update model
+			model.setValue(currentCode);
+
+			// Update height to accommodate new lines
+			const newLineCount = model.getLineCount();
+			const newHeight = newLineCount * 18 + 12;
+			container.style.height = `${newHeight}px`;
+			container.style.minHeight = `${newHeight}px`;
+			container.style.maxHeight = `${newHeight}px`;
+
+			// Re-layout editor
+			if (this.editor && container.parentElement) {
+				const width = container.parentElement.clientWidth || 507;
+				this.editor.layout({ width, height: newHeight });
+			}
+
+			// Notify parent for page-level scroll
+			if (this.onStreamingUpdate) {
+				this.onStreamingUpdate();
+			}
+
+			// Schedule next line
+			this.streamingIntervalId = setTimeout(streamNextLine, STREAM_DELAY_MS);
+		};
+
+		// Start streaming
+		this.streamingIntervalId = setTimeout(streamNextLine, 300);
 	}
 
 	private createCopyOverlay(): HTMLElement {
@@ -248,7 +329,7 @@ export class VybeChatCodeBlockPart extends VybeChatContentPart {
 
 	public override hasSameContent(other: any): boolean {
 		return other.kind === 'codeBlock' &&
-			other.code === this.currentContent.code &&
+			other.code === this.targetCode &&
 			other.language === this.currentContent.language;
 	}
 
@@ -260,26 +341,51 @@ export class VybeChatCodeBlockPart extends VybeChatContentPart {
 			return;
 		}
 
+		const wasStreaming = this.isStreaming;
 		this.currentContent = newContent as IVybeChatCodeBlockContent;
+		this.targetCode = newContent.code;
+		this.isStreaming = newContent.isStreaming ?? false;
 
-		// Update editor model
-		if (this.editor) {
-			const model = this.editor.getModel();
-			if (model) {
-				model.setValue(this.currentContent.code);
+		// If not streaming, show complete code immediately
+		if (!this.isStreaming) {
+			if (this.streamingIntervalId) {
+				clearTimeout(this.streamingIntervalId);
+				this.streamingIntervalId = null;
+			}
 
-				// Update height
-				const lineCount = model.getLineCount();
-				const height = lineCount * 18 + 12;
-				if (this.editorContainer) {
-					this.editorContainer.style.height = `${height}px`;
-					this.editor.layout({ width: this.editorContainer.clientWidth, height });
+			// Update editor model
+			if (this.editor) {
+				const model = this.editor.getModel();
+				if (model) {
+					model.setValue(this.currentContent.code);
+
+					// Update exact height to prevent vertical scroll
+					const lineCount = model.getLineCount();
+					const height = lineCount * 18 + 12;
+					if (this.editorContainer) {
+						this.editorContainer.style.height = `${height}px`;
+						this.editorContainer.style.minHeight = `${height}px`;
+						this.editorContainer.style.maxHeight = `${height}px`;
+						this.editor.layout({ width: this.editorContainer.clientWidth, height });
+					}
 				}
+			}
+		} else if (!wasStreaming && this.isStreaming) {
+			// Start streaming
+			const model = this.editor?.getModel();
+			if (model && this.editorContainer) {
+				this.startStreamingAnimation(model, this.editorContainer);
 			}
 		}
 	}
 
 	override dispose(): void {
+		// Clean up streaming interval
+		if (this.streamingIntervalId) {
+			clearTimeout(this.streamingIntervalId);
+			this.streamingIntervalId = null;
+		}
+
 		this.editor = null;
 		this.editorContainer = null;
 		this.copyButton = null;

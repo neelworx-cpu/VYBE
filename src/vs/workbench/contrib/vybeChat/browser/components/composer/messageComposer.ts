@@ -339,6 +339,7 @@ export class MessageComposer extends Disposable {
 		textInput.contentEditable = 'true';
 		textInput.setAttribute('role', 'textbox');
 		textInput.setAttribute('aria-label', 'Message input');
+		textInput.spellcheck = true; // Enable spell check
 		textInput.style.gridArea = '1 / 1 / 1 / 1';
 		textInput.style.resize = 'none';
 		textInput.style.overflow = 'hidden';
@@ -386,6 +387,49 @@ export class MessageComposer extends Disposable {
 			this.updatePlaceholderVisibility();
 		}));
 
+		// Handle paste - strip formatting and paste as plain text only
+		this._register(addDisposableListener(textInput, 'paste', (e: ClipboardEvent) => {
+			e.preventDefault();
+
+			// Get plain text from clipboard
+			const plainText = e.clipboardData?.getData('text/plain') || '';
+
+			// Use execCommand to insert text - this preserves undo history!
+			document.execCommand('insertText', false, plainText);
+
+			// Trigger input event to update placeholder
+			this.updatePlaceholderVisibility();
+		}));
+
+		// Handle keyboard shortcuts
+		this._register(addDisposableListener(textInput, 'keydown', (e: KeyboardEvent) => {
+			// Enter key to send (without Shift)
+			if (e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey) {
+				e.preventDefault();
+				// Trigger send button click
+				if (this.sendButton) {
+					this.sendButton.click();
+				}
+				return;
+			}
+
+			// Cmd+Z (Mac) or Ctrl+Z (Windows) for undo
+			if (e.key === 'z' && (e.metaKey || e.ctrlKey) && !e.shiftKey) {
+				e.preventDefault();
+				document.execCommand('undo');
+				return;
+			}
+
+			// Cmd+Shift+Z (Mac) or Ctrl+Y (Windows) for redo
+			if ((e.key === 'z' && (e.metaKey || e.ctrlKey) && e.shiftKey) ||
+			    (e.key === 'y' && e.ctrlKey)) {
+				e.preventDefault();
+				document.execCommand('redo');
+				return;
+			}
+
+			// Shift+Enter adds a new line (let default behavior happen)
+		}));
 
 		// Initial state - show placeholder
 		placeholder.style.display = 'block';

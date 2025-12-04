@@ -200,8 +200,8 @@
 
 /* Scrollable content container - HIDDEN scrollbar (ONLY for thinking block) */
 .vybe-chat-thinking-part .think-content-scrollable {
-	height: 144px !important;
-	max-height: 144px !important;
+	height: auto !important; /* Dynamic height based on content */
+	max-height: 144px !important; /* Max height before scrolling */
 	overflow-y: auto !important;
 	overflow-x: hidden !important;
 	scrollbar-width: none; /* Firefox: hide scrollbar */

@@ -3,128 +3,319 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-/* Text Edit Content Part - File edits with diff view */
+/* Text Edit Content Part - Matches VYBECode renderCodeBlock exactly */
 
-/* Scope all styles to response area to prevent affecting composer */
-.vybe-chat-response-area .composer-code-block-container {
+/* Scope to response area only - use text-edit-block class for specificity */
+.vybe-chat-response-area .composer-code-block-container.text-edit-block {
+	width: 100%;
 	position: relative;
-	margin-bottom: 8px;
-	border-radius: 4px;
 	overflow: hidden;
+	/* Relies on code block base styles for border, border-radius, margin, etc. */
 }
 
-/* Header (always visible) */
-.vybe-chat-response-area .composer-code-block-header {
+/* Header - EXACT match to reference HTML */
+.vybe-chat-response-area .text-edit-block .composer-code-block-header {
 	display: flex;
 	justify-content: space-between;
 	align-items: center;
-	padding: 8px 12px;
-	background: var(--vscode-editor-background);
+	padding: 0 8px 0 6px; /* Left 6px, Right 8px */
+	height: 28px;
+	box-sizing: border-box;
 	cursor: pointer;
 	user-select: none;
-	transition: background-color 0.1s ease-in-out;
+	column-gap: 6px;
+	background: #1a1d1f; /* VYBE Dark */
+	border-bottom: none;
+	position: sticky;
+	top: 0;
+	z-index: 2;
 }
 
-.vybe-chat-response-area .composer-code-block-header:hover {
-	background: var(--vscode-list-hoverBackground);
+/* Header - VYBE Light theme */
+.vs .vybe-chat-response-area .text-edit-block .composer-code-block-header {
+	background: #f2f4f6;
 }
 
 /* File info section */
-.vybe-chat-response-area .composer-code-block-file-info {
+.vybe-chat-response-area .text-edit-block .composer-code-block-file-info {
 	display: flex;
 	align-items: center;
-	gap: 8px;
-	flex: 1;
+	column-gap: 6px;
+	row-gap: 6px;
+	flex: 1 1 0%;
+	flex-shrink: 1;
 	min-width: 0;
+	overflow: auto hidden;
+	box-sizing: border-box;
+	height: 16px;
 }
 
-/* File icon */
-.vybe-chat-response-area .composer-primary-toolcall-icon {
+/* File icon - keep vertical center, no horizontal padding */
+.vybe-chat-response-area .text-edit-block .composer-primary-toolcall-icon {
 	flex-shrink: 0;
 	display: flex;
 	align-items: center;
+	justify-content: center;
+	width: 16px;
+	height: 16px;
+	margin: 0;
+	padding: 0;
+	margin-left: -2px; /* Shift icon 2px to the left */
 }
 
-/* Filename */
-.vybe-chat-response-area .composer-code-block-filename {
-	font-size: 13px;
-	font-weight: 500;
-	color: var(--vscode-foreground);
-	flex-shrink: 1;
+.vybe-chat-response-area .text-edit-block .show-file-icons {
+	display: block;
+	height: 18px;
+	width: 16px;
+}
+
+/* Monaco icon label */
+.vybe-chat-response-area .text-edit-block .monaco-icon-label.file-icon {
+	height: 100%; /* Keep icon vertically aligned */
+}
+
+/* Filename wrapper - RTL direction for ellipsis */
+.vybe-chat-response-area .text-edit-block .composer-code-block-filename {
+	direction: rtl;
+	display: flex;
+	align-items: center; /* Vertically center the text */
+	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
+	color: var(--vscode-foreground);
+	height: 16px; /* Match file info height */
 }
 
-/* Stats (+2/-2) */
-.vybe-chat-response-area .composer-code-block-status {
+/* Filename inner span - LTR with proper size */
+.vybe-chat-response-area .text-edit-block .composer-code-block-filename > span {
+	direction: ltr;
+	unicode-bidi: embed;
+	display: inline;
+	font-size: 12px;
+	line-height: 14.4px;
+}
+
+/* Stats (+2/-2) wrapper */
+.vybe-chat-response-area .text-edit-block .composer-code-block-status {
 	flex-shrink: 0;
-	margin-left: 8px;
+	display: flex;
+	align-items: center;
+	column-gap: 4px;
+	row-gap: 4px;
 }
 
-/* Diff container (collapsible) */
-.vybe-chat-response-area .composer-diff-block {
+/* Stats inner styling */
+.vybe-chat-response-area .text-edit-block .composer-code-block-status > span {
+	display: flex;
+	align-items: center;
+	color: var(--vscode-descriptionForeground);
+	font-size: 12px;
+	line-height: 120%;
+	font-variant-numeric: tabular-nums;
+	column-gap: 4px;
+	row-gap: 4px;
+}
+
+/* Stats flex container */
+.vybe-chat-response-area .text-edit-block .composer-code-block-status > span > div {
+	display: flex;
+	align-items: center;
+	column-gap: 3px;
+	row-gap: 3px;
+}
+
+/* Addition count - green (explicit class) */
+.vybe-chat-response-area .text-edit-block .composer-code-block-status .diff-stat-added {
+	color: var(--vscode-gitDecoration-addedResourceForeground, rgb(112, 180, 137));
+	font-size: 12px;
+	font-variant-numeric: tabular-nums;
+}
+
+/* Deletion count - red (explicit class) */
+.vybe-chat-response-area .text-edit-block .composer-code-block-status .diff-stat-deleted {
+	color: var(--vscode-gitDecoration-deletedResourceForeground, rgb(252, 107, 131));
+	font-size: 12px;
+	font-variant-numeric: tabular-nums;
+}
+
+/* Content area */
+.vybe-chat-response-area .text-edit-block .composer-code-block-content {
 	transition: height 0.2s ease-in-out;
 }
 
-/* Expand/collapse button */
-.vybe-chat-response-area .composer-message-codeblock-expand {
+/* Diff block (inside content area) */
+.vybe-chat-response-area .text-edit-block .composer-diff-block {
+	transition: height 0.2s ease-in-out;
+	background: var(--vscode-editor-background) !important;
+	overflow: hidden !important; /* No scroll ever in full expanded */
+}
+
+/* Ensure content area uses panel background */
+.vybe-chat-response-area .text-edit-block .composer-code-block-content {
+	background: var(--vscode-editor-background) !important;
+	overflow: hidden !important; /* No scroll */
+}
+
+/* Streaming editor container - allow vertical scroll in fixed viewport */
+.vybe-chat-response-area .text-edit-block .composer-code-block-content.streaming-editor {
+	overflow-y: auto; /* Allow vertical scroll ONLY in streaming (fixed 90px height) */
+	overflow-x: hidden;
+}
+
+/* Prevent diff editor from blocking page scroll when fully expanded (no internal scroll) */
+.vybe-chat-response-area .text-edit-block .monaco-diff-editor {
+	pointer-events: auto; /* Allow interactions */
+}
+
+.vybe-chat-response-area .text-edit-block .monaco-diff-editor .overflow-guard {
+	overflow: hidden !important; /* No scroll in full expanded */
+}
+
+.vybe-chat-response-area .text-edit-block .monaco-diff-editor .monaco-scrollable-element {
+	overflow: hidden !important; /* No scroll in full expanded */
+}
+
+/* Force all diff editor components to use panel background */
+.vybe-chat-response-area .text-edit-block .monaco-diff-editor .monaco-editor {
+	background-color: var(--vscode-editor-background) !important;
+}
+
+.vybe-chat-response-area .text-edit-block .monaco-diff-editor .monaco-editor .margin {
+	background-color: var(--vscode-editor-background) !important;
+}
+
+.vybe-chat-response-area .text-edit-block .monaco-diff-editor .monaco-editor-background {
+	background-color: var(--vscode-editor-background) !important;
+}
+
+.vybe-chat-response-area .text-edit-block .monaco-diff-editor .lines-content {
+	background-color: var(--vscode-editor-background) !important;
+}
+
+.vybe-chat-response-area .text-edit-block .monaco-diff-editor .view-lines {
+	background-color: transparent !important;
+}
+
+/* Bottom expand bar - absolute positioned */
+.vybe-chat-response-area .text-edit-block .composer-message-codeblock-expand {
 	position: absolute;
 	bottom: 0;
-	left: 50%;
-	transform: translateX(-50%);
-	background: var(--vscode-editor-background);
-	border: 1px solid var(--vscode-panel-border);
-	border-bottom: none;
-	border-radius: 4px 4px 0 0;
-	padding: 2px 8px;
+	left: 0;
+	width: 100%;
+	height: 14px; /* Reduced to 14px */
+	display: flex;
+	align-items: center;
+	justify-content: center;
 	cursor: pointer;
-	opacity: 0.7;
-	transition: opacity 0.1s ease-in-out;
+	user-select: none;
+	z-index: 1;
+	background: #1a1d1f; /* VYBE Dark */
 }
 
-.vybe-chat-response-area .composer-message-codeblock-expand:hover {
-	opacity: 1;
+/* Bottom expand bar - VYBE Light theme */
+.vs .vybe-chat-response-area .text-edit-block .composer-message-codeblock-expand {
+	background: #f2f4f6;
 }
 
-.vybe-chat-response-area .composer-message-codeblock-expand .codicon {
+/* Chevron icon in expand bar */
+.vybe-chat-response-area .text-edit-block .composer-message-codeblock-expand .codicon {
+	font-size: 16px;
+	text-align: center;
+}
+
+.vybe-chat-response-area .text-edit-block .composer-message-codeblock-expand .codicon {
 	font-size: 14px;
 	color: var(--vscode-foreground);
+	opacity: 0.8;
 }
 
-/* Monaco diff editor styling */
-.vybe-chat-response-area .monaco-diff-editor .editor {
-	background: var(--vscode-editor-background);
+/* Monaco diff editor styling - FORCE PANEL background everywhere */
+.vybe-chat-response-area .text-edit-block .monaco-diff-editor {
+	background: var(--vscode-editor-background) !important;
+}
+
+.vybe-chat-response-area .text-edit-block .monaco-diff-editor .editor {
+	background: var(--vscode-editor-background) !important;
+}
+
+.vybe-chat-response-area .text-edit-block .monaco-diff-editor .monaco-editor {
+	background-color: var(--vscode-editor-background) !important;
+}
+
+.vybe-chat-response-area .text-edit-block .monaco-diff-editor .monaco-editor .margin {
+	background-color: var(--vscode-editor-background) !important;
+}
+
+.vybe-chat-response-area .text-edit-block .monaco-diff-editor .monaco-editor-background {
+	background-color: var(--vscode-editor-background) !important;
+}
+
+.vybe-chat-response-area .text-edit-block .monaco-diff-editor .lines-content {
+	background-color: var(--vscode-editor-background) !important;
+}
+
+.vybe-chat-response-area .text-edit-block .monaco-diff-editor .view-lines {
+	background-color: transparent !important;
+}
+
+.vybe-chat-response-area .text-edit-block .monaco-diff-editor .view-line {
+	background-color: transparent !important;
+}
+
+/* Monaco editor background for streaming - use PANEL background */
+.vybe-chat-response-area .text-edit-block .monaco-editor {
+	background-color: var(--vscode-editor-background) !important;
+}
+
+.vybe-chat-response-area .text-edit-block .monaco-editor .margin {
+	background-color: var(--vscode-editor-background) !important;
+}
+
+.vybe-chat-response-area .text-edit-block .monaco-editor-background {
+	background-color: var(--vscode-editor-background) !important;
+}
+
+.vybe-chat-response-area .text-edit-block .monaco-editor .lines-content {
+	background-color: var(--vscode-editor-background) !important;
+}
+
+.vybe-chat-response-area .text-edit-block .monaco-editor .view-line {
+	background-color: transparent !important;
+}
+
+.vybe-chat-response-area .text-edit-block .monaco-editor .view-lines {
+	background-color: transparent !important;
 }
 
 /* Diff gutter colors */
-.vybe-chat-response-area .monaco-diff-editor .gutter-insert {
+.vybe-chat-response-area .text-edit-block .monaco-diff-editor .gutter-insert {
 	background: var(--vscode-diffEditor-insertedLineBackground, rgba(155, 185, 85, 0.2));
 }
 
-.vybe-chat-response-area .monaco-diff-editor .gutter-delete {
+.vybe-chat-response-area .text-edit-block .monaco-diff-editor .gutter-delete {
 	background: var(--vscode-diffEditor-removedLineBackground, rgba(255, 0, 0, 0.2));
 }
 
 /* Diff line colors */
-.vybe-chat-response-area .monaco-diff-editor .line-insert {
+.vybe-chat-response-area .text-edit-block .monaco-diff-editor .line-insert {
 	background: var(--vscode-diffEditor-insertedLineBackground, rgba(155, 185, 85, 0.2));
 }
 
-.vybe-chat-response-area .monaco-diff-editor .line-delete {
+.vybe-chat-response-area .text-edit-block .monaco-diff-editor .line-delete {
 	background: var(--vscode-diffEditor-removedLineBackground, rgba(255, 0, 0, 0.2));
 }
 
 /* Diff character colors (inline changes) */
-.vybe-chat-response-area .monaco-diff-editor .char-insert {
+.vybe-chat-response-area .text-edit-block .monaco-diff-editor .char-insert {
 	background: var(--vscode-diffEditor-insertedTextBackground, rgba(155, 185, 85, 0.4));
 }
 
-.vybe-chat-response-area .monaco-diff-editor .char-delete {
+.vybe-chat-response-area .text-edit-block .monaco-diff-editor .char-delete {
 	background: var(--vscode-diffEditor-removedTextBackground, rgba(255, 0, 0, 0.4));
 }
 
 /* Diagonal fill for unchanged areas */
-.vybe-chat-response-area .monaco-diff-editor .diagonal-fill {
+.vybe-chat-response-area .text-edit-block .monaco-diff-editor .diagonal-fill {
 	background: repeating-linear-gradient(
 		-45deg,
 		transparent,
@@ -133,16 +324,3 @@
 		var(--vscode-diffEditor-diagonalFill, rgba(128, 128, 128, 0.1)) 5px
 	);
 }
-
-/* Hide scrollbars in diff editor */
-.vybe-chat-response-area .monaco-diff-editor .scrollbar {
-	scrollbar-width: none;
-	-ms-overflow-style: none;
-}
-
-.vybe-chat-response-area .monaco-diff-editor .scrollbar::-webkit-scrollbar {
-	width: 0;
-	height: 0;
-	display: none;
-}
-

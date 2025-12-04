@@ -22,22 +22,35 @@
 	transition: border-color 0.1s ease-in-out;
 	border: 1px solid var(--vscode-panel-border);
 	border-radius: 6px;
-	overflow: hidden;
-	background-color: var(--vscode-titleBar-activeBackground);
+	overflow-y: hidden; /* Prevent vertical scroll/movement */
+	overflow-x: hidden; /* Hide horizontal on container (editor has it) */
+	background-color: #1a1d1f; /* VYBE Dark */
 	position: relative;
+}
+
+/* VYBE Light theme override */
+.vs .vybe-chat-response-area .composer-code-block-container {
+	background-color: #f2f4f6; /* VYBE Light */
 }
 
 /* Code content wrapper - SCOPED */
 .vybe-chat-response-area .composer-code-block-container .composer-code-block-content {
 	display: block;
 	position: relative;
+	overflow: hidden; /* Prevent any vertical movement */
 }
 
 /* Scrollable container for Monaco editor - SCOPED */
 .vybe-chat-response-area .composer-code-block-container .scrollable-div-container {
 	position: relative;
-	overflow: hidden;
-	background-color: var(--vscode-titleBar-activeBackground);
+	overflow-y: hidden; /* Prevent vertical scroll */
+	overflow-x: visible; /* Allow horizontal scroll */
+	background-color: #1a1d1f; /* VYBE Dark */
+}
+
+/* VYBE Light theme override */
+.vs .vybe-chat-response-area .composer-code-block-container .scrollable-div-container {
+	background-color: #f2f4f6; /* VYBE Light */
 }
 
 /* Show scrollbars only on hover - SCOPED */
@@ -50,21 +63,57 @@
 	opacity: 1;
 }
 
-/* Monaco editor overrides for code blocks */
+/* Monaco editor overrides for code blocks - IMPORTANT: Use !important to override Monaco defaults */
 .vybe-chat-response-area .composer-code-block-container .monaco-editor {
-	background-color: var(--vscode-titleBar-activeBackground);
+	background-color: #1a1d1f !important; /* VYBE Dark */
+	overflow-y: hidden !important; /* Prevent ANY vertical scroll */
+}
+
+.vs .vybe-chat-response-area .composer-code-block-container .monaco-editor {
+	background-color: #f2f4f6 !important; /* VYBE Light */
+	overflow-y: hidden !important; /* Prevent ANY vertical scroll */
 }
 
 .vybe-chat-response-area .composer-code-block-container .monaco-editor .margin {
-	background-color: var(--vscode-titleBar-activeBackground);
+	background-color: #1a1d1f !important; /* VYBE Dark */
+}
+
+.vs .vybe-chat-response-area .composer-code-block-container .monaco-editor .margin {
+	background-color: #f2f4f6 !important; /* VYBE Light */
 }
 
 .vybe-chat-response-area .composer-code-block-container .monaco-editor-background {
-	background-color: var(--vscode-titleBar-activeBackground);
+	background-color: #1a1d1f !important; /* VYBE Dark */
+}
+
+.vs .vybe-chat-response-area .composer-code-block-container .monaco-editor-background {
+	background-color: #f2f4f6 !important; /* VYBE Light */
 }
 
 .vybe-chat-response-area .composer-code-block-container .lines-content {
-	background-color: var(--vscode-titleBar-activeBackground);
+	background-color: #1a1d1f !important; /* VYBE Dark */
+}
+
+.vs .vybe-chat-response-area .composer-code-block-container .lines-content {
+	background-color: #f2f4f6 !important; /* VYBE Light */
+}
+
+/* Additional layer overrides to catch all Monaco background layers */
+.vybe-chat-response-area .composer-code-block-container .monaco-editor .view-line {
+	background-color: transparent !important;
+}
+
+.vybe-chat-response-area .composer-code-block-container .monaco-editor .view-lines {
+	background-color: transparent !important;
+}
+
+/* Prevent any vertical overflow/scroll in code blocks */
+.vybe-chat-response-area .composer-code-block-container .monaco-editor .overflow-guard {
+	overflow-y: hidden !important;
+}
+
+.vybe-chat-response-area .composer-code-block-container .monaco-scrollable-element {
+	overflow-y: hidden !important;
 }
 
 .vybe-chat-response-area .composer-code-block-container .monaco-editor .view-lines {

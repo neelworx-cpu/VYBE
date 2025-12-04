@@ -17,6 +17,10 @@ import { IInstantiationService } from '../../../../../platform/instantiation/com
 export class VybeChatMarkdownPart extends VybeChatContentPart {
 	private markdownContainer: HTMLElement | undefined;
 	private currentContent: string = '';
+	private targetContent: string = ''; // Full content for streaming towards
+	private isStreaming: boolean = false;
+	private streamingIntervalId: ReturnType<typeof setTimeout> | null = null;
+	private onStreamingUpdate?: () => void; // Callback for parent to handle scrolling
 	private codeBlockIndex: number = 0;
 	private codeBlockParts: VybeChatCodeBlockPart[] = [];
 
@@ -26,11 +30,17 @@ export class VybeChatMarkdownPart extends VybeChatContentPart {
 		private readonly instantiationService: IInstantiationService
 	) {
 		super('markdown');
-		this.currentContent = content.content;
+		this.targetContent = content.content;
+		this.isStreaming = content.isStreaming ?? false;
+		this.currentContent = this.isStreaming ? '' : content.content; // Start empty if streaming
+	}
+
+	public setStreamingUpdateCallback(callback: () => void): void {
+		this.onStreamingUpdate = callback;
 	}
 
 	protected createDomNode(): HTMLElement {
-		// Main container with horizontal padding only (no vertical padding)
+		// Main container - NO horizontal padding (AI response area already has 18px)
 		const outerContainer = $('.vybe-chat-markdown-response', {
 			'data-message-role': 'ai',
 			'data-message-kind': 'assistant',
@@ -38,7 +48,7 @@ export class VybeChatMarkdownPart extends VybeChatContentPart {
 			style: `
 				display: block;
 				outline: none;
-				padding: 0 6px;
+				padding: 0;
 				margin: 0;
 				background-color: var(--vscode-sideBar-background);
 				opacity: 1;
@@ -56,9 +66,9 @@ export class VybeChatMarkdownPart extends VybeChatContentPart {
 			style: 'position: sticky; top: 0px;'
 		});
 
-		// Inner padding wrapper (matches: padding: 0px 2px)
+		// Inner padding wrapper - NO horizontal padding
 		const innerPadding = $('.vybe-chat-markdown-inner', {
-			style: 'padding: 0px 2px;'
+			style: 'padding: 0;'
 		});
 
 		// Root markdown container
@@ -79,6 +89,11 @@ export class VybeChatMarkdownPart extends VybeChatContentPart {
 
 		this.markdownContainer = markdownRoot;
 		this.renderMarkdown(this.currentContent);
+
+		// Start streaming if needed
+		if (this.isStreaming && this.targetContent) {
+			this.startStreamingAnimation();
+		}
 
 		return outerContainer;
 	}
@@ -138,25 +153,90 @@ export class VybeChatMarkdownPart extends VybeChatContentPart {
 	}
 
 	/**
+	 * Stream markdown content character-by-character (like thinking block).
+	 */
+	private startStreamingAnimation(): void {
+		// Clear any existing animation
+		if (this.streamingIntervalId) {
+			clearTimeout(this.streamingIntervalId);
+			this.streamingIntervalId = null;
+		}
+
+		const fullText = this.targetContent;
+		let charIndex = this.currentContent.length; // Start from where we left off
+		const CHAR_DELAY_MS = 15; // 15ms per character (fast but legible)
+
+		const streamNextChar = () => {
+			if (charIndex >= fullText.length || !this.isStreaming) {
+				// Streaming complete
+				this.streamingIntervalId = null;
+				return;
+			}
+
+			// Add next character
+			this.currentContent = fullText.substring(0, charIndex + 1);
+			charIndex++;
+
+			// Re-render markdown with updated content
+			this.renderMarkdown(this.currentContent);
+
+			// Notify parent for page-level scroll
+			if (this.onStreamingUpdate) {
+				this.onStreamingUpdate();
+			}
+
+			// Schedule next character
+			this.streamingIntervalId = setTimeout(streamNextChar, CHAR_DELAY_MS);
+		};
+
+		// Start streaming
+		this.streamingIntervalId = setTimeout(streamNextChar, CHAR_DELAY_MS);
+	}
+
+	/**
 	 * Update content when streaming new data.
 	 */
 	updateContent(newContent: IVybeChatMarkdownContent): void {
-		if (this.currentContent === newContent.content) {
-			return; // No change
-		}
+		const newText = newContent.content;
+		const wasStreaming = this.isStreaming;
+		const isNowStreaming = newContent.isStreaming ?? false;
 
-		this.currentContent = newContent.content;
-		this.renderMarkdown(this.currentContent);
+		// Update state
+		this.targetContent = newText;
+		this.isStreaming = isNowStreaming;
+
+		// If not streaming, show complete text immediately
+		if (!isNowStreaming) {
+			this.currentContent = newText;
+			if (this.streamingIntervalId) {
+				clearTimeout(this.streamingIntervalId);
+				this.streamingIntervalId = null;
+			}
+			this.renderMarkdown(this.currentContent);
+		} else if (!wasStreaming && isNowStreaming) {
+			// Start streaming
+			this.startStreamingAnimation();
+		}
 	}
 
 	override hasSameContent(other: VybeChatContentPart): boolean {
 		if (other.kind !== 'markdown') {
 			return false;
 		}
-		return (other as VybeChatMarkdownPart).currentContent === this.currentContent;
+		return (other as VybeChatMarkdownPart).targetContent === this.targetContent;
 	}
 
 	override dispose(): void {
+		// Clean up streaming interval
+		if (this.streamingIntervalId) {
+			clearTimeout(this.streamingIntervalId);
+			this.streamingIntervalId = null;
+		}
+
+		// Dispose all code block parts
+		this.codeBlockParts.forEach(part => part.dispose());
+		this.codeBlockParts = [];
+
 		super.dispose();
 		this.markdownContainer = undefined;
 	}

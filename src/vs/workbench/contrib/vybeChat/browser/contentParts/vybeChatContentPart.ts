@@ -60,7 +60,8 @@ export type VybeChatContentPartKind =
  */
 export interface IVybeChatMarkdownContent {
 	kind: 'markdown';
-	content: string;  // Markdown text
+	content: string;  // Markdown text (final or target for streaming)
+	isStreaming?: boolean; // Whether content is currently streaming
 }
 
 /**
@@ -78,8 +79,9 @@ export interface IVybeChatThinkingContent {
  */
 export interface IVybeChatCodeBlockContent {
 	kind: 'codeBlock';
-	code: string;      // The code content
+	code: string;      // The code content (final or target for streaming)
 	language: string;  // Programming language (typescript, python, etc.)
+	isStreaming?: boolean; // Whether code is currently streaming line-by-line
 }
 
 /**
@@ -90,11 +92,14 @@ export interface IVybeChatTextEditContent {
 	fileName: string;       // Name of the file being edited
 	filePath?: string;      // Full path (optional)
 	originalContent: string; // Original file content
-	modifiedContent: string; // Modified file content
+	modifiedContent: string; // Modified file content (final after streaming)
+	streamingContent?: string; // Current content being streamed (partial)
 	language: string;       // Programming language
 	addedLines: number;     // Number of lines added
 	deletedLines: number;   // Number of lines deleted
 	isApplied?: boolean;    // Whether the edit has been applied
+	isLoading?: boolean;    // Whether the edit is currently streaming
+	isStreaming?: boolean;  // Whether currently showing streaming code (not diff yet)
 }
 
 /**
