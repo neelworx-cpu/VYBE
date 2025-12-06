@@ -20,7 +20,7 @@ export class VybeChatMarkdownPart extends VybeChatContentPart {
 	private targetContent: string = ''; // Full content for streaming towards
 	private isStreaming: boolean = false;
 	private streamingIntervalId: ReturnType<typeof setTimeout> | null = null;
-	private onStreamingUpdate?: () => void; // Callback for parent to handle scrolling
+	public onStreamingUpdate?: () => void; // Callback for parent to handle scrolling
 	private codeBlockIndex: number = 0;
 	private codeBlockParts: VybeChatCodeBlockPart[] = [];
 

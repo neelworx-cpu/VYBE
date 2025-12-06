@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { VybeChatContentPart, IVybeChatTextEditContent } from './vybeChatContentPart.js';
+import { VybeChatContentPart, IVybeChatTextEditContent, IVybeChatContentPart } from './vybeChatContentPart.js';
 import { $, addDisposableListener } from '../../../../../base/browser/dom.js';
 import { DiffEditorWidget } from '../../../../../editor/browser/widget/diffEditor/diffEditorWidget.js';
 import { CodeEditorWidget } from '../../../../../editor/browser/widget/codeEditor/codeEditorWidget.js';
@@ -34,7 +34,7 @@ export class VybeChatTextEditPart extends VybeChatContentPart {
 	private streamingIntervalId: ReturnType<typeof setInterval> | null = null; // Interval for streaming animation
 	private currentContent: IVybeChatTextEditContent;
 	private readonly uniqueId: string; // Unique ID for model URIs
-	private onStreamingUpdate?: () => void; // Callback for parent to handle scrolling
+	public onStreamingUpdate?: () => void; // Callback for parent to handle scrolling
 	private headerElement: HTMLElement | null = null;
 	private headerSeparator: HTMLElement | null = null;
 	private contentArea: HTMLElement | null = null;
@@ -713,7 +713,7 @@ export class VybeChatTextEditPart extends VybeChatContentPart {
 		return languageMap[ext] || 'plaintext';
 	}
 
-	override hasSameContent(other: VybeChatTextEditPart): boolean {
+	override hasSameContent(other: IVybeChatContentPart): boolean {
 		if (!(other instanceof VybeChatTextEditPart)) {
 			return false;
 		}

@@ -27,7 +27,7 @@ export class VybeChatThinkingPart extends VybeChatContentPart {
 	private targetContent: string = ''; // Full content for streaming towards
 	private duration: number = 0;
 	private streamingIntervalId: ReturnType<typeof setTimeout> | null = null;
-	private onStreamingUpdate?: () => void; // Callback for parent to handle scrolling
+	public onStreamingUpdate?: () => void; // Callback for parent to handle scrolling
 
 	constructor(
 		content: IVybeChatThinkingContent

@@ -248,6 +248,16 @@ export class VybeChatViewPane extends ViewPane {
 		const contextPills = this.composer ? this.composer.getContextPillsData() : [];
 		const images = this.composer ? this.composer.getImagesData() : [];
 
+		// Debug: Log pills data when sending message
+		if (contextPills.length > 0) {
+			console.log('[VYBE Chat] Sending message with pills:', contextPills.map(p => ({
+				type: p.type,
+				name: p.name,
+				hasValue: !!p.value,
+				valueLength: p.value?.length || 0
+			})));
+		}
+
 		const options: MessagePageOptions = {
 			messageId,
 			messageIndex: this.messageIndex++,
@@ -610,7 +620,7 @@ if (typeof window !== 'undefined') {
 
 	// Test function for pending terminal
 	// Test with a real command that will execute - SIMPLE VERSION
-	// Test terminal in pending state with dummy data
+	// Test terminal with real command execution
 	(window as any).__vybeTestTerminalPending = function () {
 		const allElements = document.querySelectorAll('*');
 		for (const el of allElements) {
@@ -621,24 +631,12 @@ if (typeof window !== 'undefined') {
 					return;
 				}
 
-				const testOutput = `npm WARN deprecated inflight@1.0.6: This module is not supported
-npm WARN deprecated glob@7.2.3: Glob versions prior to v9 are no longer supported
-npm WARN deprecated rimraf@3.0.2: Rimraf versions prior to v4 are no longer supported
-
-added 57 packages, and audited 58 packages in 3s
-
-7 packages are looking for funding
-  run \`npm fund\` for details
-
-found 0 vulnerabilities
-
-Installation complete! ✓`;
-
+				// Test with simple commands that execute quickly
 				(lastPage as any).renderContentParts([
 					{
 						kind: 'terminal' as const,
-						command: 'npm install express mongoose dotenv',
-						output: testOutput,
+						command: 'pwd',
+						output: '',
 						phase: 'pending' as const,
 						status: null,
 						permission: 'Ask Every Time',
@@ -680,7 +678,7 @@ Installation complete! ✓`;
 	};
 
 	// Test with git log command
-	// Test terminal with git log output (completed state)
+	// Test terminal with git log (real execution)
 	(window as any).__vybeTestTerminalGit = function () {
 		const allElements = document.querySelectorAll('*');
 		for (const el of allElements) {
@@ -691,19 +689,117 @@ Installation complete! ✓`;
 					return;
 				}
 
-				const gitOutput = `f9e9f35 (HEAD -> main, origin/main) Point 12 Patch v4: Shell-Free Execution
-c1afa9f Point 12 Patch v3: Strict Sandbox Hardening
-aba80a2 Point 12 Patch v2: Hardened Execution Sandbox
-d0c4cb2 Point 12 Patch: Fix Sandbox Mutating Command
-ebbe25e Point 12: Implemented Execution Sandbox Plane`;
-
 				(lastPage as any).renderContentParts([
 					{
 						kind: 'terminal' as const,
 						command: 'git log --oneline -5',
-						output: gitOutput,
-						phase: 'completed' as const,
-						status: 'success' as const,
+						output: '',
+						phase: 'pending' as const,
+						status: null,
+						permission: 'Ask Every Time',
+						isStreaming: false
+					}
+				]);
+
+				return;
+			}
+		}
+	};
+
+	// Test terminal with ls command
+	(window as any).__vybeTestTerminalLs = function () {
+		const allElements = document.querySelectorAll('*');
+		for (const el of allElements) {
+			if ((el as any).__vybePane) {
+				const pane = (el as any).__vybePane as VybeChatViewPane;
+				const lastPage = Array.from((pane as any).messagePages.values()).pop();
+				if (!lastPage) {
+					return;
+				}
+
+				(lastPage as any).renderContentParts([
+					{
+						kind: 'terminal' as const,
+						command: 'ls -la',
+						output: '',
+						phase: 'pending' as const,
+						status: null,
+						permission: 'Ask Every Time',
+						isStreaming: false
+					}
+				]);
+
+				return;
+			}
+		}
+	};
+
+	// Test smart terminal reuse: Short command (should reuse VYBE terminal)
+	(window as any).__vybeTestTerminalReuse = function () {
+		const allElements = document.querySelectorAll('*');
+		for (const el of allElements) {
+			if ((el as any).__vybePane) {
+				const pane = (el as any).__vybePane as VybeChatViewPane;
+				const lastPage = Array.from((pane as any).messagePages.values()).pop();
+				if (!lastPage) {
+					return;
+				}
+
+				// First command - should create "VYBE" terminal
+				(lastPage as any).renderContentParts([
+					{
+						kind: 'terminal' as const,
+						command: 'pwd',
+						output: '',
+						phase: 'pending' as const,
+						status: null,
+						permission: 'Ask Every Time',
+						isStreaming: false
+					}
+				]);
+
+				// Wait a bit, then run second command - should reuse same terminal
+				setTimeout(() => {
+					const lastPage2 = Array.from((pane as any).messagePages.values()).pop();
+					if (lastPage2) {
+						(lastPage2 as any).renderContentParts([
+							{
+								kind: 'terminal' as const,
+								command: 'ls -la',
+								output: '',
+								phase: 'pending' as const,
+								status: null,
+								permission: 'Ask Every Time',
+								isStreaming: false
+							}
+						]);
+					}
+				}, 2000);
+
+				return;
+			}
+		}
+	};
+
+	// Test smart terminal reuse: Long-running command (should create new terminal)
+	(window as any).__vybeTestTerminalLongRunning = function () {
+		const allElements = document.querySelectorAll('*');
+		for (const el of allElements) {
+			if ((el as any).__vybePane) {
+				const pane = (el as any).__vybePane as VybeChatViewPane;
+				const lastPage = Array.from((pane as any).messagePages.values()).pop();
+				if (!lastPage) {
+					return;
+				}
+
+				// Long-running command - should create "VYBE {timestamp}" terminal
+				(lastPage as any).renderContentParts([
+					{
+						kind: 'terminal' as const,
+						command: 'npm run watch',
+						output: '',
+						phase: 'pending' as const,
+						status: null,
 						permission: 'Ask Every Time',
 						isStreaming: false
 					}
@@ -833,6 +929,29 @@ Final paragraph. Inspect all transitions.`
 	};
 
 	// Test function for files edited toolbar
+	(window as any).__vybeInspectPills = function () {
+		// Try global composer first
+		const composer = (globalThis as any).__vybeComposer;
+		if (composer && composer.inspectPills) {
+			composer.inspectPills();
+			return;
+		}
+
+		// Fallback: search for pane
+		const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT);
+		let node: Node | null = walker.nextNode();
+		while (node) {
+			const pane = (node as any).__vybePane;
+			if (pane && pane.composer && pane.composer.inspectPills) {
+				pane.composer.inspectPills();
+				return;
+			}
+			node = walker.nextNode();
+		}
+
+		console.warn('[VYBE] Could not find composer. Make sure VYBE chat view is open.');
+	};
+
 	(window as any).__vybeTestFilesEdited = function () {
 		const composer = (globalThis as any).__vybeComposer;
 		if (!composer) {

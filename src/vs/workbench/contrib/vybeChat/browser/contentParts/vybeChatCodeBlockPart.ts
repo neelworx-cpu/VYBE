@@ -23,7 +23,7 @@ export class VybeChatCodeBlockPart extends VybeChatContentPart {
 	private targetCode: string = ''; // Full code for streaming towards
 	private isStreaming: boolean = false;
 	private streamingIntervalId: ReturnType<typeof setTimeout> | null = null;
-	private onStreamingUpdate?: () => void; // Callback for parent to handle scrolling
+	public onStreamingUpdate?: () => void; // Callback for parent to handle scrolling
 	private editorContainer: HTMLElement | null = null;
 	private copyButton: HTMLElement | null = null;
 

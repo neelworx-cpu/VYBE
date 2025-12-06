@@ -86,8 +86,19 @@
 }
 
 .composer-terminal-output pre {
+	margin: 0 !important;
+	padding: 4px 8px !important;
+	font-family: Menlo, Monaco, "Courier New", monospace !important;
+	white-space: pre-wrap !important;
+	word-wrap: break-word !important;
+	overflow-wrap: break-word !important;
+	font-size: 12px !important;
+	line-height: 18px !important;
 	color: var(--vscode-terminal-foreground);
 	background: var(--vscode-terminal-background) !important;
+	box-sizing: border-box !important;
+	user-select: text !important;
+	cursor: text !important;
 }
 
 /* Scrollable Container */
@@ -114,7 +125,7 @@
 
 /* Control Row */
 .composer-tool-call-control-row {
-	margin-top: 4px;
+	margin-top: 0px;
 	padding-top: 0px;
 	/* No border - removed per user request */
 }
@@ -286,27 +297,9 @@
 	background: transparent !important;
 }
 
-/* Scrollbar Styling */
-.scrollable-div-container .monaco-scrollable-element .scrollbar {
-	background: transparent;
-}
-
-.scrollable-div-container .monaco-scrollable-element .scrollbar.vertical {
-	width: 10px;
-}
-
-.scrollable-div-container .monaco-scrollable-element .slider {
-	background: var(--vscode-scrollbarSlider-background);
-	border-radius: 5px;
-}
-
-.scrollable-div-container .monaco-scrollable-element .slider:hover {
-	background: var(--vscode-scrollbarSlider-hoverBackground);
-}
-
-.scrollable-div-container .monaco-scrollable-element .slider:active {
-	background: var(--vscode-scrollbarSlider-activeBackground);
-}
+/* Scrollbar Styling - Use VS Code native scrollbar styles */
+/* Monaco's DomScrollableElement already applies native scrollbar styles */
+/* No custom overrides needed - let Monaco handle it */
 
 /* Collapsed State */
 .composer-terminal-tool-call-block-container:not(.expanded) .composer-tool-call-body {
