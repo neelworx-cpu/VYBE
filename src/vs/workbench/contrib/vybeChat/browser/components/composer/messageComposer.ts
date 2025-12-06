@@ -80,7 +80,7 @@ export class MessageComposer extends Disposable {
 	private contextPillsContainer: HTMLElement | null = null;
 	private contextPillsScrollable: DomScrollableElement | null = null; // Scrollable wrapper for pills
 	private contextPills: Map<string, HTMLElement> = new Map(); // Map of pill ID to pill element
-	private contextPillsData: Map<string, { type: 'file' | 'terminal' | 'doc'; name: string; path?: string; iconClasses?: string[] }> = new Map(); // Store pill data
+	private contextPillsData: Map<string, { type: 'file' | 'terminal' | 'doc'; name: string; path?: string; iconClasses?: string[]; value?: string }> = new Map(); // Store pill data (value is for terminal selections)
 
 	// Microphone/Speech recognition
 	private isRecording: boolean = false;
@@ -1601,12 +1601,79 @@ export class MessageComposer extends Disposable {
 		return { ...this.modelState };
 	}
 
-	public getContextPillsData(): Array<{ id: string; type: 'file' | 'terminal' | 'doc'; name: string; path?: string; iconClasses?: string[] }> {
+	/**
+	 * Debug method: Get detailed info about all pills, especially terminal pills with selection text
+	 * Call from browser console: __vybeInspectPills()
+	 */
+	public inspectPills(): void {
+		console.group('[VYBE Composer] Pill Inspection');
+		console.log('Total pills:', this.contextPillsData.size);
+
+		if (this.contextPillsData.size === 0) {
+			console.warn('No pills found in composer. Have you added any context pills?');
+			console.groupEnd();
+			return;
+		}
+
+		const pills = Array.from(this.contextPillsData.entries()).map(([id, data]) => ({
+			id,
+			...data
+		}));
+
+		const terminalPills = pills.filter(p => p.type === 'terminal');
+		const otherPills = pills.filter(p => p.type !== 'terminal');
+
+		if (terminalPills.length > 0) {
+			console.group(`🔵 Terminal Pills (${terminalPills.length})`);
+			terminalPills.forEach((pill, index) => {
+				console.group(`Terminal Pill ${index + 1}: ${pill.name}`);
+				console.log('ID:', pill.id);
+				console.log('Name:', pill.name);
+				console.log('Has Selection Text:', !!pill.value);
+				console.log('Selection Length:', pill.value?.length || 0);
+				if (pill.value) {
+					console.log('Selection Preview (first 200 chars):', pill.value.substring(0, 200) + (pill.value.length > 200 ? '...' : ''));
+					console.log('Full Selection Text:', pill.value);
+				} else {
+					console.warn('⚠️ No selection text stored for this pill!');
+				}
+				console.groupEnd();
+			});
+			console.groupEnd();
+		} else {
+			console.log('No terminal pills found.');
+		}
+
+		if (otherPills.length > 0) {
+			console.group(`📎 Other Pills (${otherPills.length})`);
+			otherPills.forEach(pill => {
+				console.log(`${pill.type}: ${pill.name}`, pill);
+			});
+			console.groupEnd();
+		}
+
+		console.groupEnd();
+	}
+
+	public getContextPillsData(): Array<{ id: string; type: 'file' | 'terminal' | 'doc'; name: string; path?: string; iconClasses?: string[]; value?: string }> {
 		// Return array of all context pills data
-		const pills: Array<{ id: string; type: 'file' | 'terminal' | 'doc'; name: string; path?: string; iconClasses?: string[] }> = [];
+		const pills: Array<{ id: string; type: 'file' | 'terminal' | 'doc'; name: string; path?: string; iconClasses?: string[]; value?: string }> = [];
 		this.contextPillsData.forEach((data, id) => {
 			pills.push({ id, ...data });
 		});
+
+		// Debug: Log terminal pills with selection text when retrieved
+		const terminalPills = pills.filter(p => p.type === 'terminal' && p.value);
+		if (terminalPills.length > 0) {
+			console.log('[VYBE Composer] Terminal pills data retrieved:', terminalPills.map(p => ({
+				id: p.id,
+				name: p.name,
+				hasValue: !!p.value,
+				valueLength: p.value?.length || 0,
+				valuePreview: p.value?.substring(0, 100) + (p.value && p.value.length > 100 ? '...' : '')
+			})));
+		}
+
 		return pills;
 	}
 
@@ -1761,15 +1828,15 @@ export class MessageComposer extends Disposable {
 	 * @param path - File path (for files only)
 	 * @param iconClasses - Icon classes for file icons (for files only)
 	 */
-	public insertContextPill(type: 'file' | 'terminal' | 'doc', name: string, path?: string, iconClasses?: string[]): void {
+	public insertContextPill(type: 'file' | 'terminal' | 'doc', name: string, path?: string, iconClasses?: string[], value?: string): void {
 		if (!this.contextPillsContainer) {
 			return;
 		}
 
 		const pillId = `${type}-${name}-${Date.now()}`;
 
-		// Store pill data
-		this.contextPillsData.set(pillId, { type, name, path, iconClasses });
+		// Store pill data (value is for terminal selection text)
+		this.contextPillsData.set(pillId, { type, name, path, iconClasses, value });
 
 		// Notify change detection
 		this.notifyPillChange();
@@ -1777,8 +1844,8 @@ export class MessageComposer extends Disposable {
 		// Show toolbar
 		if (this.contextPillsToolbar) {
 			this.contextPillsToolbar.style.display = 'flex';
-			// Add smaller gap below pills toolbar (reduced from 4px)
-			this.contextPillsToolbar.style.marginBottom = '2px';
+			// No margin bottom - gap handled by padding
+			this.contextPillsToolbar.style.marginBottom = '0';
 		}
 
 		// Update image toolbar margin if it exists (reduce gap if pills are present)
@@ -2021,7 +2088,7 @@ export class MessageComposer extends Disposable {
 			justify-content: flex-start;
 			width: 100%;
 			box-sizing: border-box;
-			padding: 2px 0;
+			padding: 1px 0;
 			margin: 0;
 		`;
 

@@ -12,5 +12,8 @@ import './vybeChatSessions.contribution.js';
 // Register initialization (ensures default chat tab always exists)
 import './vybeChatInitialization.contribution.js';
 
+// Register terminal selection button
+import './terminalSelectionButton.contribution.js';
+
 // Register actions
 import '../actions/vybeChatActions.js';
