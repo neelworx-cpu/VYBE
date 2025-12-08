@@ -31,6 +31,18 @@ import { ILanguageService } from '../../../../editor/common/languages/language.j
 import { ISpeechService } from '../../../contrib/speech/common/speechService.js';
 import { IMarkdownRendererService } from '../../../../platform/markdown/browser/markdownRenderer.js';
 import { IClipboardService } from '../../../../platform/clipboard/common/clipboardService.js';
+import { IChatRequestVariableEntry, IChatRequestFileEntry, IChatRequestStringVariableEntry } from '../../chat/common/chatVariableEntries.js';
+import { ThemeIcon } from '../../../../base/common/themables.js';
+import { Codicon } from '../../../../base/common/codicons.js';
+import { IFileService } from '../../../../platform/files/common/files.js';
+import { URI } from '../../../../base/common/uri.js';
+import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
+import { CodeDataTransfers, containsDragType, extractEditorsDropData } from '../../../../platform/dnd/browser/dnd.js';
+import { DataTransfers } from '../../../../base/browser/dnd.js';
+import { DragAndDropObserver } from '../../../../base/browser/dom.js';
+import { FileKind } from '../../../../platform/files/common/files.js';
+import { getIconClasses } from '../../../../editor/common/services/getIconClasses.js';
+import { basename, dirname, relativePath } from '../../../../base/common/resources.js';
 
 /**
  * VYBE Chat View Pane
@@ -42,6 +54,8 @@ export class VybeChatViewPane extends ViewPane {
 	private composer: MessageComposer | null = null;
 	private contextDropdown: ContextDropdown | null = null;
 	private usageDropdown: UsageDropdown | null = null;
+	private dragAndDropObserver: DragAndDropObserver | null = null;
+	private isDragAndDropSetup: boolean = false;
 	private chatArea: HTMLElement | null = null;
 	private messagePages: Map<string, MessagePage> = new Map();
 	private messageIndex: number = 0;
@@ -65,6 +79,8 @@ export class VybeChatViewPane extends ViewPane {
 		@ISpeechService private readonly _speechService: ISpeechService,
 		@IMarkdownRendererService private readonly markdownRendererService: IMarkdownRendererService,
 		@IClipboardService private readonly _clipboardService: IClipboardService,
+		@IFileService private readonly _fileService: IFileService,
+		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
 	) {
 		super(
 			{
@@ -187,9 +203,12 @@ export class VybeChatViewPane extends ViewPane {
 		(globalThis as any).__vybeComposer = this.composer;
 		// VYBE-PATCH-END: test-helpers
 
+		// Set up drag and drop for the composer
+		this.setupComposerDragAndDrop();
+
 		// Set up composer event handlers
 		this._register(this.composer.onSend(message => {
-			this.handleSendMessage(message);
+			void this.handleSendMessage(message);
 		}));
 
 		this._register(this.composer.onStop(() => {
@@ -214,6 +233,40 @@ export class VybeChatViewPane extends ViewPane {
 						}
 					});
 				}
+
+				// Update current session files before showing
+				if (this.composer) {
+					const contextPills = this.composer.getContextPillsData();
+					const workspace = this.workspaceContextService.getWorkspace();
+					const workspaceRoot = workspace.folders.length > 0 ? workspace.folders[0].uri : undefined;
+
+					const sessionFiles = contextPills
+						.filter(pill => pill.type === 'file' && pill.path)
+						.map(pill => {
+							// Try to construct URI from path
+							let uri: URI | undefined;
+							try {
+								if (pill.path && workspaceRoot) {
+									// Path is relative to workspace root, construct full URI
+									const fullPath = pill.path.endsWith('/') || pill.path.endsWith('\\')
+										? `${pill.path}${pill.name}`
+										: `${pill.path}/${pill.name}`;
+									// Remove leading slash if present
+									const cleanPath = fullPath.startsWith('/') ? fullPath.substring(1) : fullPath;
+									uri = URI.joinPath(workspaceRoot, cleanPath);
+								}
+							} catch (e) {
+								// Ignore URI construction errors
+							}
+							return {
+								name: pill.name,
+								path: pill.path || '',
+								uri: uri
+							};
+						});
+					this.contextDropdown.setCurrentSessionFiles(sessionFiles);
+				}
+
 				this.contextDropdown.show();
 			}
 		}));
@@ -235,7 +288,7 @@ export class VybeChatViewPane extends ViewPane {
 		}));
 	}
 
-	private handleSendMessage(message: string): void {
+	private async handleSendMessage(message: string): Promise<void> {
 		if (!this.chatArea || !message.trim()) {
 			return;
 		}
@@ -321,8 +374,283 @@ export class VybeChatViewPane extends ViewPane {
 			}
 		});
 
+		// Convert context pills to AI service format
+		await this.convertContextPillsToVariableEntries(contextPills);
+		// Variable entries will be used when AI service integration is implemented
+
 		// TODO: Send message to AI service and start streaming
+		// Include variableEntries in the request
 		// For now, message stays in streaming state until stop button is clicked
+	}
+
+	/**
+	 * Convert context pills from composer to IChatRequestVariableEntry format for AI service
+	 */
+	private async convertContextPillsToVariableEntries(
+		pills: Array<{ id: string; type: 'file' | 'terminal' | 'doc'; name: string; path?: string; iconClasses?: string[]; value?: string }>
+	): Promise<IChatRequestVariableEntry[]> {
+		const variableEntries: IChatRequestVariableEntry[] = [];
+
+		for (const pill of pills) {
+			try {
+				if (pill.type === 'file' && pill.path) {
+					// File pill: convert to IChatRequestFileEntry
+					// Path from contextDropdown is a directory path string (e.g., 'src/vs/workbench/...')
+					// We need to construct the full file URI: file:///path/to/dir/filename
+					// The pill.name contains the filename
+					let fileUri: URI;
+					try {
+						// First try parsing as URI (in case it's already a URI string)
+						fileUri = URI.parse(pill.path);
+						// If it's not a file URI or has no scheme, reconstruct from path + name
+						if (!fileUri.scheme || (fileUri.scheme !== 'file' && fileUri.scheme !== 'vscode-file')) {
+							// Reconstruct: path is directory, name is filename
+							const fullPath = pill.path.endsWith('/') || pill.path.endsWith('\\')
+								? `${pill.path}${pill.name}`
+								: `${pill.path}/${pill.name}`;
+							fileUri = URI.file(fullPath.startsWith('/') ? fullPath : `/${fullPath}`);
+						}
+					} catch {
+						// If URI.parse fails, construct from path + name
+						const fullPath = pill.path.endsWith('/') || pill.path.endsWith('\\')
+							? `${pill.path}${pill.name}`
+							: `${pill.path}/${pill.name}`;
+						fileUri = URI.file(fullPath.startsWith('/') ? fullPath : `/${fullPath}`);
+					}
+
+					// Check if file exists and get omitted state
+					let omittedState = 0; // OmittedState.NotOmitted
+					try {
+						const stat = await this._fileService.resolve(fileUri);
+						if (!stat.isFile) {
+							continue; // Skip if not a file
+						}
+					} catch {
+						omittedState = 2; // OmittedState.Full - file doesn't exist or can't be read
+					}
+
+					const fileEntry: IChatRequestFileEntry = {
+						kind: 'file',
+						id: pill.id,
+						name: pill.name,
+						fullName: pill.name,
+						value: fileUri,
+						omittedState,
+						icon: pill.iconClasses ? ThemeIcon.fromId(pill.iconClasses[0] || Codicon.file.id) : ThemeIcon.fromId(Codicon.file.id),
+					};
+					variableEntries.push(fileEntry);
+				} else if (pill.type === 'terminal' && pill.value) {
+					// Terminal pill: convert to ITerminalVariableEntry or IChatRequestStringVariableEntry
+					// For now, use string entry since we don't have command/output/exitCode
+					// In the future, could enhance to use ITerminalVariableEntry if we track command execution
+					const terminalUri = URI.parse(`terminal://${pill.name}`);
+
+					const stringEntry: IChatRequestStringVariableEntry = {
+						kind: 'string',
+						id: pill.id,
+						name: pill.name,
+						fullName: pill.name,
+						value: pill.value, // The terminal selection text
+						uri: terminalUri,
+						icon: ThemeIcon.fromId(Codicon.terminal.id),
+						modelDescription: `Terminal selection from ${pill.name}: ${pill.value.substring(0, 100)}${pill.value.length > 100 ? '...' : ''}`,
+					};
+					variableEntries.push(stringEntry);
+				} else if (pill.type === 'doc' && pill.value) {
+					// Doc pill: treat as string entry (document content)
+					const docUri = pill.path ? URI.parse(pill.path) : URI.parse(`doc://${pill.name}`);
+
+					const docEntry: IChatRequestStringVariableEntry = {
+						kind: 'string',
+						id: pill.id,
+						name: pill.name,
+						fullName: pill.name,
+						value: pill.value, // Document content
+						uri: docUri,
+						icon: ThemeIcon.fromId(Codicon.book.id),
+						modelDescription: `Document: ${pill.name}`,
+					};
+					variableEntries.push(docEntry);
+				}
+			} catch (error) {
+				console.error(`[VYBE Chat] Failed to convert context pill ${pill.id}:`, error);
+				// Continue with other pills even if one fails
+			}
+		}
+
+		return variableEntries;
+	}
+
+	private setupComposerDragAndDrop(): void {
+		if (!this.composer) {
+			return;
+		}
+
+		const inputBox = this.composer.getInputBox();
+		if (!inputBox) {
+			return;
+		}
+
+		// If already set up, don't create another observer (prevent duplicate listeners)
+		if (this.isDragAndDropSetup && this.dragAndDropObserver) {
+			return;
+		}
+
+		// Dispose existing observer if any (to prevent duplicate listeners)
+		if (this.dragAndDropObserver) {
+			this.dragAndDropObserver.dispose();
+			this.dragAndDropObserver = null;
+		}
+
+		// Set up drag and drop observer on the input box
+		this.dragAndDropObserver = new DragAndDropObserver(inputBox, {
+			onDragOver: (e, dragDuration) => {
+				if (this.isDragEventSupported(e)) {
+					e.stopPropagation();
+					e.preventDefault();
+					if (e.dataTransfer) {
+						e.dataTransfer.dropEffect = 'copy';
+					}
+				}
+			},
+			onDragLeave: (e) => {
+				// Optional: Add visual feedback removal
+			},
+			onDrop: async (e) => {
+				e.stopPropagation();
+				e.preventDefault();
+
+				await this.handleComposerDrop(e);
+			},
+		});
+		this._register(this.dragAndDropObserver);
+		this.isDragAndDropSetup = true;
+	}
+
+	private isDragEventSupported(e: DragEvent): boolean {
+		// Check if the drag event contains files (from explorer, editor tabs, or external)
+		return !!(containsDragType(e, CodeDataTransfers.EDITORS) ||
+			containsDragType(e, CodeDataTransfers.FILES) ||
+			containsDragType(e, DataTransfers.RESOURCES) ||
+			containsDragType(e, DataTransfers.INTERNAL_URI_LIST) ||
+			(e.dataTransfer?.files && e.dataTransfer.files.length > 0));
+	}
+
+	private async handleComposerDrop(e: DragEvent): Promise<void> {
+		if (!this.composer || !e.dataTransfer) {
+			return;
+		}
+
+		// Extract file URIs from drag event
+		const fileUris: URI[] = [];
+
+		// 1. Check for editor drag data (editor tabs)
+		const editorDragData = extractEditorsDropData(e);
+		for (const editor of editorDragData) {
+			if (editor.resource && editor.resource.scheme === 'file') {
+				fileUris.push(editor.resource);
+			}
+		}
+
+		// 2. Check for CodeDataTransfers.FILES (explorer)
+		const rawCodeFiles = e.dataTransfer.getData(CodeDataTransfers.FILES);
+		if (rawCodeFiles) {
+			try {
+				const codeFiles: string[] = JSON.parse(rawCodeFiles);
+				for (const codeFile of codeFiles) {
+					fileUris.push(URI.file(codeFile));
+				}
+			} catch (error) {
+				// Invalid transfer
+			}
+		}
+
+		// 3. Check for DataTransfers.RESOURCES
+		const rawResources = e.dataTransfer.getData(DataTransfers.RESOURCES);
+		if (rawResources) {
+			try {
+				const resources: string[] = JSON.parse(rawResources);
+				for (const resource of resources) {
+					const uri = URI.parse(resource);
+					if (uri.scheme === 'file') {
+						fileUris.push(uri);
+					}
+				}
+			} catch (error) {
+				// Invalid transfer
+			}
+		}
+
+		// 4. Check for native file transfer (external files and folders)
+		if (e.dataTransfer.files) {
+			for (let i = 0; i < e.dataTransfer.files.length; i++) {
+				const file = e.dataTransfer.files[i];
+				// Handle both files and directories
+				if (file) {
+					// Try to get path from file
+					const path = (file as any).path;
+					if (path) {
+						fileUris.push(URI.file(path));
+					}
+				}
+			}
+		}
+
+		// Remove duplicates
+		const uniqueUris = new Set<string>();
+		const uniqueFiles: URI[] = [];
+		for (const uri of fileUris) {
+			const uriString = uri.toString();
+			if (!uniqueUris.has(uriString)) {
+				uniqueUris.add(uriString);
+				uniqueFiles.push(uri);
+			}
+		}
+
+		// Convert URIs to context pills
+		const workspace = this.workspaceContextService.getWorkspace();
+		const workspaceRoot = workspace.folders.length > 0 ? workspace.folders[0].uri : undefined;
+
+		// Batch resolve all files/folders at once to reduce async operations
+		const resolvedFiles = await this._fileService.resolveAll(uniqueFiles.map(uri => ({ resource: uri })));
+
+		for (let i = 0; i < uniqueFiles.length; i++) {
+			const fileUri = uniqueFiles[i];
+			const resolvedFile = resolvedFiles[i];
+
+			try {
+				// Check if file/folder exists and was resolved successfully
+				if (!resolvedFile.success || !resolvedFile.stat) {
+					continue; // Skip if resolution failed
+				}
+
+				const stat = resolvedFile.stat;
+
+				// Get name and relative path
+				const name = basename(fileUri);
+				let relativePathStr = '';
+
+				if (workspaceRoot) {
+					const dirUri = stat.isDirectory ? fileUri : dirname(fileUri);
+					const relPath = relativePath(workspaceRoot, dirUri);
+					if (relPath) {
+						relativePathStr = relPath;
+					}
+				} else {
+					relativePathStr = (stat.isDirectory ? fileUri.fsPath : dirname(fileUri).fsPath) || '';
+				}
+
+				// Get icon classes (use FileKind.FOLDER for directories, FileKind.FILE for files)
+				const fileKind = stat.isDirectory ? FileKind.FOLDER : FileKind.FILE;
+				const iconClasses = getIconClasses(this._modelService, this._languageService, fileUri, fileKind);
+
+				// Insert context pill (treat folders as files for now, but with folder icon)
+				this.composer.insertContextPill('file', name, relativePathStr, iconClasses);
+			} catch (error) {
+				// File/folder doesn't exist or error reading - skip it
+				console.error('[VYBE Chat] Error handling dropped file/folder:', error);
+			}
+		}
 	}
 
 	/**

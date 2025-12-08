@@ -1888,9 +1888,12 @@ export class MessageComposer extends Disposable {
 
 		// Icon container - use 16px for file icons (like context dropdown), 12px for codicons
 		const iconContainer = append(pill, $('span'));
-		const iconSize = type === 'file' ? 16 : 12;
 
-		if (type === 'file') {
+		// Check if this is a folder by looking for 'folder-icon' in icon classes
+		const isFolder = type === 'file' && iconClasses && iconClasses.some(cls => cls.includes('folder-icon'));
+		const iconSize = (type === 'file' && !isFolder) ? 16 : 12;
+
+		if (type === 'file' && !isFolder) {
 			iconContainer.className = 'show-file-icons';
 		}
 
@@ -1904,38 +1907,50 @@ export class MessageComposer extends Disposable {
 			position: relative;
 			overflow: visible;
 			margin: 0;
-			margin-left: ${type === 'file' ? '-2px' : '0'};
-			margin-top: ${type === 'file' ? '-1px' : '0'};
+			margin-left: ${type === 'file' && !isFolder ? '-2px' : '0'};
+			margin-top: ${type === 'file' && !isFolder ? '-1px' : '0'};
 			padding: 0;
 		`;
 
 		// Icon based on type
 		let iconElement: HTMLElement;
 		if (type === 'file') {
-			// File icon - EXACTLY match context dropdown structure
-			const iconWrapper = append(iconContainer, $('div'));
-			iconWrapper.style.cssText = `
-				position: relative;
-				height: 100%;
-				width: 100%;
-				display: flex;
-				align-items: center;
-				justify-content: center;
-			`;
+			if (isFolder) {
+				// Folder icon - use codicon like context dropdown
+				iconElement = append(iconContainer, $('i.codicon.codicon-folder'));
+				iconElement.style.cssText = `
+					font-size: 12px;
+					line-height: 12px;
+					display: flex;
+					align-items: center;
+					justify-content: center;
+				`;
+			} else {
+				// File icon - EXACTLY match context dropdown structure
+				const iconWrapper = append(iconContainer, $('div'));
+				iconWrapper.style.cssText = `
+					position: relative;
+					height: 100%;
+					width: 100%;
+					display: flex;
+					align-items: center;
+					justify-content: center;
+				`;
 
-			iconElement = append(iconWrapper, $('div'));
-			const classes = ['monaco-icon-label', 'file-icon'];
-			if (iconClasses && iconClasses.length > 0) {
-				classes.push(...iconClasses);
+				iconElement = append(iconWrapper, $('div'));
+				const classes = ['monaco-icon-label', 'file-icon'];
+				if (iconClasses && iconClasses.length > 0) {
+					classes.push(...iconClasses);
+				}
+				classes.push('height-override-important');
+				iconElement.className = classes.join(' ');
+				// Match context dropdown exactly - use 100% not fixed px, ensure display: flex
+				iconElement.style.cssText = `
+					height: 100%;
+					width: 100%;
+					display: flex;
+				`;
 			}
-			classes.push('height-override-important');
-			iconElement.className = classes.join(' ');
-			// Match context dropdown exactly - use 100% not fixed px, ensure display: flex
-			iconElement.style.cssText = `
-				height: 100%;
-				width: 100%;
-				display: flex;
-			`;
 		} else {
 			// Terminal or doc icon - simple codicon
 			iconElement = append(iconContainer, $(`span.codicon.${type === 'terminal' ? 'codicon-terminal' : 'codicon-book'}`));
@@ -2345,6 +2360,10 @@ export class MessageComposer extends Disposable {
 			setTimeout(animate, 100 + Math.random() * 100);
 		};
 		animate();
+	}
+
+	public getInputBox(): HTMLElement | null {
+		return this.inputBox;
 	}
 
 	override dispose(): void {

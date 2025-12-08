@@ -1,0 +1,254 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* Ensure terminal-wrapper has flex layout when prompt bar is present */
+.terminal-wrapper:has(.prompt-bar-container.vybe-terminal-prompt-bar) {
+	display: flex !important;
+	flex-direction: column !important;
+	height: 100% !important;
+	position: relative !important;
+	overflow: hidden !important;
+}
+
+/* Ensure xterm-wrapper takes up available space and clips content */
+.terminal-wrapper:has(.prompt-bar-container.vybe-terminal-prompt-bar) > .xterm-wrapper {
+	flex-grow: 1 !important;
+	flex-shrink: 1 !important;
+	min-height: 0 !important;
+	position: relative !important;
+	overflow: hidden !important;
+	z-index: auto !important;
+	height: auto !important;
+	padding-top: 0 !important;
+	margin-top: 0 !important;
+	padding-bottom: 0 !important; /* No padding - flex handles spacing */
+	margin-bottom: 0 !important;
+	max-height: 100% !important;
+	box-sizing: border-box !important;
+	/* Ensure wrapper clips any overflow */
+	contain: layout style paint !important;
+	/* Ensure no background shows through gap */
+	background: transparent !important;
+}
+
+/* Ensure the xterm inside xterm-wrapper uses relative positioning (like Cursor) */
+.terminal-wrapper:has(.prompt-bar-container.vybe-terminal-prompt-bar) > .xterm-wrapper > .terminal.xterm {
+	/* Override VS Code's absolute positioning - use relative like Cursor */
+	position: relative !important;
+	top: auto !important;
+	bottom: auto !important;
+	left: auto !important;
+	right: auto !important;
+	/* Explicitly constrain height to xterm-wrapper's height */
+	height: 100% !important;
+	max-height: 100% !important;
+	box-sizing: border-box !important;
+	overflow: hidden !important;
+}
+
+/* Constrain the scrollable element to fit within xterm - this is what actually contains the terminal content */
+.terminal-wrapper:has(.prompt-bar-container.vybe-terminal-prompt-bar) > .xterm-wrapper > .terminal.xterm > .xterm-scrollable-element {
+	/* Explicitly constrain to xterm's height - this prevents content from extending beyond */
+	height: 100% !important;
+	max-height: 100% !important;
+	overflow: hidden !important;
+	box-sizing: border-box !important;
+	position: relative !important;
+	top: 0 !important;
+	bottom: 0 !important;
+}
+
+/* Ensure the screen inside scrollable element is also constrained */
+.terminal-wrapper:has(.prompt-bar-container.vybe-terminal-prompt-bar) > .xterm-wrapper > .terminal.xterm > .xterm-scrollable-element > .xterm-screen {
+	height: 100% !important;
+	max-height: 100% !important;
+	overflow: hidden !important;
+	box-sizing: border-box !important;
+}
+
+/* Disable sticky scroll overlay (like Cursor) - hide any sticky scroll elements */
+.terminal-wrapper:has(.prompt-bar-container.vybe-terminal-prompt-bar) > .xterm-wrapper .terminal-sticky-scroll,
+.terminal-wrapper:has(.prompt-bar-container.vybe-terminal-prompt-bar) > .xterm-wrapper [class*="sticky-scroll"],
+.terminal-wrapper:has(.prompt-bar-container.vybe-terminal-prompt-bar) > .xterm-wrapper [class*="stickyScroll"] {
+	display: none !important;
+	visibility: hidden !important;
+}
+
+/* Ensure xterm viewport is contained - this is where sticky scroll appears */
+.terminal-wrapper:has(.prompt-bar-container.vybe-terminal-prompt-bar) > .xterm-wrapper > .terminal.xterm > .xterm-viewport {
+	/* Viewport should be clipped by wrapper's overflow: hidden */
+	position: relative !important;
+}
+
+/* Main container - flex child in terminal-wrapper, stacks at bottom */
+.terminal-wrapper > .prompt-bar-container.vybe-terminal-prompt-bar {
+	position: relative !important;
+	width: 100% !important;
+	flex-shrink: 0 !important;
+	flex-grow: 0 !important;
+	flex-basis: auto !important;
+	display: block !important;
+	top: auto !important;
+	bottom: auto !important;
+	left: auto !important;
+	right: auto !important;
+	z-index: 0 !important;
+	order: 999;
+	background: transparent !important;
+	transform: none !important;
+	margin: 0 !important;
+	margin-top: 0 !important;
+	margin-bottom: 0 !important;
+	padding-top: 0 !important;
+	padding-bottom: 0 !important;
+	height: auto !important;
+}
+
+.prompt-bar-container.vybe-terminal-prompt-bar.hide {
+	display: none !important;
+}
+
+/* Hint bar styling */
+.prompt-bar-container.vybe-terminal-prompt-bar .prompt-bar-hint {
+	display: block;
+	text-align: center;
+	opacity: 1;
+	color: var(--vscode-input-placeholderForeground);
+	font-size: 10px;
+	height: 20px;
+	line-height: 20px;
+	cursor: pointer;
+	background: transparent;
+	border: none;
+	border-radius: 0;
+	box-sizing: border-box;
+	padding: 0 10px;
+	visibility: visible;
+}
+
+.prompt-bar-container.vybe-terminal-prompt-bar .prompt-bar-hint code {
+	font-family: var(--vscode-editor-font-family);
+	font-size: 10px;
+}
+
+/* Composer inner styling */
+.prompt-bar-container.vybe-terminal-prompt-bar .terminal-prompt-bar-inner {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	padding: 8px 8px 4px 8px;
+	background: var(--vscode-panel-background);
+	border: 1px solid var(--vscode-panel-border);
+	border-radius: 8px;
+	box-sizing: border-box;
+}
+
+/* Input row */
+.terminal-prompt-bar-input-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.terminal-prompt-bar-input {
+	flex: 1;
+	min-width: 0;
+}
+
+.vybe-terminal-prompt-input {
+	resize: none;
+	overflow-x: auto;
+	overflow-y: hidden;
+	line-height: 20px;
+	font-family: inherit;
+	font-size: 13px;
+	color: var(--vscode-input-foreground);
+	background-color: transparent;
+	border: none;
+	outline: none;
+	box-sizing: border-box;
+	padding: 0;
+	white-space: nowrap;
+	min-height: 20px;
+	max-height: 20px;
+}
+
+/* Placeholder for contenteditable */
+.vybe-terminal-prompt-input[data-placeholder]:empty:before {
+	content: attr(data-placeholder);
+	color: var(--vscode-input-placeholderForeground);
+	opacity: 0.5;
+	pointer-events: none;
+}
+
+/* Actions row */
+.terminal-prompt-bar-actions-row {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 8px;
+}
+
+.terminal-prompt-bar-actions-spacer {
+	flex: 1;
+}
+
+/* Buttons */
+.cursor-button-secondary {
+	background: transparent;
+	border: 1px solid var(--vscode-button-secondaryBackground);
+	color: var(--vscode-button-secondaryForeground);
+	border-radius: 4px;
+	cursor: pointer;
+	user-select: none;
+}
+
+.cursor-button-secondary:hover {
+	background: var(--vscode-button-secondaryHoverBackground);
+}
+
+.terminal-prompt-bar-icon-button {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	cursor: pointer;
+	background: var(--vscode-button-background);
+	color: var(--vscode-button-foreground);
+	border-radius: 4px;
+	border: none;
+}
+
+.terminal-prompt-bar-icon-button:hover {
+	background: var(--vscode-button-hoverBackground);
+}
+
+.terminal-prompt-bar-icon-button:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+/* Quick answer row styling */
+.terminal-prompt-bar-quick-answer-row {
+	display: none;
+}
+
+.terminal-prompt-bar-answer-scroll {
+	/* Native VS Code scrollbar styling */
+}
+
+.terminal-prompt-bar-answer-content {
+	/* Markdown content styling */
+}
+
+/* Inline code highlighting (markdown backticks) */
+.terminal-prompt-bar-answer-content code {
+	background-color: var(--vscode-textCodeBlock-background);
+	color: var(--vscode-textLink-foreground);
+	padding: 2px 4px;
+	border-radius: 3px;
+	font-family: var(--vscode-editor-font-family);
+	font-size: 12px;
+}
+

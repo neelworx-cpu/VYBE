@@ -14,6 +14,13 @@ import { IModelService } from '../../../../../../editor/common/services/model.js
 import { ILanguageService } from '../../../../../../editor/common/languages/language.js';
 import { DomScrollableElement } from '../../../../../../base/browser/ui/scrollbar/scrollableElement.js';
 import { ScrollbarVisibility } from '../../../../../../base/common/scrollable.js';
+import { relativePath, basename, dirname } from '../../../../../../base/common/resources.js';
+import { IWorkspaceContextService } from '../../../../../../platform/workspace/common/workspace.js';
+import { ITerminalService, ITerminalInstance } from '../../../../../contrib/terminal/browser/terminal.js';
+import { IFileService } from '../../../../../../platform/files/common/files.js';
+import { IEditorService } from '../../../../../../workbench/services/editor/common/editorService.js';
+import { EditorsOrder } from '../../../../../../workbench/common/editor.js';
+import { EditorResourceAccessor } from '../../../../../../workbench/common/editor.js';
 
 type ViewType = 'initial' | 'files' | 'docs' | 'terminals';
 
@@ -29,19 +36,35 @@ export class ContextDropdown extends Disposable {
 	private scrollableElement: DomScrollableElement | null = null;
 	private contentWrapper: HTMLElement | null = null;
 	private currentView: ViewType = 'initial';
+	private previousView: ViewType = 'initial';
 	private onPillInsert?: ContextPillInsertCallback;
+	private currentSessionFiles: Array<{ name: string; path: string; uri?: URI }> = [];
+	private searchQuery: string = '';
+	private cachedRecentFiles: Array<{ name: string; path: string; uri: URI }> = [];
+	private cachedFiles: Array<{ name: string; path: string; uri?: URI; isFile: boolean; fromSession: boolean }> = [];
+	private cachedTerminals: Array<{ name: string; instance: ITerminalInstance; isSelected: boolean }> = [];
+	private cachedDocs: Array<{ name: string; source: string; isSelected?: boolean; isAdd?: boolean }> = [];
+	private searchTimeout: any = null;
 
 	constructor(
 		private anchorElement: HTMLElement,
 		@IThemeService private readonly themeService: IThemeService,
 		@IModelService private readonly modelService: IModelService,
-		@ILanguageService private readonly languageService: ILanguageService
+		@ILanguageService private readonly languageService: ILanguageService,
+		@IFileService private readonly fileService: IFileService,
+		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
+		@ITerminalService private readonly terminalService: ITerminalService,
+		@IEditorService private readonly editorService: IEditorService,
 	) {
 		super();
 	}
 
 	public setPillInsertCallback(callback: ContextPillInsertCallback): void {
 		this.onPillInsert = callback;
+	}
+
+	public setCurrentSessionFiles(files: Array<{ name: string; path: string; uri?: URI }>): void {
+		this.currentSessionFiles = files;
 	}
 
 	public show(openDownward: boolean = false): void {
@@ -52,6 +75,7 @@ export class ContextDropdown extends Disposable {
 		}
 
 		this.currentView = 'initial';
+		this.previousView = 'initial';
 		this.createDropdown(openDownward);
 	}
 
@@ -177,6 +201,21 @@ export class ContextDropdown extends Disposable {
 			font-family: -apple-system, "system-ui", sans-serif;
 		`;
 
+		// Add search input event listener with debouncing
+		this._register(addDisposableListener(this.searchInput, 'input', (e: Event) => {
+			const query = (e.target as HTMLInputElement).value.trim().toLowerCase();
+			this.searchQuery = query;
+
+			// Debounce search to avoid excessive re-renders
+			if (this.searchTimeout) {
+				clearTimeout(this.searchTimeout);
+			}
+
+			this.searchTimeout = setTimeout(() => {
+				this.handleSearch();
+			}, 150); // 150ms debounce
+		}));
+
 		// Content wrapper (will be wrapped by DomScrollableElement)
 		// This element will be inside scrollableDomNode and can grow beyond its height
 		this.contentWrapper = $('div');
@@ -232,9 +271,30 @@ export class ContextDropdown extends Disposable {
 		}, 0);
 	}
 
+	private handleSearch(): void {
+		// Don't change view when searching - just re-render with filter
+		// The search query is already set in the input event handler
+		// and will be read from the input in renderContent()
+		this.renderContent();
+	}
+
 	private renderContent(): void {
 		if (!this.contentWrapper || !this.searchInput || !this.backArrow || !this.scrollableContainer) {
 			return;
+		}
+
+		// Check if view has changed - only clear search when switching views
+		const viewChanged = this.currentView !== this.previousView;
+		if (viewChanged) {
+			// Clear search when switching views
+			if (this.searchInput) {
+				this.searchInput.value = '';
+				this.searchQuery = '';
+			}
+			this.previousView = this.currentView;
+		} else {
+			// Get current search query from input (preserve user's typing)
+			this.searchQuery = this.searchInput.value.trim().toLowerCase();
 		}
 
 		clearNode(this.contentWrapper);
@@ -252,6 +312,7 @@ export class ContextDropdown extends Disposable {
 		}
 
 		// Update search placeholder and back arrow visibility
+
 		if (this.currentView === 'initial') {
 			this.searchInput.setAttribute('placeholder', 'Add files, folders, docs...');
 			this.backArrow.style.display = 'none';
@@ -269,14 +330,23 @@ export class ContextDropdown extends Disposable {
 		// Render content
 		if (this.currentView === 'initial') {
 			this.renderInitialView();
+			// Update height immediately for initial view
+			this.updateHeightAfterRender();
 		} else if (this.currentView === 'files') {
-			this.renderFilesView();
+			// For async files view, update height after it completes
+			void this.renderFilesView().then(() => {
+				this.updateHeightAfterRender();
+			});
 		} else if (this.currentView === 'docs') {
 			this.renderDocsView();
+			this.updateHeightAfterRender();
 		} else if (this.currentView === 'terminals') {
 			this.renderTerminalsView();
+			this.updateHeightAfterRender();
 		}
+	}
 
+	private updateHeightAfterRender(): void {
 		// Update height and scrollbar AFTER content is rendered (exactly like history dropdown)
 		setTimeout(() => {
 			if (!this.scrollableElement || !this.contentWrapper) {
@@ -338,17 +408,64 @@ export class ContextDropdown extends Disposable {
 			gap: 2px;
 		`;
 
-		// Mock recent files
-		const recentFiles = [
-			{ name: 'vybeChatViewPane.ts', path: 'src/vs/workbench/contrib/vybeChat/browser' },
-			{ name: 'historyDropdown.ts', path: 'src/vs/workbench/contrib/vybeChat/browser/components/titlebar' },
-			{ name: 'vybeChatActions.ts', path: 'src/vs/workbench/contrib/vybeChat/browser/actions' }
-		];
+		// Get real recently used editors (MRU - Most Recently Used)
+		const recentEditors = this.editorService.getEditors(EditorsOrder.MOST_RECENTLY_ACTIVE, { excludeSticky: false });
 
-		recentFiles.forEach((file) => {
-			const fileItem = this.createFileItem(file, isDark, textColor, borderColor, false);
-			recentSection.appendChild(fileItem);
-		});
+		// Filter to only file editors and get their resources
+		let recentFiles: Array<{ name: string; path: string; uri: URI }> = [];
+		const workspace = this.workspaceContextService.getWorkspace();
+		const workspaceRoot = workspace.folders.length > 0 ? workspace.folders[0].uri : undefined;
+
+		for (const editorIdentifier of recentEditors.slice(0, 5)) { // Limit to 5 most recent
+			const resource = EditorResourceAccessor.getOriginalUri(editorIdentifier.editor);
+			if (resource && URI.isUri(resource) && resource.scheme === 'file') {
+				const fileName = basename(resource);
+				let relativePathStr = '';
+
+				if (workspaceRoot) {
+					const dirUri = dirname(resource);
+					const relPath = relativePath(workspaceRoot, dirUri);
+					if (relPath) {
+						relativePathStr = relPath;
+					}
+				} else {
+					relativePathStr = dirname(resource).fsPath || '';
+				}
+
+				recentFiles.push({
+					name: fileName,
+					path: relativePathStr,
+					uri: resource
+				});
+			}
+		}
+
+		// Cache recent files
+		this.cachedRecentFiles = recentFiles;
+
+		// Filter by search query if present (filename only)
+		if (this.searchQuery) {
+			recentFiles = recentFiles.filter(file =>
+				file.name.toLowerCase().includes(this.searchQuery)
+			);
+		}
+
+		if (recentFiles.length === 0) {
+			const emptyMessage = append(recentSection, $('div'));
+			emptyMessage.textContent = this.searchQuery ? 'No files match your search' : 'No recent files';
+			emptyMessage.style.cssText = `
+				color: ${textColor};
+				font-size: 11px;
+				opacity: 0.6;
+				padding: 8px 6px;
+				text-align: center;
+			`;
+		} else {
+			recentFiles.forEach((file) => {
+				const fileItem = this.createFileItem(file, isDark, textColor, borderColor, false);
+				recentSection.appendChild(fileItem);
+			});
+		}
 
 		// Divider
 		const divider = append(this.contentWrapper, $('div'));
@@ -380,7 +497,7 @@ export class ContextDropdown extends Disposable {
 		});
 	}
 
-	private renderFilesView(): void {
+	private async renderFilesView(): Promise<void> {
 		if (!this.contentWrapper) {
 			return;
 		}
@@ -408,28 +525,238 @@ export class ContextDropdown extends Disposable {
 			gap: 2px;
 		`;
 
-		// Mock files and folders
-		const items = [
-			{ name: 'vybeChatViewPane.ts', path: 'src/vs/workbench/contrib/vybeChat/browser', isFile: true, isSelected: true },
-			{ name: 'src', path: '/src', isFile: false },
-			{ name: 'vs', path: '/src/vs', isFile: false },
-			{ name: 'workbench', path: '/src/vs/workbench', isFile: false },
-			{ name: 'contrib', path: '/src/vs/workbench/contrib', isFile: false },
-			{ name: 'vybeChat', path: '/src/vs/workbench/contrib/vybeChat', isFile: false },
-			{ name: 'common', path: '/src/vs/workbench/contrib/vybeChat/common', isFile: false },
-			{ name: 'browser', path: '/src/vs/workbench/contrib/vybeChat/browser', isFile: false },
-			{ name: 'components', path: '/src/vs/workbench/contrib/vybeChat/browser/components', isFile: false },
-			{ name: 'titlebar', path: '/src/vs/workbench/contrib/vybeChat/browser/components/titlebar', isFile: false },
-			{ name: 'composer', path: '/src/vs/workbench/contrib/vybeChat/browser/components/composer', isFile: false },
-			{ name: 'historyDropdown.ts', path: 'src/vs/workbench/contrib/vybeChat/browser/components/titlebar', isFile: true },
-			{ name: 'vybeChatActions.ts', path: 'src/vs/workbench/contrib/vybeChat/browser/actions', isFile: true },
-			{ name: 'vybeChatConstants.ts', path: 'src/vs/workbench/contrib/vybeChat/common', isFile: true }
-		];
+		// Get workspace folders
+		const workspace = this.workspaceContextService.getWorkspace();
+		if (workspace.folders.length === 0) {
+			const emptyMessage = append(filesList, $('div'));
+			emptyMessage.textContent = 'No workspace folder open';
+			emptyMessage.style.cssText = `
+				color: ${textColor};
+				font-size: 11px;
+				opacity: 0.6;
+				padding: 8px 6px;
+				text-align: center;
+			`;
+			return;
+		}
 
-		items.forEach(item => {
-			const fileItem = this.createFileOrFolderItem(item, isDark, textColor, borderColor);
-			filesList.appendChild(fileItem);
-		});
+		// Show loading state
+		const loadingMessage = append(filesList, $('div'));
+		loadingMessage.textContent = 'Loading files...';
+		loadingMessage.style.cssText = `
+			color: ${textColor};
+			font-size: 11px;
+			opacity: 0.6;
+			padding: 8px 6px;
+			text-align: center;
+		`;
+
+		try {
+			// Clear loading message
+			clearNode(filesList);
+
+			// Get workspace root first (needed for path calculations)
+			const workspaceRoot = workspace.folders.length > 0 ? workspace.folders[0].uri : undefined;
+
+			// Get files from current session (context pills)
+			const sessionFiles = this.currentSessionFiles.map(file => {
+				// If we have a URI, extract the relative path properly
+				let filePath = file.path;
+				if (file.uri && workspaceRoot) {
+					const dirUri = dirname(file.uri);
+					const relPath = relativePath(workspaceRoot, dirUri);
+					if (relPath) {
+						filePath = relPath;
+					}
+				}
+				return {
+					name: file.name,
+					path: filePath,
+					uri: file.uri,
+					isFile: true,
+					fromSession: true
+				};
+			});
+
+			// Get recently opened files from editor history (excluding files already in session)
+			const recentEditors = this.editorService.getEditors(EditorsOrder.MOST_RECENTLY_ACTIVE, { excludeSticky: false });
+			const recentFiles: Array<{ name: string; path: string; uri?: URI; isFile: boolean; fromSession: boolean }> = [];
+			const sessionFileUris = new Set(sessionFiles.map(f => f.uri?.toString()).filter(Boolean));
+
+			for (const editorIdentifier of recentEditors) {
+				const resource = EditorResourceAccessor.getOriginalUri(editorIdentifier.editor);
+				if (resource && URI.isUri(resource) && resource.scheme === 'file') {
+					// Skip if already in session files
+					if (sessionFileUris.has(resource.toString())) {
+						continue;
+					}
+
+					const fileName = basename(resource);
+					let relativePathStr = '';
+
+					if (workspaceRoot) {
+						const dirUri = dirname(resource);
+						const relPath = relativePath(workspaceRoot, dirUri);
+						if (relPath) {
+							relativePathStr = relPath;
+						}
+					} else {
+						relativePathStr = dirname(resource).fsPath || '';
+					}
+
+					recentFiles.push({
+						name: fileName,
+						path: relativePathStr,
+						uri: resource,
+						isFile: true,
+						fromSession: false
+					});
+				}
+			}
+
+			// Combine session files and recent files
+			const allFiles = [...sessionFiles, ...recentFiles];
+
+			if (allFiles.length === 0) {
+				const emptyMessage = append(filesList, $('div'));
+				emptyMessage.textContent = this.searchQuery ? 'No files match your search' : 'No files found';
+				emptyMessage.style.cssText = `
+					color: ${textColor};
+					font-size: 11px;
+					opacity: 0.6;
+					padding: 8px 6px;
+					text-align: center;
+				`;
+				return;
+			}
+
+			// Sort: session files first, then recent files, both alphabetically
+			allFiles.sort((a, b) => {
+				if (a.fromSession !== b.fromSession) {
+					return a.fromSession ? -1 : 1; // Session files first
+				}
+				return a.name.localeCompare(b.name);
+			});
+
+			// Cache files
+			this.cachedFiles = allFiles;
+
+			// Filter by search query if present (filename only)
+			let filteredFiles = allFiles;
+			if (this.searchQuery) {
+				filteredFiles = allFiles.filter(item =>
+					item.name.toLowerCase().includes(this.searchQuery)
+				);
+			}
+
+			// Check if filtered results are empty
+			if (filteredFiles.length === 0) {
+				const emptyMessage = append(filesList, $('div'));
+				emptyMessage.textContent = 'No files match your search';
+				emptyMessage.style.cssText = `
+					color: ${textColor};
+					font-size: 11px;
+					opacity: 0.6;
+					padding: 8px 6px;
+					text-align: center;
+				`;
+			} else {
+				// Render files (limit to 50 for performance)
+				const displayFiles = filteredFiles.slice(0, 50);
+				displayFiles.forEach(item => {
+					const fileItem = this.createFileOrFolderItem(item, isDark, textColor, borderColor);
+					filesList.appendChild(fileItem);
+				});
+
+				if (filteredFiles.length > 50) {
+					const moreMessage = append(filesList, $('div'));
+					moreMessage.textContent = `... and ${filteredFiles.length - 50} more files`;
+					moreMessage.style.cssText = `
+						color: ${textColor};
+						font-size: 11px;
+						opacity: 0.5;
+						padding: 4px 6px;
+						text-align: center;
+						font-style: italic;
+					`;
+				}
+			}
+		} catch (error) {
+			clearNode(filesList);
+			const errorMessage = append(filesList, $('div'));
+			errorMessage.textContent = 'Error loading files';
+			errorMessage.style.cssText = `
+				color: ${textColor};
+				font-size: 11px;
+				opacity: 0.6;
+				padding: 8px 6px;
+				text-align: center;
+			`;
+			console.error('[VYBE Context Dropdown] Error loading files:', error);
+		}
+	}
+
+	/**
+	 * Recursively get files from a directory
+	 */
+	private async getFilesRecursive(rootUri: URI, maxDepth: number, currentDepth: number = 0): Promise<Array<{ name: string; path: string; isFile: boolean }>> {
+		if (currentDepth >= maxDepth) {
+			return [];
+		}
+
+		const files: Array<{ name: string; path: string; isFile: boolean }> = [];
+
+		try {
+			const stat = await this.fileService.resolve(rootUri);
+			if (!stat.isDirectory) {
+				return [];
+			}
+
+			// Get relative path from workspace root
+			const workspace = this.workspaceContextService.getWorkspace();
+			if (workspace.folders.length === 0) {
+				return [];
+			}
+
+			const workspaceRoot = workspace.folders[0].uri;
+			const relativePathStr = relativePath(workspaceRoot, rootUri) || '';
+
+			// Add current directory if not root
+			if (relativePathStr && currentDepth > 0) {
+				files.push({
+					name: basename(rootUri),
+					path: relativePathStr,
+					isFile: false
+				});
+			}
+
+			// Process children
+			if (stat.children) {
+				for (const child of stat.children) {
+					if (child.isFile) {
+						// Get directory path (parent of file)
+						const childDir = dirname(child.resource);
+						const dirRelativePath = relativePath(workspaceRoot, childDir) || '';
+						// Remove leading slash if present
+						const dirPath = dirRelativePath.replace(/^\//, '');
+
+						files.push({
+							name: basename(child.resource),
+							path: dirPath,
+							isFile: true
+						});
+					} else if (child.isDirectory && currentDepth < maxDepth - 1) {
+						// Recursively get files from subdirectories
+						const subFiles = await this.getFilesRecursive(child.resource, maxDepth, currentDepth + 1);
+						files.push(...subFiles);
+					}
+				}
+			}
+		} catch (error) {
+			console.error(`[VYBE Context Dropdown] Error reading directory ${rootUri.toString()}:`, error);
+		}
+
+		return files;
 	}
 
 	private renderDocsView(): void {
@@ -460,7 +787,7 @@ export class ContextDropdown extends Disposable {
 		`;
 
 		// Mock docs
-		const docs = [
+		const allDocs = [
 			{ name: 'VS Code API', source: 'Official', isSelected: true },
 			{ name: 'TypeScript', source: 'Official' },
 			{ name: 'React', source: 'Official' },
@@ -474,10 +801,34 @@ export class ContextDropdown extends Disposable {
 			{ name: 'Add new doc', source: '', isAdd: true }
 		];
 
-		docs.forEach(doc => {
-			const docItem = this.createDocItem(doc, isDark, textColor);
-			docsList.appendChild(docItem);
-		});
+		// Cache docs
+		this.cachedDocs = allDocs;
+
+		// Filter by search query if present
+		let docs = allDocs;
+		if (this.searchQuery) {
+			docs = allDocs.filter(doc =>
+				doc.name.toLowerCase().includes(this.searchQuery) ||
+				doc.source.toLowerCase().includes(this.searchQuery)
+			);
+		}
+
+		if (docs.length === 0) {
+			const emptyMessage = append(docsList, $('div'));
+			emptyMessage.textContent = 'No docs match your search';
+			emptyMessage.style.cssText = `
+				color: ${textColor};
+				font-size: 11px;
+				opacity: 0.6;
+				padding: 8px 6px;
+				text-align: center;
+			`;
+		} else {
+			docs.forEach(doc => {
+				const docItem = this.createDocItem(doc, isDark, textColor);
+				docsList.appendChild(docItem);
+			});
+		}
 	}
 
 	private renderTerminalsView(): void {
@@ -507,15 +858,57 @@ export class ContextDropdown extends Disposable {
 			gap: 2px;
 		`;
 
-		// Mock terminals
-		const terminals = [
-			{ name: 'zsh', isSelected: true },
-			{ name: 'npm run watch', isSelected: false },
-			{ name: 'node', isSelected: false },
-			{ name: 'Add new terminal', isAdd: true }
-		];
+		// Get real terminal instances
+		const terminalInstances = this.terminalService.instances;
 
-		terminals.forEach(terminal => {
+		if (terminalInstances.length === 0) {
+			const emptyMessage = append(terminalsList, $('div'));
+			emptyMessage.textContent = 'No terminals open';
+			emptyMessage.style.cssText = `
+				color: ${textColor};
+				font-size: 11px;
+				opacity: 0.6;
+				padding: 8px 6px;
+				text-align: center;
+			`;
+			return;
+		}
+
+		// Convert terminal instances to display format
+		let terminals = terminalInstances.map((instance: ITerminalInstance, index: number) => {
+			// Get terminal name (title, process name, or fallback)
+			const name = instance.title || instance.processName || `Terminal ${index + 1}`;
+			return {
+				name,
+				instance,
+				isSelected: index === 0 // First terminal is selected by default
+			};
+		});
+
+		// Cache terminals
+		this.cachedTerminals = terminals;
+
+		// Filter by search query if present
+		if (this.searchQuery) {
+			terminals = terminals.filter(terminal =>
+				terminal.name.toLowerCase().includes(this.searchQuery)
+			);
+		}
+
+		if (terminals.length === 0 && this.searchQuery) {
+			const emptyMessage = append(terminalsList, $('div'));
+			emptyMessage.textContent = 'No terminals match your search';
+			emptyMessage.style.cssText = `
+				color: ${textColor};
+				font-size: 11px;
+				opacity: 0.6;
+				padding: 8px 6px;
+				text-align: center;
+			`;
+			return;
+		}
+
+		terminals.forEach((terminal: { name: string; instance: ITerminalInstance; isSelected: boolean }) => {
 			const terminalItem = this.createTerminalItem(terminal, isDark, textColor);
 			terminalsList.appendChild(terminalItem);
 		});
@@ -564,8 +957,8 @@ export class ContextDropdown extends Disposable {
 			margin-left: -2px;
 		`;
 
-		// Create URI from file path
-		const fileUri = URI.file(`/${file.path}/${file.name}`);
+		// Create URI from file path or use provided URI
+		const fileUri = (file as any).uri || URI.file(`/${file.path}/${file.name}`);
 		const iconClasses = getIconClasses(this.modelService, this.languageService, fileUri, FileKind.FILE);
 
 		const iconWrapper = append(iconContainer, $('div'));
@@ -654,7 +1047,7 @@ export class ContextDropdown extends Disposable {
 		return fileItem;
 	}
 
-	private createFileOrFolderItem(item: { name: string; path: string; isFile: boolean; isSelected?: boolean }, isDark: boolean, textColor: string, borderColor: string): HTMLElement {
+	private createFileOrFolderItem(item: { name: string; path: string; isFile: boolean; isSelected?: boolean; uri?: URI }, isDark: boolean, textColor: string, borderColor: string): HTMLElement {
 		const fileItem = $('div');
 		fileItem.style.cssText = `
 			display: flex;
@@ -684,26 +1077,61 @@ export class ContextDropdown extends Disposable {
 			gap: 6px;
 		`;
 
-		// Icon container
+		// Icon container with VS Code file icons (for files)
 		const iconContainer = append(contentRow, $('span'));
-		iconContainer.style.cssText = `
-			flex-shrink: 0;
-			display: flex;
-			align-items: center;
-			justify-content: center;
-			font-size: 14px;
-			line-height: 16px;
-			margin-left: -2px;
-			color: ${textColor};
-			width: 16px;
-			height: 16px;
-		`;
+		if (item.isFile) {
+			iconContainer.className = 'show-file-icons';
+			iconContainer.style.cssText = `
+				flex-shrink: 0;
+				height: 16px;
+				width: 16px;
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				margin-left: -2px;
+			`;
 
-		const icon = append(iconContainer, $(`i.codicon.${item.isFile ? 'codicon-file' : 'codicon-folder'}`));
-		icon.style.cssText = `
-			height: 100%;
-			width: 100%;
-		`;
+			// Use URI if available, otherwise construct from path
+			const fileUri = item.uri || URI.file(`/${item.path}/${item.name}`);
+			const iconClasses = getIconClasses(this.modelService, this.languageService, fileUri, FileKind.FILE);
+
+			const iconWrapper = append(iconContainer, $('div'));
+			iconWrapper.style.cssText = `
+				position: relative;
+				height: 100%;
+				width: 100%;
+				display: flex;
+				align-items: center;
+				justify-content: center;
+			`;
+
+			const iconDiv = append(iconWrapper, $('div'));
+			iconDiv.className = `monaco-icon-label file-icon ${iconClasses.join(' ')} height-override-important`;
+			iconDiv.style.cssText = `
+				height: 100%;
+				width: 100%;
+			`;
+		} else {
+			// Folder icon
+			iconContainer.style.cssText = `
+				flex-shrink: 0;
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				font-size: 14px;
+				line-height: 16px;
+				margin-left: -2px;
+				color: ${textColor};
+				width: 16px;
+				height: 16px;
+			`;
+
+			const icon = append(iconContainer, $('i.codicon.codicon-folder'));
+			icon.style.cssText = `
+				height: 100%;
+				width: 100%;
+			`;
+		}
 
 		// Name and path container
 		const nameContainer = append(contentRow, $('div'));
@@ -765,8 +1193,10 @@ export class ContextDropdown extends Disposable {
 
 		this._register(addDisposableListener(fileItem, 'click', () => {
 			if (item.isFile && this.onPillInsert) {
-				const fileUri = URI.file(`/${item.path}/${item.name}`);
+				// Use URI if available (from session files or recent files), otherwise construct from path
+				const fileUri = item.uri || URI.file(`/${item.path}/${item.name}`);
 				const iconClasses = getIconClasses(this.modelService, this.languageService, fileUri, FileKind.FILE);
+				// Use path from item (already calculated relative path)
 				this.onPillInsert('file', item.name, item.path, iconClasses);
 			}
 			this.hide();
@@ -903,7 +1333,7 @@ export class ContextDropdown extends Disposable {
 		return docItem;
 	}
 
-	private createTerminalItem(terminal: { name: string; isSelected?: boolean; isAdd?: boolean }, isDark: boolean, textColor: string): HTMLElement {
+	private createTerminalItem(terminal: { name: string; instance?: ITerminalInstance; isSelected?: boolean; isAdd?: boolean }, isDark: boolean, textColor: string): HTMLElement {
 		const terminalItem = $('div');
 		terminalItem.style.cssText = `
 			display: flex;
@@ -1134,6 +1564,14 @@ export class ContextDropdown extends Disposable {
 	}
 
 	public hide(): void {
+		// Clear search timeout
+		if (this.searchTimeout) {
+			clearTimeout(this.searchTimeout);
+			this.searchTimeout = null;
+		}
+
+		// Clear search query
+		this.searchQuery = '';
 		if (this.dropdownElement) {
 			this.dropdownElement.remove();
 			this.dropdownElement = null;

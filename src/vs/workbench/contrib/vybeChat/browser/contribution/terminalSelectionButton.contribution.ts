@@ -370,25 +370,15 @@ class TerminalSelectionButtonContribution extends Disposable implements IWorkben
 		// Format pill name: just the terminal name (e.g., "git", "zsh", "VYBE")
 		const pillName = terminalName;
 
-		// First, check if inline terminal composer is open for this terminal
-		// If so, add to inline composer instead of main chat view
+		// First, check if terminal prompt bar is open and expanded for this terminal
+		// If so, add to prompt bar instead of main chat view
 		if (this.currentTerminalElement) {
-			const inlineComposer = this.currentTerminalElement.querySelector('.vybe-terminal-inline-composer') as HTMLElement | null;
-			if (inlineComposer && inlineComposer.style.display !== 'none') {
-				// Inline composer is open - get the widget instance
-				// The widget should be stored on the terminal element or we can find it via the container
-				// For now, we'll try to find it via the container's parent
-				const composerElement = inlineComposer.querySelector('.vybe-terminal-inline-composer-inner');
-				if (composerElement) {
-					// Try to find the widget instance - it should be attached to the terminal element
-					const widgetInstance = (this.currentTerminalElement as any).__vybeTerminalChatWidget;
-					if (widgetInstance && typeof widgetInstance.insertContextPill === 'function') {
-						console.log('[Terminal Selection] Found inline composer, inserting pill:', pillName);
-						widgetInstance.insertContextPill(pillName, selection);
-						this.hideButton();
-						return;
-					}
-				}
+			const promptBarWidget = (this.currentTerminalElement as any).__vybeTerminalPromptBarWidget;
+			if (promptBarWidget && promptBarWidget.isExpanded && promptBarWidget.isExpanded()) {
+				console.log('[Terminal Selection] Found prompt bar, inserting pill:', pillName);
+				promptBarWidget.insertContextPill(pillName, selection);
+				this.hideButton();
+				return;
 			}
 		}
 

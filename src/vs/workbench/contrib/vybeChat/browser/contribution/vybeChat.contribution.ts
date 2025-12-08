@@ -15,5 +15,9 @@ import './vybeChatInitialization.contribution.js';
 // Register terminal selection button
 import './terminalSelectionButton.contribution.js';
 
+// Register terminal prompt bar
+import './vybeTerminalPromptBar.contribution.js';
+import './vybeTerminalPromptBarActions.js';
+
 // Register actions
 import '../actions/vybeChatActions.js';
