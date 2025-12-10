@@ -17,10 +17,18 @@ import { VybeChatThinkingPart } from '../../contentParts/vybeChatThinkingPart.js
 import { VybeChatCodeBlockPart } from '../../contentParts/vybeChatCodeBlockPart.js';
 import { VybeChatTextEditPart } from '../../contentParts/vybeChatTextEditPart.js';
 import { VybeChatTerminalPart } from '../../contentParts/vybeChatTerminalPart.js';
+import { VybeChatReadingFilesPart, IVybeChatReadingFilesContent } from '../../contentParts/vybeChatReadingFilesPart.js';
+import { VybeChatSearchedPart, IVybeChatSearchedContent } from '../../contentParts/vybeChatSearchedPart.js';
+import { VybeChatExploredPart, IVybeChatExploredContent, ExploredAction } from '../../contentParts/vybeChatExploredPart.js';
+import { VybeChatPlanDocumentPart } from '../../contentParts/vybeChatPlanDocumentPart.js';
+import type { IVybeChatPlanDocumentContent, IVybeChatListedContent, IVybeChatDirectoryContent } from '../../contentParts/vybeChatContentPart.js';
 import { IMarkdownRendererService } from '../../../../../../platform/markdown/browser/markdownRenderer.js';
 import { IModelService } from '../../../../../../editor/common/services/model.js';
 import { ILanguageService } from '../../../../../../editor/common/languages/language.js';
 import { IClipboardService } from '../../../../../../platform/clipboard/common/clipboardService.js';
+import { IEditorService } from '../../../../../services/editor/common/editorService.js';
+import { IFileService } from '../../../../../../platform/files/common/files.js';
+import { INotificationService } from '../../../../../../platform/notification/common/notification.js';
 
 export interface ContextPillData {
 	id: string;
@@ -69,11 +77,15 @@ export class MessagePage extends Disposable {
 
 	// Content parts for AI response
 	private contentParts: IVybeChatContentPart[] = [];
+	private contentPartsData: IVybeChatContentData[] = []; // Track original data for grouping
 	private markdownRendererService: IMarkdownRendererService | undefined;
 	private instantiationService: IInstantiationService | undefined;
 	private modelService: IModelService | undefined;
 	private languageService: ILanguageService | undefined;
 	private clipboardService: IClipboardService | undefined;
+	private editorService: IEditorService | undefined;
+	private fileService: IFileService | undefined;
+	private notificationService: INotificationService | undefined;
 	private codeBlockIndex: number = 0;
 
 	private _onStop = this._register(new Emitter<void>());
@@ -86,7 +98,10 @@ export class MessagePage extends Disposable {
 		modelService?: IModelService,
 		languageService?: ILanguageService,
 		instantiationService?: IInstantiationService,
-		clipboardService?: IClipboardService
+		clipboardService?: IClipboardService,
+		editorService?: IEditorService,
+		fileService?: IFileService,
+		notificationService?: INotificationService
 	) {
 		super();
 		this.options = options;
@@ -95,6 +110,9 @@ export class MessagePage extends Disposable {
 		this.languageService = languageService;
 		this.instantiationService = instantiationService;
 		this.clipboardService = clipboardService;
+		this.editorService = editorService;
+		this.fileService = fileService;
+		this.notificationService = notificationService;
 		this.pageElement = this.createPage(options);
 		parent.appendChild(this.pageElement);
 	}
@@ -340,8 +358,271 @@ export class MessagePage extends Disposable {
 	}
 
 	/**
+	 * Check if a content part is a research action (read, search, listed, directory).
+	 */
+	private isResearchAction(contentData: IVybeChatContentData): boolean {
+		return contentData.kind === 'readingFiles' ||
+			contentData.kind === 'searched' ||
+			contentData.kind === 'listed' ||
+			contentData.kind === 'directory';
+	}
+
+	/**
+	 * Group consecutive research actions (3+) into an Explored block.
+	 * @deprecated Not currently used - kept for potential future use
+	 */
+	// @ts-expect-error - Deprecated method kept for potential future use
+	private _groupResearchActions(_contentParts: IVybeChatContentData[]): IVybeChatContentData[] {
+		const grouped: IVybeChatContentData[] = [];
+		let researchGroup: IVybeChatContentData[] = [];
+
+		for (let i = 0; i < _contentParts.length; i++) {
+			const current = _contentParts[i];
+
+			if (this.isResearchAction(current)) {
+				// Add to research group
+				researchGroup.push(current);
+			} else {
+				// Non-research action - process any pending research group first
+				if (researchGroup.length > 0) {
+					if (researchGroup.length >= 3) {
+						// Group into Explored block
+						const exploredActions: ExploredAction[] = researchGroup.map(action => {
+							if (action.kind === 'readingFiles') {
+								return {
+									type: 'read' as const,
+									data: action as IVybeChatReadingFilesContent
+								};
+							} else if (action.kind === 'searched') {
+								return {
+									type: 'searched' as const,
+									data: action as IVybeChatSearchedContent
+								};
+							} else if (action.kind === 'listed') {
+								return {
+									type: 'listed' as const,
+									data: action as IVybeChatListedContent
+								};
+							} else if (action.kind === 'directory') {
+								return {
+									type: 'directory' as const,
+									data: action as IVybeChatDirectoryContent
+								};
+							}
+							return null;
+						}).filter((a): a is NonNullable<typeof a> => a !== null) as ExploredAction[];
+
+						grouped.push({
+							kind: 'explored',
+							actions: exploredActions,
+							isStreaming: false
+						});
+					} else {
+						// Keep as individual items (1 or 2 actions)
+						grouped.push(...researchGroup);
+					}
+					researchGroup = [];
+				}
+				// Add non-research action
+				grouped.push(current);
+			}
+		}
+
+		// Process any remaining research group at the end
+		if (researchGroup.length > 0) {
+			if (researchGroup.length >= 3) {
+				// Group into Explored block
+				const exploredActions: ExploredAction[] = researchGroup.map(action => {
+					if (action.kind === 'readingFiles') {
+						return {
+							type: 'read' as const,
+							data: action as IVybeChatReadingFilesContent
+						};
+					} else if (action.kind === 'searched') {
+						return {
+							type: 'searched' as const,
+							data: action as IVybeChatSearchedContent
+						};
+					} else if (action.kind === 'listed') {
+						return {
+							type: 'listed' as const,
+							data: action as IVybeChatListedContent
+						};
+					} else if (action.kind === 'directory') {
+						return {
+							type: 'directory' as const,
+							data: action as IVybeChatDirectoryContent
+						};
+					}
+					return null;
+				}).filter((a): a is NonNullable<typeof a> => a !== null) as ExploredAction[];
+
+				grouped.push({
+					kind: 'explored',
+					actions: exploredActions,
+					isStreaming: false
+				});
+			} else {
+				// Keep as individual items (1 or 2 actions)
+				grouped.push(...researchGroup);
+			}
+		}
+
+		return grouped;
+	}
+
+	/**
+	 * Add a single content part (for streaming updates).
+	 * Items appear individually, then group into Explored when 3+ research actions complete.
+	 */
+	public addContentPart(contentData: IVybeChatContentData): void {
+		if (!this.aiResponseArea || !this.markdownRendererService) {
+			return;
+		}
+
+		// Add to data tracking
+		this.contentPartsData.push(contentData);
+
+		// Render individually (don't group yet if streaming)
+		const part = this.createContentPart(contentData);
+		if (part) {
+			this.contentParts.push(part);
+			this.aiResponseArea.appendChild(part.domNode);
+
+			// If this is a research action that just completed, check for grouping
+			// Use setTimeout to ensure DOM updates are complete
+			if (this.isResearchAction(contentData) && !(contentData as any).isStreaming) {
+				setTimeout(() => {
+					this.checkAndGroupResearchActions();
+				}, 0);
+			}
+		}
+	}
+
+	/**
+	 * Check if we have 3+ consecutive completed research actions and group them.
+	 * Only groups when ALL items in a consecutive sequence are complete.
+	 */
+	private checkAndGroupResearchActions(): void {
+		if (!this.aiResponseArea) {
+			return;
+		}
+
+		// Find consecutive research actions where ALL are completed (3+)
+		const groups: Array<{ start: number; end: number; actions: IVybeChatContentData[] }> = [];
+		let currentGroup: { start: number; actions: IVybeChatContentData[] } | null = null;
+
+		for (let i = 0; i < this.contentPartsData.length; i++) {
+			const data = this.contentPartsData[i];
+			const isResearch = this.isResearchAction(data);
+			const isCompleted = !(data as any).isStreaming;
+
+			if (isResearch) {
+				if (isCompleted) {
+					// Completed research action - add to group
+					if (!currentGroup) {
+						currentGroup = { start: i, actions: [data] };
+					} else {
+						currentGroup.actions.push(data);
+					}
+				} else {
+					// Research action still streaming - break group (don't group incomplete sequences)
+					if (currentGroup) {
+						currentGroup = null;
+					}
+				}
+			} else {
+				// Non-research action - finalize group if it has 3+ completed actions
+				if (currentGroup && currentGroup.actions.length >= 3) {
+					groups.push({ start: currentGroup.start, end: i - 1, actions: currentGroup.actions });
+				}
+				currentGroup = null;
+			}
+		}
+
+		// Check final group (only if all are completed)
+		if (currentGroup && currentGroup.actions.length >= 3) {
+			// Verify all actions in group are completed
+			const allCompleted = currentGroup.actions.every(action => !(action as any).isStreaming);
+			if (allCompleted) {
+				groups.push({ start: currentGroup.start, end: this.contentPartsData.length - 1, actions: currentGroup.actions });
+			}
+		}
+
+		// Process groups from end to start (to preserve indices)
+		for (let g = groups.length - 1; g >= 0; g--) {
+			const group = groups[g];
+
+			// Check if these parts are still individual (not already grouped)
+			const firstPart = this.contentParts[group.start];
+			if (firstPart && firstPart.kind === 'explored') {
+				continue; // Already grouped
+			}
+
+			// Remove individual parts from DOM and tracking
+			for (let i = group.start; i <= group.end; i++) {
+				const part = this.contentParts[i];
+				if (part) {
+					part.domNode.remove();
+					part.dispose();
+				}
+			}
+
+			// Create Explored block
+			const exploredActions: ExploredAction[] = group.actions.map(action => {
+				if (action.kind === 'readingFiles') {
+					return {
+						type: 'read' as const,
+						data: action as IVybeChatReadingFilesContent
+					};
+				} else if (action.kind === 'searched') {
+					return {
+						type: 'searched' as const,
+						data: action as IVybeChatSearchedContent
+					};
+				} else if (action.kind === 'listed') {
+					return {
+						type: 'listed' as const,
+						data: action as IVybeChatListedContent
+					};
+				} else if (action.kind === 'directory') {
+					return {
+						type: 'directory' as const,
+						data: action as IVybeChatDirectoryContent
+					};
+				}
+				return null;
+			}).filter((a): a is NonNullable<typeof a> => a !== null) as ExploredAction[];
+
+			const exploredData: IVybeChatExploredContent = {
+				kind: 'explored',
+				actions: exploredActions,
+				isStreaming: false
+			};
+
+			const exploredPart = this.createContentPart(exploredData);
+			if (exploredPart) {
+				// Replace the range with single Explored part
+				this.contentParts.splice(group.start, group.end - group.start + 1, exploredPart);
+				this.contentPartsData.splice(group.start, group.end - group.start + 1, exploredData);
+
+				// Insert into DOM at the position of the first removed part
+				const insertBefore = group.start < this.contentParts.length - 1
+					? this.contentParts[group.start + 1].domNode
+					: null;
+				if (insertBefore) {
+					this.aiResponseArea.insertBefore(exploredPart.domNode, insertBefore);
+				} else {
+					this.aiResponseArea.appendChild(exploredPart.domNode);
+				}
+			}
+		}
+	}
+
+	/**
 	 * Render content parts in the AI response area.
 	 * This is where thinking, markdown, code blocks, etc. will appear.
+	 * For streaming, use addContentPart() instead.
 	 */
 	public renderContentParts(contentParts: IVybeChatContentData[]): void {
 		if (!this.aiResponseArea || !this.markdownRendererService) {
@@ -350,14 +631,11 @@ export class MessagePage extends Disposable {
 
 		// Clear existing parts
 		this.disposeContentParts();
+		this.contentPartsData = [];
 
-		// Render each content part
+		// Add each part individually (they'll group automatically when complete)
 		for (const contentData of contentParts) {
-			const part = this.createContentPart(contentData);
-			if (part) {
-				this.contentParts.push(part);
-				this.aiResponseArea.appendChild(part.domNode);
-			}
+			this.addContentPart(contentData);
 		}
 	}
 
@@ -450,6 +728,35 @@ export class MessagePage extends Disposable {
 			return terminalPart;
 		}
 
+		case 'readingFiles': {
+			const readingPart = this._register(new VybeChatReadingFilesPart(contentData as IVybeChatReadingFilesContent, this.editorService, this.fileService, this.notificationService));
+			return readingPart;
+		}
+
+		case 'searched': {
+			const searchedPart = this._register(new VybeChatSearchedPart(contentData as IVybeChatSearchedContent, this.editorService, this.fileService, this.notificationService));
+			return searchedPart;
+		}
+
+		case 'explored': {
+			const exploredPart = this._register(new VybeChatExploredPart(contentData as IVybeChatExploredContent, this.editorService, this.fileService, this.notificationService));
+			return exploredPart;
+		}
+
+		case 'planDocument': {
+			if (!this.instantiationService) {
+				throw new Error('IInstantiationService is required for plan document');
+			}
+			const planPart = this._register(new VybeChatPlanDocumentPart(contentData as IVybeChatPlanDocumentContent, this.instantiationService, this.markdownRendererService));
+
+			// Wire up streaming callback for smart scrolling
+			if (planPart && this.options.onContentUpdate) {
+				planPart.onStreamingUpdate = this.options.onContentUpdate;
+			}
+
+			return planPart;
+		}
+
 		// TODO: Add more content types (errors, progress, etc.)
 
 		default:
@@ -459,11 +766,53 @@ export class MessagePage extends Disposable {
 
 	/**
 	 * Update existing content parts with streaming data.
+	 * Updates individual parts, then checks for grouping when research actions complete.
+	 * contentParts should be the full array of all parts so far.
 	 */
 	public updateContentParts(contentParts: IVybeChatContentData[]): void {
-		// For now, just re-render everything
-		// TODO: Optimize to update only changed parts (like Copilot does with diff)
-		this.renderContentParts(contentParts);
+		if (!this.aiResponseArea || !this.markdownRendererService) {
+			return;
+		}
+
+		// Update existing parts or add new ones
+		for (let i = 0; i < contentParts.length; i++) {
+			const contentData = contentParts[i];
+
+			if (i < this.contentParts.length && i < this.contentPartsData.length) {
+				// Update existing part
+				const existingPart = this.contentParts[i];
+				const existingData = this.contentPartsData[i];
+
+				// Only update if data actually changed
+				if (existingPart && existingPart.updateContent && existingData.kind === contentData.kind) {
+					existingPart.updateContent(contentData);
+					this.contentPartsData[i] = contentData;
+
+					// Check for grouping when research action completes
+					if (this.isResearchAction(contentData) && !(contentData as any).isStreaming) {
+						// Use setTimeout to allow DOM updates to complete
+						setTimeout(() => {
+							this.checkAndGroupResearchActions();
+						}, 0);
+					}
+				} else if (existingData.kind !== contentData.kind) {
+					// Kind changed - replace the part
+					existingPart?.dispose();
+					const newPart = this.createContentPart(contentData);
+					if (newPart) {
+						this.contentParts[i] = newPart;
+						this.contentPartsData[i] = contentData;
+						// Replace in DOM
+						if (existingPart) {
+							existingPart.domNode.replaceWith(newPart.domNode);
+						}
+					}
+				}
+			} else {
+				// Add new part
+				this.addContentPart(contentData);
+			}
+		}
 	}
 
 	/**
@@ -474,6 +823,7 @@ export class MessagePage extends Disposable {
 			part.dispose();
 		}
 		this.contentParts = [];
+		this.contentPartsData = [];
 
 		// Clear response area
 		if (this.aiResponseArea) {

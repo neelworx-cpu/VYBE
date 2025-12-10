@@ -60,7 +60,15 @@ export type VybeChatContentPartKind =
 	// Phase 4: Advanced (coming soon)
 	| 'terminal'       // Terminal command execution
 	| 'reference'      // File references
-	| 'command';       // Command buttons
+	| 'command'        // Command buttons
+	// Phase 5: File Operations
+	| 'readingFiles'   // Files being read by AI
+	| 'searched'       // Search results
+	| 'listed'         // Listed items/directories
+	| 'directory'      // Directory operations
+	| 'explored'       // Grouped multiple actions
+	// Phase 6: Planning
+	| 'planDocument';  // AI-generated plan document
 
 /**
  * Data for markdown content parts.
@@ -141,6 +149,116 @@ export interface IVybeChatErrorContent {
 }
 
 /**
+ * File metadata for content parts.
+ */
+export interface IFileMetadata {
+	name: string;
+	path?: string;
+	uri?: string; // URI string (more reliable than path)
+	lineRange?: { start: number; end: number };
+	language?: string; // For syntax highlighting
+	iconClasses?: string[]; // VS Code icon classes
+	exists?: boolean; // Whether file exists (for error handling)
+}
+
+/**
+ * Data for reading files content parts.
+ */
+export interface IVybeChatReadingFilesContent {
+	kind: 'readingFiles';
+	id?: string; // Unique ID for tracking and updates
+	files: Array<IFileMetadata>;
+	isStreaming?: boolean;
+	error?: {
+		code: string;
+		message: string;
+	};
+}
+
+/**
+ * Search type for different search operations.
+ */
+export type SearchType = 'codebase' | 'semantic' | 'web' | 'documentation';
+
+/**
+ * Web search result (for web searches).
+ */
+export interface IWebSearchResult {
+	title: string;
+	url: string;
+	snippet: string;
+}
+
+/**
+ * Data for searched content parts.
+ */
+export interface IVybeChatSearchedContent {
+	kind: 'searched';
+	id?: string; // Unique ID for tracking and updates
+	searchType?: SearchType; // Type of search (defaults to 'codebase')
+	query: string;
+	files: Array<IFileMetadata>;
+	webResults?: Array<IWebSearchResult>; // For web searches
+	isStreaming?: boolean;
+	error?: {
+		code: string;
+		message: string;
+	};
+}
+
+/**
+ * Data for listed content parts.
+ */
+export interface IVybeChatListedContent {
+	kind: 'listed';
+	id?: string;
+	name: string;
+	isStreaming?: boolean;
+}
+
+/**
+ * Data for directory content parts.
+ */
+export interface IVybeChatDirectoryContent {
+	kind: 'directory';
+	id?: string;
+	name: string;
+	isStreaming?: boolean;
+}
+
+/**
+ * Data for explored content parts.
+ */
+export interface IVybeChatExploredContent {
+	kind: 'explored';
+	id?: string; // Unique ID for tracking and updates
+	actions: Array<{
+		type: 'read' | 'searched' | 'listed' | 'directory';
+		data: IVybeChatReadingFilesContent | IVybeChatSearchedContent | IVybeChatListedContent | IVybeChatDirectoryContent;
+	}>;
+	isStreaming?: boolean;
+}
+
+/**
+ * Data for plan document content parts.
+ */
+export interface IVybeChatPlanDocumentContent {
+	kind: 'planDocument';
+	id?: string; // Unique ID for tracking and updates
+	filename: string; // Plan filename (e.g., "complete-mcp-integration.plan.md")
+	title: string; // Plan title
+	summary: string; // Plan summary (shown in collapsed mode)
+	content: string; // Full plan content (markdown, shown in expanded mode)
+	isExpanded?: boolean; // Whether plan is expanded (default: false)
+	isStreaming?: boolean; // Whether plan is still being generated
+	modelState?: { // Model selection state
+		isAutoEnabled: boolean;
+		isMaxModeEnabled: boolean;
+		selectedModelId: string;
+	};
+}
+
+/**
  * Union type of all content data.
  * This is what gets passed to content parts for rendering.
  */
@@ -151,7 +269,13 @@ export type IVybeChatContentData =
 	| IVybeChatTextEditContent
 	| IVybeChatTerminalContent
 	| IVybeChatProgressContent
-	| IVybeChatErrorContent;
+	| IVybeChatErrorContent
+	| IVybeChatReadingFilesContent
+	| IVybeChatSearchedContent
+	| IVybeChatExploredContent
+	| IVybeChatListedContent
+	| IVybeChatDirectoryContent
+	| IVybeChatPlanDocumentContent;
 
 /**
  * Base class for content parts.

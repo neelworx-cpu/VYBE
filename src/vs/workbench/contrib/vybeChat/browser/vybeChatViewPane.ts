@@ -8,6 +8,7 @@ import './contentParts/media/vybeChatThinking.css';
 import './contentParts/media/vybeChatMarkdown.css';
 import './contentParts/media/vybeChatCodeBlock.css';
 import './contentParts/media/vybeChatTextEdit.css';
+// import './contentParts/media/vybeChatPlanDocument.css'; // TODO: Re-enable after rebuild
 import './contentParts/media/vybeChatTerminal.css';
 import { ViewPane, IViewPaneOptions } from '../../../browser/parts/views/viewPane.js';
 import { addDisposableListener } from '../../../../base/browser/dom.js';
@@ -31,10 +32,12 @@ import { ILanguageService } from '../../../../editor/common/languages/language.j
 import { ISpeechService } from '../../../contrib/speech/common/speechService.js';
 import { IMarkdownRendererService } from '../../../../platform/markdown/browser/markdownRenderer.js';
 import { IClipboardService } from '../../../../platform/clipboard/common/clipboardService.js';
+import { IEditorService } from '../../../services/editor/common/editorService.js';
 import { IChatRequestVariableEntry, IChatRequestFileEntry, IChatRequestStringVariableEntry } from '../../chat/common/chatVariableEntries.js';
 import { ThemeIcon } from '../../../../base/common/themables.js';
 import { Codicon } from '../../../../base/common/codicons.js';
 import { IFileService } from '../../../../platform/files/common/files.js';
+import { INotificationService } from '../../../../platform/notification/common/notification.js';
 import { URI } from '../../../../base/common/uri.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import { CodeDataTransfers, containsDragType, extractEditorsDropData } from '../../../../platform/dnd/browser/dnd.js';
@@ -79,8 +82,10 @@ export class VybeChatViewPane extends ViewPane {
 		@ISpeechService private readonly _speechService: ISpeechService,
 		@IMarkdownRendererService private readonly markdownRendererService: IMarkdownRendererService,
 		@IClipboardService private readonly _clipboardService: IClipboardService,
+		@IEditorService private readonly _editorService: IEditorService,
 		@IFileService private readonly _fileService: IFileService,
 		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
+		@INotificationService private readonly _notificationService: INotificationService,
 	) {
 		super(
 			{
@@ -356,7 +361,10 @@ export class VybeChatViewPane extends ViewPane {
 			this._modelService,
 			this._languageService,
 			this.instantiationService,
-			this._clipboardService
+			this._clipboardService,
+			this._editorService,
+			this._fileService,
+			this._notificationService
 		));
 		this.messagePages.set(messageId, messagePage);
 
@@ -929,6 +937,7 @@ declare global {
 		__vybeTestContentParts?: () => void;
 		__vybeTestFilesEdited?: () => void;
 		__vybeTestSpacing?: () => void;
+		__vybeTestPlanDocument?: () => void;
 	}
 }
 
@@ -954,7 +963,7 @@ if (typeof window !== 'undefined') {
 		for (const el of allElements) {
 			if ((el as any).__vybePane) {
 				const pane = (el as any).__vybePane as VybeChatViewPane;
-				const lastPage = Array.from((pane as any).messagePages.values()).pop();
+				const lastPage = Array.from((pane as any).messagePages.values()).pop() as MessagePage | undefined;
 				if (!lastPage) {
 					return;
 				}
@@ -983,7 +992,7 @@ if (typeof window !== 'undefined') {
 		for (const el of allElements) {
 			if ((el as any).__vybePane) {
 				const pane = (el as any).__vybePane as VybeChatViewPane;
-				const lastPage = Array.from((pane as any).messagePages.values()).pop();
+				const lastPage = Array.from((pane as any).messagePages.values()).pop() as MessagePage | undefined;
 				if (!lastPage) {
 					return;
 				}
@@ -1012,7 +1021,7 @@ if (typeof window !== 'undefined') {
 		for (const el of allElements) {
 			if ((el as any).__vybePane) {
 				const pane = (el as any).__vybePane as VybeChatViewPane;
-				const lastPage = Array.from((pane as any).messagePages.values()).pop();
+				const lastPage = Array.from((pane as any).messagePages.values()).pop() as MessagePage | undefined;
 				if (!lastPage) {
 					return;
 				}
@@ -1040,7 +1049,7 @@ if (typeof window !== 'undefined') {
 		for (const el of allElements) {
 			if ((el as any).__vybePane) {
 				const pane = (el as any).__vybePane as VybeChatViewPane;
-				const lastPage = Array.from((pane as any).messagePages.values()).pop();
+				const lastPage = Array.from((pane as any).messagePages.values()).pop() as MessagePage | undefined;
 				if (!lastPage) {
 					return;
 				}
@@ -1068,7 +1077,7 @@ if (typeof window !== 'undefined') {
 		for (const el of allElements) {
 			if ((el as any).__vybePane) {
 				const pane = (el as any).__vybePane as VybeChatViewPane;
-				const lastPage = Array.from((pane as any).messagePages.values()).pop();
+				const lastPage = Array.from((pane as any).messagePages.values()).pop() as MessagePage | undefined;
 				if (!lastPage) {
 					return;
 				}
@@ -1115,7 +1124,7 @@ if (typeof window !== 'undefined') {
 		for (const el of allElements) {
 			if ((el as any).__vybePane) {
 				const pane = (el as any).__vybePane as VybeChatViewPane;
-				const lastPage = Array.from((pane as any).messagePages.values()).pop();
+				const lastPage = Array.from((pane as any).messagePages.values()).pop() as MessagePage | undefined;
 				if (!lastPage) {
 					return;
 				}
@@ -1146,7 +1155,7 @@ if (typeof window !== 'undefined') {
 		for (const el of allElements) {
 			if ((el as any).__vybePane) {
 				const pane = (el as any).__vybePane as VybeChatViewPane;
-				const lastPage = Array.from((pane as any).messagePages.values()).pop();
+				const lastPage = Array.from((pane as any).messagePages.values()).pop() as MessagePage | undefined;
 				if (!lastPage) {
 					return;
 				}
@@ -1362,7 +1371,7 @@ Final paragraph. Inspect all transitions.`
 		for (const el of allElements) {
 			if ((el as any).__vybePane) {
 				const pane = (el as any).__vybePane as VybeChatViewPane;
-				const lastPage = Array.from((pane as any).messagePages.values()).pop();
+				const lastPage = Array.from((pane as any).messagePages.values()).pop() as MessagePage | undefined;
 				if (!lastPage) {
 					return;
 				}
@@ -2038,6 +2047,563 @@ All changes are ready to commit! 🎉`;
 						}, t2Time);
 					}, m1Time);
 				}, t1Time);
+
+				return;
+			}
+		}
+	};
+
+	// Test function for new content parts: Read, Searched, Explored
+	(window as any).__vybeTestNewContentParts = function () {
+		const allElements = document.querySelectorAll('*');
+		for (const el of allElements) {
+			if ((el as any).__vybePane) {
+				const pane = (el as any).__vybePane as VybeChatViewPane;
+				const lastPage = Array.from((pane as any).messagePages.values()).pop() as MessagePage | undefined;
+				if (!lastPage) {
+					return;
+				}
+
+				// Reset scroll state
+				pane.resetScrollState();
+
+				// Test: 2 reads → markdown → read/search/read (should group last 3 into explored)
+
+				// Read 1: Reading (streaming) -> Read (complete)
+				setTimeout(() => {
+					lastPage.addContentPart({
+						kind: 'readingFiles',
+						files: [
+							{
+								name: 'vybeChatThinkingPart.ts',
+								path: 'src/vs/workbench/contrib/vybeChat/browser/contentParts/vybeChatThinkingPart.ts',
+								lineRange: { start: 1, end: 100 }
+							}
+						],
+						isStreaming: true
+					});
+					pane.scrollToShowLatestContent();
+				}, 500);
+
+				setTimeout(() => {
+					lastPage.updateContentParts([
+						{
+							kind: 'readingFiles',
+							files: [
+								{
+									name: 'vybeChatThinkingPart.ts',
+									path: 'src/vs/workbench/contrib/vybeChat/browser/contentParts/vybeChatThinkingPart.ts',
+									lineRange: { start: 1, end: 100 }
+								}
+							],
+							isStreaming: false
+						}
+					]);
+				}, 1500);
+
+				// Read 2: Reading (streaming) -> Read (complete)
+				setTimeout(() => {
+					lastPage.addContentPart({
+						kind: 'readingFiles',
+						files: [
+							{
+								name: 'messageComposer.ts',
+								path: 'src/vs/workbench/contrib/vybeChat/browser/components/composer/messageComposer.ts',
+								lineRange: { start: 50, end: 150 }
+							}
+						],
+						isStreaming: true
+					});
+					pane.scrollToShowLatestContent();
+				}, 2000);
+
+				setTimeout(() => {
+					lastPage.updateContentParts([
+						{
+							kind: 'readingFiles',
+							files: [
+								{
+									name: 'vybeChatThinkingPart.ts',
+									path: 'src/vs/workbench/contrib/vybeChat/browser/contentParts/vybeChatThinkingPart.ts',
+									lineRange: { start: 1, end: 100 }
+								}
+							],
+							isStreaming: false
+						},
+						{
+							kind: 'readingFiles',
+							files: [
+								{
+									name: 'messageComposer.ts',
+									path: 'src/vs/workbench/contrib/vybeChat/browser/components/composer/messageComposer.ts',
+									lineRange: { start: 50, end: 150 }
+								}
+							],
+							isStreaming: false
+						}
+					]);
+				}, 3000);
+
+				// Markdown (breaks grouping)
+				setTimeout(() => {
+					lastPage.addContentPart({
+						kind: 'markdown',
+						content: 'I found the relevant code sections. Let me analyze them further.',
+						isStreaming: false
+					});
+					pane.scrollToShowLatestContent();
+				}, 3500);
+
+				// Read 3: Reading (streaming) -> Read (complete)
+				setTimeout(() => {
+					lastPage.addContentPart({
+						kind: 'readingFiles',
+						files: [
+							{
+								name: 'vybeChatViewPane.ts',
+								path: 'src/vs/workbench/contrib/vybeChat/browser/vybeChatViewPane.ts',
+								lineRange: { start: 200, end: 300 }
+							}
+						],
+						isStreaming: true
+					});
+					pane.scrollToShowLatestContent();
+				}, 4000);
+
+				setTimeout(() => {
+					lastPage.updateContentParts([
+						{
+							kind: 'readingFiles',
+							files: [
+								{
+									name: 'vybeChatThinkingPart.ts',
+									path: 'src/vs/workbench/contrib/vybeChat/browser/contentParts/vybeChatThinkingPart.ts',
+									lineRange: { start: 1, end: 100 }
+								}
+							],
+							isStreaming: false
+						},
+						{
+							kind: 'readingFiles',
+							files: [
+								{
+									name: 'messageComposer.ts',
+									path: 'src/vs/workbench/contrib/vybeChat/browser/components/composer/messageComposer.ts',
+									lineRange: { start: 50, end: 150 }
+								}
+							],
+							isStreaming: false
+						},
+						{
+							kind: 'markdown',
+							content: 'I found the relevant code sections. Let me analyze them further.',
+							isStreaming: false
+						},
+						{
+							kind: 'readingFiles',
+							files: [
+								{
+									name: 'vybeChatViewPane.ts',
+									path: 'src/vs/workbench/contrib/vybeChat/browser/vybeChatViewPane.ts',
+									lineRange: { start: 200, end: 300 }
+								}
+							],
+							isStreaming: false
+						}
+					]);
+				}, 5000);
+
+				// Search 1: Searching (streaming) -> Searched (complete) - web search (no files)
+				setTimeout(() => {
+					lastPage.addContentPart({
+						kind: 'searched',
+						query: 'how to implement file grouping in VS Code',
+						files: [],
+						isStreaming: true
+					});
+					pane.scrollToShowLatestContent();
+				}, 5500);
+
+				setTimeout(() => {
+					lastPage.updateContentParts([
+						{
+							kind: 'readingFiles',
+							files: [
+								{
+									name: 'vybeChatThinkingPart.ts',
+									path: 'src/vs/workbench/contrib/vybeChat/browser/contentParts/vybeChatThinkingPart.ts',
+									lineRange: { start: 1, end: 100 }
+								}
+							],
+							isStreaming: false
+						},
+						{
+							kind: 'readingFiles',
+							files: [
+								{
+									name: 'messageComposer.ts',
+									path: 'src/vs/workbench/contrib/vybeChat/browser/components/composer/messageComposer.ts',
+									lineRange: { start: 50, end: 150 }
+								}
+							],
+							isStreaming: false
+						},
+						{
+							kind: 'markdown',
+							content: 'I found the relevant code sections. Let me analyze them further.',
+							isStreaming: false
+						},
+						{
+							kind: 'readingFiles',
+							files: [
+								{
+									name: 'vybeChatViewPane.ts',
+									path: 'src/vs/workbench/contrib/vybeChat/browser/vybeChatViewPane.ts',
+									lineRange: { start: 200, end: 300 }
+								}
+							],
+							isStreaming: false
+						},
+						{
+							kind: 'searched',
+							query: 'how to implement file grouping in VS Code',
+							files: [],
+							isStreaming: false
+						}
+					]);
+					pane.scrollToShowLatestContent();
+				}, 6500);
+
+				// Read 4: Reading (streaming) -> Read (complete) - Should trigger grouping (3+ consecutive after markdown)
+				setTimeout(() => {
+					lastPage.addContentPart({
+						kind: 'readingFiles',
+						files: [
+							{
+								name: 'contextDropdown.ts',
+								path: 'src/vs/workbench/contrib/vybeChat/browser/components/composer/contextDropdown.ts',
+								lineRange: { start: 50, end: 150 }
+							}
+						],
+						isStreaming: true
+					});
+					pane.scrollToShowLatestContent();
+				}, 7000);
+
+				setTimeout(() => {
+					lastPage.updateContentParts([
+						{
+							kind: 'readingFiles',
+							files: [
+								{
+									name: 'vybeChatThinkingPart.ts',
+									path: 'src/vs/workbench/contrib/vybeChat/browser/contentParts/vybeChatThinkingPart.ts',
+									lineRange: { start: 1, end: 100 }
+								}
+							],
+							isStreaming: false
+						},
+						{
+							kind: 'readingFiles',
+							files: [
+								{
+									name: 'messageComposer.ts',
+									path: 'src/vs/workbench/contrib/vybeChat/browser/components/composer/messageComposer.ts',
+									lineRange: { start: 50, end: 150 }
+								}
+							],
+							isStreaming: false
+						},
+						{
+							kind: 'markdown',
+							content: 'I found the relevant code sections. Let me analyze them further.',
+							isStreaming: false
+						},
+						{
+							kind: 'readingFiles',
+							files: [
+								{
+									name: 'vybeChatViewPane.ts',
+									path: 'src/vs/workbench/contrib/vybeChat/browser/vybeChatViewPane.ts',
+									lineRange: { start: 200, end: 300 }
+								}
+							],
+							isStreaming: false
+						},
+						{
+							kind: 'searched',
+							query: 'how to implement file grouping in VS Code',
+							files: [],
+							isStreaming: false
+						},
+						{
+							kind: 'readingFiles',
+							files: [
+								{
+									name: 'contextDropdown.ts',
+									path: 'src/vs/workbench/contrib/vybeChat/browser/components/composer/contextDropdown.ts',
+									lineRange: { start: 50, end: 150 }
+								}
+							],
+							isStreaming: false
+						}
+					]);
+					pane.scrollToShowLatestContent();
+				}, 8000);
+
+				return;
+			}
+		}
+	};
+
+	// Test function for plan document content part
+	(window as any).__vybeTestPlanDocument = function () {
+		const allElements = document.querySelectorAll('*');
+		for (const el of allElements) {
+			if ((el as any).__vybePane) {
+				const pane = (el as any).__vybePane as VybeChatViewPane;
+				const lastPage = Array.from((pane as any).messagePages.values()).pop() as MessagePage | undefined;
+				if (!lastPage) {
+					return;
+				}
+
+				// Reset scroll state
+				pane.resetScrollState();
+
+				// Use unique ID for this plan document
+				const planId = `plan-${Date.now()}`;
+				const planContent = `## Current Status
+
+✅ **Already Implemented:**
+
+- MCP server registration in \`src/vs/workbench/contrib/vybeChat/browser/contribution/vybeMcpServer.contribution.ts\`
+- Environment variable passing (WORKSPACE_ROOT, SUPABASE_URL, SUPABASE_KEY, etc.)
+- Server path configuration with defaults
+- Tool auto-discovery via \`McpLanguageModelToolContribution\`
+
+## Missing Components
+
+### 1. Repo ID Generation Service
+
+**File**: \`src/vs/workbench/contrib/vybeChat/common/vybeMcpRepoIdService.ts\`
+
+Create a service that generates stable \`repo_id\` values from workspace roots. This is required by most VYBE-MCP cloud tools (e.g., \`search_codebase\`, \`vybe_solve_task\`).
+
+**Implementation:**
+
+- Use workspace folder URI to generate stable hash (similar to \`getWorkspaceIdentifier\` in \`src/vs/platform/workspaces/node/workspaces.ts\`)
+- Cache repo_id per workspace
+- Expose via \`IVybeMcpRepoIdService\` interface
+
+**Usage:** Tools that need \`repo_id\` will call this service to get the current workspace's repo_id.
+
+### 2. Session Management Integration
+
+**File**: \`src/vs/workbench/contrib/vybeChat/common/vybeMcpSessionService.ts\`
+
+Track MCP sessions and maintain continuity across chat interactions. The \`vybe_session_solve\` tool requires \`session_id\` to maintain conversation context.
+
+**Implementation:**
+
+- Map IDE chat session IDs to MCP session IDs
+- Store mapping in workspace storage
+- Provide \`getOrCreateMcpSessionId(chatSessionId: string): Promise<string>\`
+- Integrate with existing chat session management
+
+**Integration Points:**
+
+- Hook into \`ChatModel\` session creation
+- Pass \`session_id\` when calling \`vybe_session_solve\` tool
+- Use \`list_sessions\` and \`get_session\` tools to show session history
+
+### 3. Event Streaming Client (SSE)
+
+**File**: \`src/vs/workbench/contrib/vybeChat/common/vybeMcpEventStreamService.ts\`
+
+Implement SSE client for real-time task progress updates from the \`subscribe_events\` tool.
+
+**Implementation:**
+
+- Create \`EventSource\` connection to MCP server SSE endpoint
+- Parse and emit events: \`agent_step_start\`, \`agent_step_complete\`, \`task_complete\`, \`patch_generated\`, \`test_result\`
+- Integrate with chat UI to show progress indicators
+- Handle connection lifecycle (connect on task start, disconnect on completion)
+
+**Event Types to Handle:**
+
+- \`agent_step_start\` / \`agent_step_complete\` - Show agent progress
+- \`task_complete\` / \`task_failed\` - Task completion status
+- \`patch_generated\` - New patch available for approval
+- \`test_result\` - Test execution results
+
+### 4. Panel Envelope Renderer
+
+**Files**:
+- \`src/vs/workbench/contrib/vybeChat/browser/contentParts/vybeChatPanelEnvelopePart.ts\`
+- \`src/vs/workbench/contrib/vybeChat/browser/components/panelEnvelope/panelEnvelopeRenderer.ts\`
+
+Render Panel Envelope responses from \`vybe_solve_task\` and \`vybe_session_solve\` tools. The envelope contains patches, test results, and metadata.
+
+**Components to Build:**
+
+- **Patch Viewer**: Display pending/applied patches in diff view
+- **Test Results Display**: Show test execution output
+- **Metadata Panel**: Display execution stats (files touched, patches generated, etc.)
+- **Approval UI**: Buttons to approve/reject pending patches
+
+**Integration:**
+
+- Detect Panel Envelope in tool results
+- Create \`VybeChatPanelEnvelopePart\` content part
+- Register in \`VybeChatViewPane\` content parts registry
+
+### 5. Approval Workflow Integration
+
+**File**: \`src/vs/workbench/contrib/vybeChat/browser/components/panelEnvelope/patchApprovalWorkflow.ts\`
+
+Implement UI and logic for approving/rejecting patches generated by MCP tools.
+
+**Implementation:**
+
+- Show pending patches in diff view
+- Provide approve/reject buttons
+- Call \`apply_patch\` tool with approval when user accepts
+- Track approval state per patch
+- Show applied patches as completed changes
+
+**Note:** The MCP server fixes mentioned in the analysis document should ensure proper approval gate enforcement.
+
+### 6. Tool Parameter Injection
+
+**File**: \`src/vs/workbench/contrib/vybeChat/common/vybeMcpToolParameterInjector.ts\`
+
+Automatically inject \`repo_id\` and \`session_id\` into tool calls that require them, so the AI doesn't need to provide these parameters explicitly.
+
+**Implementation:**
+
+- Intercept tool invocations via \`ILanguageModelToolsService\`
+- Detect tools that need \`repo_id\` or \`session_id\`
+- Inject parameters before execution
+- Use \`IVybeMcpRepoIdService\` and \`IVybeMcpSessionService\`
+
+**Tools Requiring Injection:**
+
+- \`repo_id\`: \`search_codebase\`, \`vybe_solve_task\`, \`vybe_session_solve\`, \`get_context_for_task\`, etc.
+- \`session_id\`: \`vybe_session_solve\`, \`get_session\`, \`list_session_entries\`
+
+## Implementation Order
+
+1. **Repo ID Service** - Foundation for other features
+2. **Session Management** - Enables session continuity
+3. **Tool Parameter Injection** - Makes tools easier to use
+4. **Panel Envelope Renderer** - Core UI for MCP results
+5. **Approval Workflow** - Complete the patch workflow
+6. **Event Streaming** - Real-time updates (can be done in parallel)
+
+## Configuration
+
+Add VS Code settings for:
+
+- \`vybe.mcp.repoId\` - Override auto-generated repo_id (optional)
+- \`vybe.mcp.enableEventStreaming\` - Toggle SSE updates (default: true)
+- \`vybe.mcp.autoApprovePatches\` - Auto-approve patches (default: false)
+
+## Testing Strategy
+
+1. **Unit Tests**: Repo ID generation, session mapping
+2. **Integration Tests**: Tool parameter injection, envelope parsing
+3. **Manual Testing**: Full workflow from chat → tool call → envelope display → approval
+
+## Files to Create
+
+- \`src/vs/workbench/contrib/vybeChat/common/vybeMcpRepoIdService.ts\`
+- \`src/vs/workbench/contrib/vybeChat/common/vybeMcpSessionService.ts\`
+- \`src/vs/workbench/contrib/vybeChat/common/vybeMcpEventStreamService.ts\`
+- \`src/vs/workbench/contrib/vybeChat/common/vybeMcpToolParameterInjector.ts\`
+- \`src/vs/workbench/contrib/vybeChat/browser/contentParts/vybeChatPanelEnvelopePart.ts\`
+- \`src/vs/workbench/contrib/vybeChat/browser/components/panelEnvelope/panelEnvelopeRenderer.ts\`
+- \`src/vs/workbench/contrib/vybeChat/browser/components/panelEnvelope/patchApprovalWorkflow.ts\`
+
+## Files to Modify
+
+- \`src/vs/workbench/contrib/vybeChat/browser/contribution/vybeChat.contribution.ts\` - Register new services
+- \`src/vs/workbench/contrib/vybeChat/browser/vybeChatViewPane.ts\` - Register panel envelope content part
+- \`src/vs/workbench/contrib/vybeChat/common/vybeChatService.ts\` (if exists) - Integrate services
+
+## Dependencies
+
+- Existing MCP infrastructure (already in place)
+- Chat session management (already exists)
+- Workspace context service (already available)
+- File service for storage (already available)`;
+
+				// Step 1: Start streaming (collapsed, summary streams)
+				setTimeout(() => {
+					lastPage.addContentPart({
+						kind: 'planDocument',
+						id: planId,
+						filename: 'complete-mcp-integration.plan.md',
+						title: 'Complete VYBE-MCP Integration Plan',
+						summary: 'Complete the VYBE-MCP server integration by adding repo_id generation, session management, event streaming, panel envelope rendering, and approval workflows to make all MCP tools fully functional in the IDE. This plan covers 6 major components: Repo ID Service, Session Management, Event Streaming, Panel Envelope Renderer, Approval Workflow, and Tool Parameter Injection.',
+						content: `# Complete VYBE-MCP Integration Plan\n\n${planContent}`,
+						isExpanded: false,
+						isStreaming: true,
+						modelState: {
+							isAutoEnabled: true,
+							isMaxModeEnabled: false,
+							selectedModelId: 'composer-1'
+						}
+					});
+					pane.scrollToShowLatestContent();
+				}, 500);
+
+				// Step 2: Complete streaming (still collapsed, summary visible)
+				// Wait longer to let streaming animation complete naturally
+				// Calculate approximate time: content length * 15ms per char + buffer
+				const contentLength = `# Complete VYBE-MCP Integration Plan\n\n${planContent}`.length;
+				const estimatedStreamTime = contentLength * 15; // 15ms per character
+				setTimeout(() => {
+					lastPage.updateContentParts([
+						{
+							kind: 'planDocument',
+							id: planId,
+							filename: 'complete-mcp-integration.plan.md',
+							title: 'Complete VYBE-MCP Integration Plan',
+							summary: 'Complete the VYBE-MCP server integration by adding repo_id generation, session management, event streaming, panel envelope rendering, and approval workflows to make all MCP tools fully functional in the IDE. This plan covers 6 major components: Repo ID Service, Session Management, Event Streaming, Panel Envelope Renderer, Approval Workflow, and Tool Parameter Injection.',
+							content: `# Complete VYBE-MCP Integration Plan\n\n${planContent}`,
+							isExpanded: false,
+							isStreaming: false,
+							modelState: {
+								isAutoEnabled: true,
+								isMaxModeEnabled: false,
+								selectedModelId: 'composer-1'
+							}
+						}
+					]);
+					pane.scrollToShowLatestContent();
+				}, 500 + estimatedStreamTime + 500); // Start delay + stream time + buffer
+
+				// Step 3: Expand to show full plan (summary + full content)
+				setTimeout(() => {
+					lastPage.updateContentParts([
+						{
+							kind: 'planDocument',
+							id: planId,
+							filename: 'complete-mcp-integration.plan.md',
+							title: 'Complete VYBE-MCP Integration Plan',
+							summary: 'Complete the VYBE-MCP server integration by adding repo_id generation, session management, event streaming, panel envelope rendering, and approval workflows to make all MCP tools fully functional in the IDE. This plan covers 6 major components: Repo ID Service, Session Management, Event Streaming, Panel Envelope Renderer, Approval Workflow, and Tool Parameter Injection.',
+							content: `# Complete VYBE-MCP Integration Plan\n\n${planContent}`,
+							isExpanded: true,
+							isStreaming: false,
+							modelState: {
+								isAutoEnabled: true,
+								isMaxModeEnabled: false,
+								selectedModelId: 'composer-1'
+							}
+						}
+					]);
+					pane.scrollToShowLatestContent();
+				}, 4500);
 
 				return;
 			}

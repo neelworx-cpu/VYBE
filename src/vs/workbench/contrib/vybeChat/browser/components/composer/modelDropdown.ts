@@ -47,14 +47,14 @@ export class ModelDropdown extends Disposable {
 		super();
 	}
 
-	show(currentState: ModelDropdownState, openDownward: boolean = false): void {
+	show(currentState: ModelDropdownState, openDownward: boolean = false, alignRight: boolean = false): void {
 		// Toggle behavior: if already open, close it
 		if (this.dropdownContainer) {
 			this.hide();
 			return;
 		}
 		this.state = { ...currentState };
-		this.createDropdown(openDownward);
+		this.createDropdown(openDownward, alignRight);
 	}
 
 	hide(): void {
@@ -72,7 +72,7 @@ export class ModelDropdown extends Disposable {
 		return document.body.classList.contains('vs-dark') || document.body.classList.contains('hc-black');
 	}
 
-	private createDropdown(openDownward: boolean = false): void {
+	private createDropdown(openDownward: boolean = false, alignRight: boolean = false): void {
 
 		const isDarkTheme = this.isDarkTheme();
 
@@ -94,23 +94,32 @@ export class ModelDropdown extends Disposable {
 			visibility: visible;
 			width: 200px;
 			min-width: 170px;
-			transform-origin: left bottom;
+			transform-origin: ${alignRight ? 'right' : 'left'} bottom;
 			box-shadow: 0 0 8px 2px rgba(0, 0, 0, 0.12);
 			z-index: 2548;
 		`;
 
-		// Position dropdown - left edge aligned above icon
+		// Position dropdown
 		const rect = this.anchorElement.getBoundingClientRect();
 		if (openDownward) {
 			// Open downward (for sticky message at top)
 			this.dropdownContainer.style.top = `${rect.bottom + 3}px`;
-			this.dropdownContainer.style.left = `${rect.left}px`;
+			if (alignRight) {
+				this.dropdownContainer.style.right = `${window.innerWidth - rect.right}px`;
+			} else {
+				this.dropdownContainer.style.left = `${rect.left}px`;
+			}
 			this.dropdownContainer.style.transform = 'none';
 		} else {
 			// Open upward (for bottom composer)
 			this.dropdownContainer.style.top = `${rect.top - 3}px`;
-			this.dropdownContainer.style.left = `${rect.left}px`;
-			this.dropdownContainer.style.transform = 'translateY(-100%)';
+			if (alignRight) {
+				this.dropdownContainer.style.right = `${window.innerWidth - rect.right}px`;
+				this.dropdownContainer.style.transform = 'translateY(-100%)';
+			} else {
+				this.dropdownContainer.style.left = `${rect.left}px`;
+				this.dropdownContainer.style.transform = 'translateY(-100%)';
+			}
 		}
 
 		// Inner container - matches history dropdown

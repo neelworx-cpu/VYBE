@@ -22,21 +22,33 @@
 	animation: chat-fade-in 0.2s ease-out;
 }
 
-/* Markdown container root */
-.vybe-markdown-container-root {
+/* Markdown container root - match computed CSS: font-size: 13px, line-height: 20.8px */
+.vybe-markdown-container-root,
+.anysphere-markdown-container-root {
 	user-select: text;
-	font-size: 1em;
-	line-height: 1.5;
+	font-size: 13px; /* Match computed */
+	line-height: 20.8px; /* Match computed */
 	min-height: 22.2px;
+	word-wrap: break-word;
+	overflow-wrap: break-word;
+	max-width: 100%;
 }
 
-/* Markdown sections */
-.vybe-markdown-container-root .markdown-section {
-	margin: 0.3em 0; /* Small gap between sections */
+/* Markdown sections - match computed CSS: margin-top: 6px, margin-bottom: 6px */
+.vybe-markdown-container-root .markdown-section,
+.anysphere-markdown-container-root .markdown-section {
+	margin: 6px 0; /* Match computed: margin-top: 6px, margin-bottom: 6px */
 }
 
-/* Headings - h1 with minimal spacing to match reference */
-.vybe-markdown-container-root h1 {
+/* First markdown section should have no top margin to prevent shifting */
+.vybe-markdown-container-root .markdown-section:first-child,
+.anysphere-markdown-container-root .markdown-section:first-child {
+	margin-top: 0 !important;
+}
+
+/* Headings - match computed CSS from browser */
+.vybe-markdown-container-root h1,
+.anysphere-markdown-container-root h1 {
 	font-size: 1.6em; /* 20.8px at 13px base */
 	font-weight: 600;
 	line-height: 1.25; /* Tight line height */
@@ -44,20 +56,38 @@
 	color: var(--vscode-foreground);
 }
 
-.vybe-markdown-container-root h2 {
-	font-size: 1.3em;
+.vybe-markdown-container-root h2,
+.anysphere-markdown-container-root h2 {
+	font-size: 16.9px; /* Match computed: 16.9px */
 	font-weight: 600;
-	line-height: 1.3;
-	margin: 0.3em 0 0.15em 0;
+	line-height: 21.125px; /* Match computed */
+	margin: 20px 0 10px 0; /* Match computed: margin-top: 20px, margin-bottom: 10px */
 	color: var(--vscode-foreground);
 }
 
-.vybe-markdown-container-root h3 {
-	font-size: 1.17em;
+/* First h2 should have no top margin to prevent shifting */
+.vybe-markdown-container-root .markdown-section:first-child h2,
+.vybe-markdown-container-root > h2:first-child,
+.anysphere-markdown-container-root .markdown-section:first-child h2,
+.anysphere-markdown-container-root > h2:first-child {
+	margin-top: 0 !important;
+}
+
+.vybe-markdown-container-root h3,
+.anysphere-markdown-container-root h3 {
+	font-size: 14.95px; /* Match computed: 14.95px */
 	font-weight: 600;
-	line-height: 1.3;
-	margin: 0.3em 0 0.15em 0;
+	line-height: 18.6875px; /* Match computed */
+	margin: 18px 0 8px 0; /* Match computed: margin-top: 18px, margin-bottom: 8px */
 	color: var(--vscode-foreground);
+}
+
+/* First h3 should have no top margin if it's the first element */
+.vybe-markdown-container-root .markdown-section:first-child h3,
+.vybe-markdown-container-root > h3:first-child,
+.anysphere-markdown-container-root .markdown-section:first-child h3,
+.anysphere-markdown-container-root > h3:first-child {
+	margin-top: 0 !important;
 }
 
 .vybe-markdown-container-root h4 {
@@ -84,10 +114,30 @@
 	color: var(--vscode-foreground);
 }
 
-/* Paragraphs - minimal spacing */
-.vybe-markdown-container-root p {
+/* Paragraphs - match computed CSS: line-height: 19.5px */
+.vybe-markdown-container-root p,
+.anysphere-markdown-container-root p {
 	margin: 0.15em 0; /* ~2px at 13px base */
-	line-height: 1.5;
+	line-height: 19.5px; /* Match computed CSS */
+}
+
+/* Remove top margin from first paragraph to prevent layout shifts */
+.vybe-markdown-container-root p:first-child,
+.anysphere-markdown-container-root p:first-child {
+	margin-top: 0 !important;
+}
+
+/* Also ensure rendered-markdown element has no margins */
+.vybe-markdown-container-root .rendered-markdown,
+.anysphere-markdown-container-root .rendered-markdown {
+	margin: 0 !important;
+	padding: 0 !important;
+}
+
+/* Ensure first element in rendered-markdown has no top margin */
+.vybe-markdown-container-root .rendered-markdown > *:first-child,
+.anysphere-markdown-container-root .rendered-markdown > *:first-child {
+	margin-top: 0 !important;
 }
 
 /* Bold text */
@@ -104,35 +154,52 @@
 	font-style: italic;
 }
 
-/* Inline code */
+/* Inline code - match computed CSS: padding: 1.5px 3px, font-size: 11.7px, line-height: 16.38px */
 .vybe-markdown-container-root .markdown-inline-code,
-.vybe-markdown-container-root code:not(pre code) {
-	word-break: break-all;
+.vybe-markdown-container-root code:not(pre code),
+.anysphere-markdown-container-root .markdown-inline-code,
+.anysphere-markdown-container-root code:not(pre code) {
+	word-break: break-word; /* Changed from break-all to break-word for better wrapping */
+	overflow-wrap: break-word;
 	font-family: Menlo, Monaco, "Courier New", monospace;
 	cursor: default;
 	color: inherit;
 	background-color: var(--vscode-textCodeBlock-background);
-	padding: 1px 4px;
-	border-radius: 3px;
-	font-size: 0.9em;
+	padding: 1.5px 3px; /* Match computed: padding-top: 1.5px, padding-bottom: 1.5px, padding-left: 3px, padding-right: 3px */
+	border-radius: 4px; /* Match computed */
+	font-size: 11.7px; /* Match computed */
+	line-height: 16.38px; /* Match computed */
+	display: inline-block; /* Ensure proper wrapping */
+	max-width: 100%;
 }
 
-/* Lists */
+/* Lists - match computed CSS: margin-left: 16px, margin-top: 4px, margin-bottom: 0px */
 .vybe-markdown-container-root ul,
-.vybe-markdown-container-root ol {
-	margin: 0.25em 0px 0.25em 16px;
+.vybe-markdown-container-root ol,
+.anysphere-markdown-container-root ul,
+.anysphere-markdown-container-root ol {
+	margin: 4px 0 0 16px; /* Match computed: margin-top: 4px, margin-bottom: 0px, margin-left: 16px */
 	padding: 0px;
+	line-height: 19.5px; /* Match computed */
 }
 
 .vybe-markdown-container-root ul.nested,
-.vybe-markdown-container-root ol.nested {
+.vybe-markdown-container-root ol.nested,
+.anysphere-markdown-container-root ul.nested,
+.anysphere-markdown-container-root ol.nested {
 	margin-top: 0;
 	margin-bottom: 0;
 }
 
-.vybe-markdown-container-root li {
-	padding-top: 2px;
-	padding-bottom: 2px;
+/* List items - match computed CSS: margin-top: 2px, margin-bottom: 2px, padding-top: 2px, padding-bottom: 2px */
+.vybe-markdown-container-root li,
+.anysphere-markdown-container-root li {
+	margin-top: 2px; /* Match computed */
+	margin-bottom: 2px; /* Match computed */
+	margin-left: 0px; /* Match computed */
+	padding-top: 2px; /* Match computed */
+	padding-bottom: 2px; /* Match computed */
+	line-height: 19.5px; /* Match computed */
 }
 
 .vybe-markdown-container-root ul li {
@@ -157,13 +224,21 @@
 	text-decoration: underline;
 }
 
-/* File links (file://) get special styling */
+/* File links (file://) get special styling - VYBE green text, lighter background */
 .vybe-markdown-container-root .markdown-link[data-link^="file:"],
 .vybe-markdown-container-root a[href^="file:"] {
 	background-color: var(--vscode-textCodeBlock-background);
+	color: #3ecf8e; /* VYBE green */
 	padding: 1px 4px;
 	border-radius: 4px;
 	word-break: break-word;
+	cursor: pointer;
+	text-decoration: none;
+}
+
+.vybe-markdown-container-root .markdown-link[data-link^="file:"]:hover,
+.vybe-markdown-container-root a[href^="file:"]:hover {
+	background-color: color-mix(in srgb, #3ecf8e 20%, var(--vscode-textCodeBlock-background));
 }
 
 /* Tables - comprehensive styling to ensure borders show */

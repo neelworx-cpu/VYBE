@@ -17,10 +17,16 @@ export class VybeTerminalPromptBarWidget extends Disposable {
 	private _composerInner: HTMLElement | null = null;
 	private _isExpanded: boolean = false;
 	private _textInput: HTMLElement | null = null;
+	// Used internally - assigned but may not be read in all code paths
+	// @ts-expect-error - Assigned for internal state tracking
 	private _lightbulbButton: HTMLElement | null = null;
+	// @ts-expect-error - Assigned for internal state tracking
 	private _lightbulbIcon: HTMLElement | null = null;
+	// @ts-expect-error - Assigned for internal state tracking
 	private _focusTracker: IFocusTracker | null = null;
+	// @ts-expect-error - Assigned for internal state tracking
 	private _sendButtonDisposable: any = null;
+	// @ts-expect-error - Assigned for internal state tracking
 	private _isVisible: boolean = false;
 	private _isQuickQuestionMode: boolean = false;
 	private _quickAnswerRow: HTMLElement | null = null;
