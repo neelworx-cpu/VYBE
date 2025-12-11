@@ -938,6 +938,7 @@ declare global {
 		__vybeTestFilesEdited?: () => void;
 		__vybeTestSpacing?: () => void;
 		__vybeTestPlanDocument?: () => void;
+		__vybeTestQuestionnaire?: () => void;
 	}
 }
 
@@ -1298,7 +1299,7 @@ Final paragraph. Inspect all transitions.`
 		// Clear any existing files
 		composer.clearEditedFiles();
 
-		// Add sample files with different file types
+		// Add sample files with different file types (15 files for accurate testing)
 		const sampleFiles = [
 			{
 				id: 'file1',
@@ -1347,6 +1348,78 @@ Final paragraph. Inspect all transitions.`
 				iconClasses: ['codicon', 'codicon-file', 'file-icon', 'css-lang-file-icon'],
 				additions: 156,
 				deletions: 78
+			},
+			{
+				id: 'file7',
+				name: 'questionnaireToolbar.ts',
+				path: 'src/vs/workbench/contrib/vybeChat/browser/components/composer/questionnaireToolbar.ts',
+				iconClasses: ['codicon', 'codicon-file', 'file-icon', 'typescript-lang-file-icon'],
+				additions: 234,
+				deletions: 12
+			},
+			{
+				id: 'file8',
+				name: 'filesEditedToolbar.ts',
+				path: 'src/vs/workbench/contrib/vybeChat/browser/components/composer/filesEditedToolbar.ts',
+				iconClasses: ['codicon', 'codicon-file', 'file-icon', 'typescript-lang-file-icon'],
+				additions: 189,
+				deletions: 45
+			},
+			{
+				id: 'file9',
+				name: 'vybeChatPlanDocumentPart.ts',
+				path: 'src/vs/workbench/contrib/vybeChat/browser/contentParts/vybeChatPlanDocumentPart.ts',
+				iconClasses: ['codicon', 'codicon-file', 'file-icon', 'typescript-lang-file-icon'],
+				additions: 456,
+				deletions: 123
+			},
+			{
+				id: 'file10',
+				name: 'vybeChatMarkdown.css',
+				path: 'src/vs/workbench/contrib/vybeChat/browser/contentParts/media/vybeChatMarkdown.css',
+				iconClasses: ['codicon', 'codicon-file', 'file-icon', 'css-lang-file-icon'],
+				additions: 89,
+				deletions: 34
+			},
+			{
+				id: 'file11',
+				name: 'tsconfig.json',
+				path: 'tsconfig.json',
+				iconClasses: ['codicon', 'codicon-file', 'file-icon', 'json-lang-file-icon'],
+				additions: 12,
+				deletions: 3
+			},
+			{
+				id: 'file12',
+				name: 'webpack.config.js',
+				path: 'webpack.config.js',
+				iconClasses: ['codicon', 'codicon-file', 'file-icon', 'javascript-lang-file-icon'],
+				additions: 45,
+				deletions: 12
+			},
+			{
+				id: 'file13',
+				name: 'CONTRIBUTING.md',
+				path: 'CONTRIBUTING.md',
+				iconClasses: ['codicon', 'codicon-file', 'file-icon', 'markdown-lang-file-icon'],
+				additions: 67,
+				deletions: 8
+			},
+			{
+				id: 'file14',
+				name: 'vybeChatService.ts',
+				path: 'src/vs/workbench/contrib/vybeChat/common/vybeChatService.ts',
+				iconClasses: ['codicon', 'codicon-file', 'file-icon', 'typescript-lang-file-icon'],
+				additions: 234,
+				deletions: 56
+			},
+			{
+				id: 'file15',
+				name: 'vybeChat.contribution.ts',
+				path: 'src/vs/workbench/contrib/vybeChat/browser/contribution/vybeChat.contribution.ts',
+				iconClasses: ['codicon', 'codicon-file', 'file-icon', 'typescript-lang-file-icon'],
+				additions: 123,
+				deletions: 23
 			}
 		];
 
@@ -2608,5 +2681,71 @@ Add VS Code settings for:
 				return;
 			}
 		}
+	};
+
+	// Test function for questionnaire toolbar
+	(window as any).__vybeTestQuestionnaire = function () {
+		const composer = (globalThis as any).__vybeComposer;
+		if (!composer) {
+			console.warn('Composer not found. Make sure the chat pane is initialized.');
+			return;
+		}
+
+		// Sample questions for testing
+		const questions = [
+			{
+				id: 'q1',
+				text: 'What is the scope of this integration? Should I implement all components (repo_id, sessions, event streaming, panel envelopes, approval workflow) or focus on specific ones first?',
+				options: [
+					{ id: 'q1-a', label: 'All components - complete integration', letter: 'A' },
+					{ id: 'q1-b', label: 'Core only - repo_id, sessions, basic envelope rendering', letter: 'B' },
+					{ id: 'q1-c', label: 'Let me specify priorities', letter: 'C' }
+				]
+			},
+			{
+				id: 'q2',
+				text: 'Do you have Supabase configured and ready? This affects which tools will work (cloud plane tools require Supabase).',
+				options: [
+					{ id: 'q2-a', label: 'Yes, Supabase is configured', letter: 'A' },
+					{ id: 'q2-b', label: 'No, focus on local tools only for now', letter: 'B' },
+					{ id: 'q2-c', label: 'Will configure later, but include Supabase features', letter: 'C' }
+				]
+			},
+			{
+				id: 'q3',
+				text: 'How should patch approval work? Should patches require explicit approval or auto-apply?',
+				options: [
+					{ id: 'q3-a', label: 'Explicit approval required (show UI, user clicks approve)', letter: 'A' },
+					{ id: 'q3-b', label: 'Auto-apply patches (no approval UI needed)', letter: 'B' },
+					{ id: 'q3-c', label: 'Configurable via settings (default: require approval)', letter: 'C' }
+				]
+			}
+		];
+
+		// Set up callbacks
+		composer.setQuestionnaireCallbacks(
+			() => {
+				console.log('Skip clicked');
+				composer.clearQuestionnaire();
+			},
+			() => {
+				console.log('Continue clicked');
+				// Get selected answers
+				const selectedAnswers: { [questionId: string]: string } = {};
+				questions.forEach(q => {
+					// This would need to be tracked, but for now just log
+					console.log(`Question ${q.id} selected option would be retrieved here`);
+				});
+				console.log('Selected answers:', selectedAnswers);
+				composer.clearQuestionnaire();
+			},
+			(questionId: string, optionId: string) => {
+				console.log(`Question ${questionId} - Option ${optionId} selected`);
+			}
+		);
+
+		// Set questions to display
+		composer.setQuestionnaireQuestions(questions);
+		console.log('Questionnaire toolbar displayed with', questions.length, 'questions');
 	};
 }

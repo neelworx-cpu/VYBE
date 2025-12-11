@@ -31,6 +31,13 @@ export class FilesEditedToolbar extends Disposable {
 	private actionButtons: HTMLElement[] = [];
 	private actionButtonElements: HTMLElement[] = []; // Store button elements (not wrappers) for theme updates
 
+	// Callbacks
+	private onUndoAllCallback: (() => void) | null = null;
+	private onReviewCallback: (() => void) | null = null;
+	private onKeepAllCallback: (() => void) | null = null;
+	private onAcceptFileCallback: ((fileId: string) => void) | null = null;
+	private onRemoveFileCallback: ((fileId: string) => void) | null = null;
+
 	constructor(private parent: HTMLElement) {
 		super();
 		this.toolbar = this.renderToolbar();
@@ -87,10 +94,10 @@ export class FilesEditedToolbar extends Disposable {
 		const isDarkTheme = this.isDarkTheme();
 
 		// Update toolbar container background and border
-		// Match composer: Dark mode: #1e1f21, Light mode: #f8f8f9
+		// Match composer input box background: Dark mode: #212427, Light mode: #eceff2
 		// Match composer border: Dark mode: #383838, Light mode: #d9d9d9
 		this.toolbarContainer.style.cssText = `
-			background: ${isDarkTheme ? '#1e1f21' : '#f8f8f9'};
+			background: ${isDarkTheme ? '#212427' : '#eceff2'};
 			border-top: ${isDarkTheme ? '1px solid #383838' : '1px solid #d9d9d9'};
 			border-right: ${isDarkTheme ? '1px solid #383838' : '1px solid #d9d9d9'};
 			border-bottom: none;
@@ -177,7 +184,7 @@ export class FilesEditedToolbar extends Disposable {
 		// Main toolbar container - match composer's background and border
 		this.toolbarContainer = append(absoluteWrapper, $('div'));
 		this.toolbarContainer.id = 'composer-toolbar-section';
-		this.toolbarContainer.className = 'hide-if-empty';
+		this.toolbarContainer.className = 'hide-if-empty composer-files-edited-toolbar';
 		this.updateToolbarTheme();
 
 		// Header section
@@ -478,7 +485,14 @@ export class FilesEditedToolbar extends Disposable {
 		// Add click handlers
 		this._register(addDisposableListener(button, 'click', (e) => {
 			e.stopPropagation();
-			// TODO: Implement action handlers
+			const buttonText = span.textContent?.trim();
+			if (buttonText === 'Undo All' && this.onUndoAllCallback) {
+				this.onUndoAllCallback();
+			} else if (buttonText === 'Review' && this.onReviewCallback) {
+				this.onReviewCallback();
+			} else if (buttonText === 'Keep All' && this.onKeepAllCallback) {
+				this.onKeepAllCallback();
+			}
 		}));
 
 		return buttonWrapper;
@@ -530,6 +544,26 @@ export class FilesEditedToolbar extends Disposable {
 	public clearFiles(): void {
 		this.files.clear();
 		this.updateFiles();
+	}
+
+	public setOnUndoAll(callback: () => void): void {
+		this.onUndoAllCallback = callback;
+	}
+
+	public setOnReview(callback: () => void): void {
+		this.onReviewCallback = callback;
+	}
+
+	public setOnKeepAll(callback: () => void): void {
+		this.onKeepAllCallback = callback;
+	}
+
+	public setOnAcceptFile(callback: (fileId: string) => void): void {
+		this.onAcceptFileCallback = callback;
+	}
+
+	public setOnRemoveFile(callback: (fileId: string) => void): void {
+		this.onRemoveFileCallback = callback;
 	}
 
 	private updateFiles(): void {
@@ -680,19 +714,24 @@ export class FilesEditedToolbar extends Disposable {
 			height: 12px;
 			display: flex;
 			align-items: center;
+			justify-content: center;
 		`;
 
 		const iconWrapper = append(iconContainer, $('div'));
 		iconWrapper.className = 'show-file-icons';
 		iconWrapper.style.cssText = `
 			height: 16px;
+			width: 16px;
+			display: flex;
+			align-items: center;
+			justify-content: center;
 		`;
 
 		const iconInner = append(iconWrapper, $('div'));
 		iconInner.style.cssText = `
 			position: relative;
-			height: 100%;
-			width: 100%;
+			height: 16px;
+			width: 16px;
 			display: flex;
 			align-items: center;
 			justify-content: center;
@@ -702,9 +741,11 @@ export class FilesEditedToolbar extends Disposable {
 		const iconClasses = ['monaco-icon-label', 'file-icon', 'height-override-important', ...file.iconClasses];
 		iconElement.className = iconClasses.join(' ');
 		iconElement.style.cssText = `
-			height: 100%;
-			width: 100%;
+			height: 16px;
+			width: 16px;
 			display: flex;
+			align-items: center;
+			justify-content: center;
 		`;
 
 		// Name + Stats container
@@ -716,6 +757,7 @@ export class FilesEditedToolbar extends Disposable {
 			align-items: center;
 			overflow-x: hidden;
 			text-overflow: ellipsis;
+			margin-left: 2px;
 		`;
 
 		// File name
@@ -812,9 +854,9 @@ export class FilesEditedToolbar extends Disposable {
 		`;
 
 		// Hover effect - show action buttons and background
-		// Use slightly darker hover background for better visibility
+		// Use same hover background as questionnaire toolbar options
 		const isDarkTheme = this.isDarkTheme();
-		const hoverBackground = isDarkTheme ? '#252728' : '#E5E5E5'; // Slightly darker than default
+		const hoverBackground = isDarkTheme ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)';
 
 		this._register(addDisposableListener(item, 'mouseenter', () => {
 			item.style.backgroundColor = hoverBackground;
@@ -830,11 +872,16 @@ export class FilesEditedToolbar extends Disposable {
 		this._register(addDisposableListener(xButton, 'click', (e) => {
 			e.stopPropagation();
 			this.removeFile(file.id);
+			if (this.onRemoveFileCallback) {
+				this.onRemoveFileCallback(file.id);
+			}
 		}));
 
 		this._register(addDisposableListener(checkButton, 'click', (e) => {
 			e.stopPropagation();
-			// TODO: Implement accept action
+			if (this.onAcceptFileCallback) {
+				this.onAcceptFileCallback(file.id);
+			}
 		}));
 
 		return item;

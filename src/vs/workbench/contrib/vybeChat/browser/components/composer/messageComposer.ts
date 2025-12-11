@@ -15,6 +15,7 @@ import { DomScrollableElement } from '../../../../../../base/browser/ui/scrollba
 import { ScrollbarVisibility } from '../../../../../../base/common/scrollable.js';
 import { ImageAttachments } from './imageAttachments.js';
 import { FilesEditedToolbar } from './filesEditedToolbar.js';
+import { QuestionnaireToolbar } from './questionnaireToolbar.js';
 import { ISpeechService } from '../../../../../../workbench/contrib/speech/common/speechService.js';
 import { CancellationTokenSource } from '../../../../../../base/common/cancellation.js';
 
@@ -74,6 +75,9 @@ export class MessageComposer extends Disposable {
 
 	// Files edited toolbar (separate component)
 	private filesEditedToolbar: FilesEditedToolbar | null = null;
+
+	// Questionnaire toolbar (separate component)
+	private questionnaireToolbar: QuestionnaireToolbar | null = null;
 
 	// Context pills toolbar
 	private contextPillsToolbar: HTMLElement | null = null;
@@ -241,6 +245,9 @@ export class MessageComposer extends Disposable {
 		// Files edited toolbar (positioned absolutely at top of composer, inserted BEFORE inputBox)
 		this.filesEditedToolbar = this._register(new FilesEditedToolbar(composerOuter));
 
+		// Questionnaire toolbar (positioned absolutely at top of composer, appears when AI needs to ask questions)
+		this.questionnaireToolbar = this._register(new QuestionnaireToolbar(composerOuter));
+
 		// Main input box container with VYBE theme-aware background
 		this.inputBox = $('.vybe-ai-input-box');
 		this.inputBox.style.position = 'relative';
@@ -296,12 +303,15 @@ export class MessageComposer extends Disposable {
 
 		this.inputBox.appendChild(innerContent);
 
-		// Append toolbar first (if it exists)
+		// Append toolbars first (if they exist)
 		if (this.filesEditedToolbar && this.filesEditedToolbar.toolbar) {
 			composerOuter.appendChild(this.filesEditedToolbar.toolbar);
 		}
+		if (this.questionnaireToolbar && this.questionnaireToolbar.toolbar) {
+			composerOuter.appendChild(this.questionnaireToolbar.toolbar);
+		}
 
-		// Then append inputBox (toolbar will appear above due to absolute positioning with bottom: 100%)
+		// Then append inputBox (toolbars will appear above due to absolute positioning with bottom: 100%)
 		composerOuter.appendChild(this.inputBox);
 
 		return composerOuter;
@@ -1772,6 +1782,67 @@ export class MessageComposer extends Disposable {
 	public clearEditedFiles(): void {
 		if (this.filesEditedToolbar) {
 			this.filesEditedToolbar.clearFiles();
+		}
+	}
+
+	/**
+	 * Set callbacks for files edited toolbar actions
+	 * @param onUndoAll - Callback when "Undo All" button is clicked
+	 * @param onReview - Callback when "Review" button is clicked
+	 * @param onKeepAll - Callback when "Keep All" button is clicked
+	 * @param onAcceptFile - Callback when a file's accept (check) button is clicked
+	 * @param onRemoveFile - Callback when a file's remove (X) button is clicked
+	 */
+	public setFilesEditedCallbacks(
+		onUndoAll: () => void,
+		onReview: () => void,
+		onKeepAll: () => void,
+		onAcceptFile: (fileId: string) => void,
+		onRemoveFile: (fileId: string) => void
+	): void {
+		if (this.filesEditedToolbar) {
+			this.filesEditedToolbar.setOnUndoAll(onUndoAll);
+			this.filesEditedToolbar.setOnReview(onReview);
+			this.filesEditedToolbar.setOnKeepAll(onKeepAll);
+			this.filesEditedToolbar.setOnAcceptFile(onAcceptFile);
+			this.filesEditedToolbar.setOnRemoveFile(onRemoveFile);
+		}
+	}
+
+	/**
+	 * Set questions for the questionnaire toolbar
+	 * @param questions - Array of questions with options
+	 */
+	public setQuestionnaireQuestions(questions: Array<{ id: string; text: string; options: Array<{ id: string; label: string; letter: string }> }>): void {
+		if (this.questionnaireToolbar) {
+			this.questionnaireToolbar.setQuestions(questions);
+		}
+	}
+
+	/**
+	 * Clear the questionnaire toolbar
+	 */
+	public clearQuestionnaire(): void {
+		if (this.questionnaireToolbar) {
+			this.questionnaireToolbar.clear();
+		}
+	}
+
+	/**
+	 * Set callbacks for questionnaire toolbar actions
+	 * @param onSkip - Callback when skip button is clicked
+	 * @param onContinue - Callback when continue button is clicked
+	 * @param onOptionSelected - Callback when an option is selected (questionId, optionId)
+	 */
+	public setQuestionnaireCallbacks(
+		onSkip: () => void,
+		onContinue: () => void,
+		onOptionSelected: (questionId: string, optionId: string) => void
+	): void {
+		if (this.questionnaireToolbar) {
+			this.questionnaireToolbar.setOnSkip(onSkip);
+			this.questionnaireToolbar.setOnContinue(onContinue);
+			this.questionnaireToolbar.setOnOptionSelected(onOptionSelected);
 		}
 	}
 
