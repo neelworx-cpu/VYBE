@@ -45,6 +45,7 @@ import { IChatRequestVariableEntry } from './chatVariableEntries.js';
 import { ChatAgentLocation, ChatConfiguration, ChatModeKind } from './constants.js';
 import { ChatMessageRole, IChatMessage } from './languageModels.js';
 import { ILanguageModelToolsService } from './languageModelToolsService.js';
+import { CONFIG_ENABLE_LOCAL_EMBEDDINGS, CONFIG_ENABLE_LOCAL_INDEXING, CONFIG_ENABLE_LOCAL_SEMANTIC_SEARCH } from '../../../services/indexing/common/indexingConfiguration.js';
 
 const serializedChatKey = 'interactive.sessions';
 
@@ -115,6 +116,32 @@ export class ChatService extends Disposable implements IChatService {
 	private get isEmptyWindow(): boolean {
 		const workspace = this.workspaceContextService.getWorkspace();
 		return !workspace.configuration && workspace.folders.length === 0;
+	}
+
+	private getWorkspaceIdForMcp(): string | undefined {
+		const workspace = this.workspaceContextService.getWorkspace();
+		if (workspace.id) {
+			return workspace.id;
+		}
+		if (workspace.configuration) {
+			return workspace.configuration.toString();
+		}
+		if (workspace.folders.length) {
+			return workspace.folders[0].uri.toString();
+		}
+		return undefined;
+	}
+
+	private getVybeFeatureFlags() {
+		const localIndexing = !!this.configurationService.getValue<boolean>(CONFIG_ENABLE_LOCAL_INDEXING);
+		const semanticEnabled = localIndexing && !!this.configurationService.getValue<boolean>(CONFIG_ENABLE_LOCAL_SEMANTIC_SEARCH);
+		const embeddingsEnabled = localIndexing && !!this.configurationService.getValue<boolean>(CONFIG_ENABLE_LOCAL_EMBEDDINGS);
+		return {
+			enable_ide_context: localIndexing,
+			local_indexing_enabled: localIndexing,
+			semantic_enabled: semanticEnabled,
+			embeddings_enabled: embeddingsEnabled
+		};
 	}
 
 	constructor(
@@ -911,7 +938,18 @@ export class ChatService extends Disposable implements IChatService {
 							userSelectedTools: options?.userSelectedTools?.get(),
 							modeInstructions: options?.modeInfo?.modeInstructions,
 							editedFileEvents: request.editedFileEvents,
+							workspaceId: this.getWorkspaceIdForMcp(),
+							features: this.getVybeFeatureFlags(),
 						};
+
+						if (agentRequest.features?.enable_ide_context) {
+							this.logService.trace('[chat] vybe features', {
+								local_indexing_enabled: agentRequest.features.local_indexing_enabled,
+								semantic_enabled: agentRequest.features.semantic_enabled,
+								embeddings_enabled: agentRequest.features.embeddings_enabled,
+								has_workspace_id: !!agentRequest.workspaceId
+							});
+						}
 
 						let isInitialTools = true;
 

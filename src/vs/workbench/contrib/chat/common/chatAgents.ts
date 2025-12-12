@@ -150,6 +150,14 @@ export interface IChatAgentRequest {
 	modeInstructions?: IChatRequestModeInstructions;
 	editedFileEvents?: IChatAgentEditedFileEvent[];
 	isSubagent?: boolean;
+	// VYBE: workspace + feature gating for local index / MCP context
+	workspaceId?: string;
+	features?: {
+		enable_ide_context?: boolean;
+		local_indexing_enabled?: boolean;
+		semantic_enabled?: boolean;
+		embeddings_enabled?: boolean;
+	};
 
 }
 
