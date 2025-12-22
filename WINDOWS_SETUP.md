@@ -55,11 +55,15 @@ npm install
 ```
 
 This will:
-- Run preinstall/postinstall scripts
-- Install all npm packages
+- Run preinstall/postinstall scripts (which verify Node.js version matches `.nvmrc`)
+- Install all npm packages using exact versions from `package-lock.json`
 - Set up the build environment
 
-**Note:** This may take 5-10 minutes on first run.
+**Important Notes:**
+- The `package-lock.json` file ensures you get the exact same dependency versions as other developers
+- **Always commit `package-lock.json`** - it prevents version mismatches between Mac and Windows
+- If you get version errors, delete `node_modules` and `package-lock.json`, then run `npm install` again
+- This may take 5-10 minutes on first run
 
 ### 4. Download Electron
 ```powershell
@@ -123,14 +127,19 @@ Now when you make changes to the code, they'll automatically recompile and you c
 ## Troubleshooting
 
 ### "Node version mismatch"
-- Ensure you're using Node 20.11.0 exactly
+- Ensure you're using Node 20.11.0 exactly (or any Node 20.x version >= 20.11.0)
 - Check with: `node --version`
 - If using nvm-windows: `nvm use 20.11.0`
+- The project enforces Node version via:
+  - `.nvmrc` file (for nvm)
+  - `package.json` `engines` field (npm warning)
+  - Preinstall script (hard check)
 
 ### "ERR_UNKNOWN_FILE_EXTENSION" or TypeScript errors
 - Make sure you ran `npm install` completely
 - Check that `tsx` is installed: `npm list tsx`
 - Try deleting `node_modules` and `package-lock.json`, then `npm install` again
+- **Important**: After deleting `package-lock.json`, make sure to commit the newly generated one to keep versions in sync
 
 ### "Electron not found" or launch fails
 - Run: `npm run electron`
@@ -171,11 +180,26 @@ Once setup is complete:
 
 You're ready to develop! Start with `npm run watch` in one terminal and `.\scripts\code.bat` in another.
 
+## Version Consistency
+
+To ensure both Mac and Windows developers use the same package versions:
+
+1. **Always commit `package-lock.json`** - This file locks dependency versions
+2. **Use the same Node.js version** - Check `.nvmrc` for the required version
+3. **After pulling changes**, always run `npm install` to sync dependencies
+4. **If packages are out of sync**, both developers should:
+   ```powershell
+   Remove-Item -Recurse -Force node_modules
+   Remove-Item package-lock.json
+   npm install
+   # Commit the new package-lock.json
+   ```
+
 ## Getting Help
 
 If you encounter issues:
 1. Check the error message carefully
-2. Verify Node version: `node --version` (must be 20.11.0)
+2. Verify Node version: `node --version` (must be >= 20.11.0)
 3. Try a clean install:
    ```powershell
    Remove-Item -Recurse -Force node_modules
@@ -183,6 +207,7 @@ If you encounter issues:
    npm install
    ```
 4. Check that you're on the `develop` branch: `git branch`
+5. See `MERGE_STRATEGY.md` for information about merging upstream changes
 
 
 

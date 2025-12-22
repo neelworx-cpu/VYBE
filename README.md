@@ -3,6 +3,51 @@
 [![Bugs](https://img.shields.io/github/issues/microsoft/vscode/bug.svg)](https://github.com/microsoft/vscode/issues?utf8=✓&q=is%3Aissue+is%3Aopen+label%3Abug)
 [![Gitter](https://img.shields.io/badge/chat-on%20gitter-yellow.svg)](https://gitter.im/Microsoft/vscode)
 
+## ⚠️ Prerequisites - READ THIS FIRST
+
+**Before cloning or setting up this repository, you MUST use Node.js version 20.11.0.**
+
+### Quick Setup
+
+1. **Install/Use Node.js 20.11.0:**
+   ```bash
+   # If using nvm (recommended)
+   nvm install 20.11.0
+   nvm use 20.11.0
+
+   # Verify version
+   node --version  # Should show: v20.11.0
+   ```
+
+2. **Clone and install:**
+   ```bash
+   git clone <repository-url>
+   cd VYBE
+   npm install
+   ```
+
+### Why This Matters
+
+- The project **requires** Node.js 20.11.0 (specified in `.nvmrc`)
+- Using a different version will cause installation/build failures
+- The preinstall script will **block** installation if the wrong version is detected
+- Both Mac and Windows developers must use the same Node.js version
+
+### Platform-Specific Setup
+
+- **macOS/Linux**: See instructions above using `nvm`
+- **Windows**: See [WINDOWS_SETUP.md](WINDOWS_SETUP.md) for detailed Windows setup instructions
+
+### Troubleshooting
+
+If you get a "Node version mismatch" error:
+1. Check your current version: `node --version`
+2. Switch to 20.11.0: `nvm use 20.11.0` (or install it: `nvm install 20.11.0`)
+3. Verify: `node --version` should show `v20.11.0`
+4. Try `npm install` again
+
+---
+
 ## The Repository
 
 This repository ("`Code - OSS`") is where we (Microsoft) develop the [Visual Studio Code](https://code.visualstudio.com) product together with the community. Not only do we work on code and issues here, we also publish our [roadmap](https://github.com/microsoft/vscode/wiki/Roadmap), [monthly iteration plans](https://github.com/microsoft/vscode/wiki/Iteration-Plans), and our [endgame plans](https://github.com/microsoft/vscode/wiki/Running-the-Endgame). This source code is available to everyone under the standard [MIT license](https://github.com/microsoft/vscode/blob/main/LICENSE.txt).

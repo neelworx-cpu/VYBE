@@ -9,6 +9,9 @@
   "main": "./out/main.js",
   "type": "module",
   "private": true,
+  "engines": {
+    "node": ">=20.11.0 <21.0.0"
+  },
   "scripts": {
     "test": "echo Please run any of the test scripts from the scripts folder.",
     "test-browser": "npx playwright install && node test/unit/browser/index.js",

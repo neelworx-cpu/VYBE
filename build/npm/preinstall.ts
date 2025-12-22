@@ -32,7 +32,19 @@ if (!process.env['VSCODE_SKIP_NODE_VERSION_CHECK']) {
 	if (majorNodeVersion < requiredMajor ||
 		(majorNodeVersion === requiredMajor && minorNodeVersion < requiredMinor) ||
 		(majorNodeVersion === requiredMajor && minorNodeVersion === requiredMinor && patchNodeVersion < requiredPatch)) {
-		console.error(`\x1b[1;31m*** Please use Node.js v${requiredVersion} or later for development. Currently using v${process.versions.node}.\x1b[0;0m`);
+		console.error('\x1b[1;31m***\x1b[0;0m');
+		console.error(`\x1b[1;31m*** Node.js Version Mismatch!\x1b[0;0m`);
+		console.error(`\x1b[1;31m*** Required: Node.js v${requiredVersion} or later\x1b[0;0m`);
+		console.error(`\x1b[1;31m*** Currently using: v${process.versions.node}\x1b[0;0m`);
+		console.error('\x1b[1;31m***\x1b[0;0m');
+		console.error('\x1b[1;33m*** To fix this:\x1b[0;0m');
+		console.error('\x1b[1;33m***   1. Install Node.js 20.11.0: nvm install 20.11.0\x1b[0;0m');
+		console.error('\x1b[1;33m***   2. Switch to it: nvm use 20.11.0\x1b[0;0m');
+		console.error('\x1b[1;33m***   3. Verify: node --version (should show v20.11.0)\x1b[0;0m');
+		console.error('\x1b[1;33m***   4. Run npm install again\x1b[0;0m');
+		console.error('\x1b[1;33m***\x1b[0;0m');
+		console.error('\x1b[1;33m*** See README.md for more setup instructions.\x1b[0;0m');
+		console.error('\x1b[1;31m***\x1b[0;0m');
 		throw new Error();
 	}
 }
