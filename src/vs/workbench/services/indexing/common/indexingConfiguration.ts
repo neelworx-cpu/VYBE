@@ -3,6 +3,9 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { IStringDictionary } from '../../../../base/common/collections.js';
+import { IConfigurationPropertySchema } from '../../../../platform/configuration/common/configurationRegistry.js';
+
 export const CONFIG_SECTION = 'vybe';
 
 export const CONFIG_ENABLE_LOCAL_INDEXING = 'vybe.localIndexing.enabled';
@@ -17,8 +20,11 @@ export const CONFIG_EMBEDDING_MODEL = 'vybe.localIndexing.embeddingModel';
 export const CONFIG_EMBEDDING_BATCH_SIZE = 'vybe.localIndexing.embeddingBatchSize';
 export const CONFIG_SEARCH_TOP_K = 'vybe.localIndexing.searchTopK';
 export const CONFIG_LEXICAL_ROW_LIMIT = 'vybe.localIndexing.lexicalRowLimit';
+export const CONFIG_EMBEDDING_RUNTIME = 'vybe.localIndexing.embeddingRuntime';
+export const CONFIG_DEV_DB_SMOKE_TEST = 'vybe.localIndexing.devDbSmokeTest';
+export const CONFIG_DEV_INDEX_FIRST_N_FILES = 'vybe.localIndexing.devIndexFirstNFiles';
 
-export const indexingConfigurationProperties = {
+export const indexingConfigurationProperties: IStringDictionary<IConfigurationPropertySchema> = {
 	[CONFIG_ENABLE_LOCAL_INDEXING]: {
 		type: 'boolean',
 		default: false,
@@ -64,7 +70,7 @@ export const indexingConfigurationProperties = {
 	},
 	[CONFIG_EMBEDDING_MODEL]: {
 		type: 'string',
-		default: 'nomic-ai/CodeRankEmbed',
+		default: 'coderank-embed',
 		description: 'Embedding model identifier used for local semantic search.'
 	},
 	[CONFIG_EMBEDDING_BATCH_SIZE]: {
@@ -84,6 +90,23 @@ export const indexingConfigurationProperties = {
 		default: 200,
 		minimum: 1,
 		description: 'Maximum rows returned from lexical search per query.'
+	},
+	[CONFIG_EMBEDDING_RUNTIME]: {
+		type: 'string',
+		enum: ['hash', 'onnx', 'auto'],
+		default: 'hash',
+		description: 'Local embedding runtime implementation: "hash" (fast, lightweight), "onnx" (experimental CodeRank ONNX runtime), or "auto" to prefer ONNX with a hash fallback.'
+	},
+	[CONFIG_DEV_DB_SMOKE_TEST]: {
+		type: 'boolean',
+		default: false,
+		description: 'Dev-only: when true, the extension host will run a SQLite DB persistence smoke test on startup and log the result.'
+	},
+	[CONFIG_DEV_INDEX_FIRST_N_FILES]: {
+		type: 'number',
+		default: 0,
+		minimum: 0,
+		description: 'Dev-only: when > 0, the extension host will index the first N discovered files on startup to validate incremental indexing.'
 	}
-} as const;
+};
 

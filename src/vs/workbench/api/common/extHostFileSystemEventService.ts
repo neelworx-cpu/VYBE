@@ -276,6 +276,7 @@ export class ExtHostFileSystemEventService implements ExtHostFileSystemEventServ
 	private readonly _onWillCreateFile = new AsyncEmitter<vscode.FileWillCreateEvent>();
 	private readonly _onWillDeleteFile = new AsyncEmitter<vscode.FileWillDeleteEvent>();
 
+	readonly onFileSystemEvent: Event<FileSystemEvents> = this._onFileSystemEvent.event;
 	readonly onDidRenameFile: Event<vscode.FileRenameEvent> = this._onDidRenameFile.event;
 	readonly onDidCreateFile: Event<vscode.FileCreateEvent> = this._onDidCreateFile.event;
 	readonly onDidDeleteFile: Event<vscode.FileDeleteEvent> = this._onDidDeleteFile.event;

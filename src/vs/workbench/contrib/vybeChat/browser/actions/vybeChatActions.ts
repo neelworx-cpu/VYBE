@@ -16,6 +16,7 @@ import { HistoryDropdown, ChatHistoryItem } from '../components/titlebar/history
 import { DisposableStore } from '../../../../../base/common/lifecycle.js';
 import { IWorkbenchLayoutService, Parts } from '../../../../services/layout/browser/layoutService.js';
 import { IThemeService } from '../../../../../platform/theme/common/themeService.js';
+import { ICommandService } from '../../../../../platform/commands/common/commands.js';
 
 /**
  * Action to create a new chat session
@@ -302,7 +303,10 @@ registerAction2(class VybeChatSettingsAction extends Action2 {
 	}
 
 	async run(accessor: ServicesAccessor): Promise<void> {
-		// TODO: Implement settings
+		// Open the central VYBE Settings editor – all configuration for VYBE
+		// (including chat behavior, indexing, and models) lives there.
+		const commandService = accessor.get(ICommandService);
+		await commandService.executeCommand('vybe.openSettingsEditor');
 	}
 });
 

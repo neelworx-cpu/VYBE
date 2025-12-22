@@ -38,6 +38,8 @@
     "vscode-oniguruma": "1.7.0",
     "vscode-regexpp": "^3.1.0",
     "vscode-textmate": "^9.2.1",
+    "onnxruntime-web": "^1.19.0",
+    "@huggingface/tokenizers": "^0.0.6",
     "yauzl": "^3.0.0",
     "yazl": "^2.4.3"
   },

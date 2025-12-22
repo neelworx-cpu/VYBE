@@ -1367,9 +1367,206 @@ export interface MainThreadEmbeddingsShape extends IDisposable {
 	$computeEmbeddings(embeddingsModel: string, input: string[], token: CancellationToken): Promise<({ values: number[] }[])>;
 }
 
+export interface MainThreadIndexingShape extends IDisposable { }
+
 export interface ExtHostEmbeddingsShape {
 	$provideEmbeddings(handle: number, input: string[], token: CancellationToken): Promise<{ values: number[] }[]>;
 	$acceptEmbeddingModels(models: string[]): void;
+}
+
+export type IndexStateDto =
+	| 'uninitialized'
+	| 'indexing'
+	| 'ready'
+	| 'stale'
+	| 'error'
+	// Extended lifecycle states used by the extension host for more precise
+	// index health reporting. These map conceptually to the older states
+	// but are persisted explicitly in the SQLite metadata.
+	| 'idle'
+	| 'building'
+	| 'degraded';
+
+export interface IndexStatusDto {
+	readonly workspaceId: string;
+	readonly state: IndexStateDto;
+	readonly totalFiles?: number;
+	readonly indexedFiles?: number;
+	readonly totalChunks?: number;
+	readonly lastIndexedTime?: number;
+	readonly schemaVersion?: number;
+	readonly embeddedChunks?: number;
+	readonly embeddingModel?: string;
+	readonly errorMessage?: string;
+	readonly lastFullScanTime?: number;
+	readonly lastEmbeddingRunTime?: number;
+	readonly failedEmbeddingCount?: number;
+	readonly pendingEmbeddingCount?: number;
+	readonly retrievalMode?: 'ts' | 'sqlite-vector';
+	readonly vectorIndexReady?: boolean;
+	readonly lastErrorCode?: string;
+	readonly lastErrorMessage?: string;
+	// Phase 10: Control plane fields
+	readonly paused?: boolean;
+	readonly pausedReason?: string;
+	readonly degradedReason?: string;
+	readonly rebuilding?: boolean;
+	readonly backfillingVectorIndex?: boolean;
+	// Model status fields
+	readonly modelDownloadState?: 'idle' | 'checking' | 'downloading' | 'extracting' | 'ready' | 'error' | 'hash';
+	readonly modelDownloadProgress?: number;
+	readonly modelDownloadMessage?: string;
+}
+
+export interface DevSimilarChunkHitDto {
+	readonly filePath: string;
+	readonly chunkId: string;
+	/**
+	 * Base cosine similarity score between query embedding and chunk embedding.
+	 */
+	readonly similarityScore: number;
+	/**
+	 * Dev-only composite score used for ranking. This is a weighted
+	 * combination of the base cosine similarity and additional signals.
+	 */
+	readonly compositeScore?: number;
+	/**
+	 * Dev-only ranking signals used to derive the composite score. All
+	 * fields are optional and exist purely for diagnostics.
+	 */
+	readonly chunkLengthPenalty?: number;
+	readonly filePathDepthPenalty?: number;
+	readonly recencyBoost?: number;
+	readonly sameFileBoost?: number;
+	readonly snippet?: string;
+}
+
+export interface IndexVerificationSnapshotDto {
+	readonly totalFiles: number;
+	readonly indexedFiles: number;
+	readonly totalChunks: number;
+	readonly discoveredFilesCount: number;
+	readonly deletedFilesCount: number;
+}
+
+// Phase 11: Context assembly DTOs
+export interface ContextItemDto {
+	readonly filePath: string;
+	readonly snippet: string;
+	readonly startLine: number;
+	readonly endLine: number;
+	readonly score: number;
+	readonly reason: string;
+}
+
+export interface RepoOverviewDto {
+	readonly totalFiles: number;
+	readonly indexedFiles: number;
+	readonly totalChunks: number;
+	readonly folders: Array<{
+		readonly path: string;
+		readonly fileCount: number;
+		readonly totalSize: number;
+		readonly languages: Record<string, number>;
+	}>;
+	readonly recentFiles: Array<{
+		readonly path: string;
+		readonly lastIndexedTime: number;
+		readonly size: number;
+		readonly languageId?: string;
+	}>;
+}
+
+export interface ExtHostIndexingShape {
+	/**
+	 * Dev-only DB persistence smoke test. Implementations must use the same
+	 * SQLite backend and storage path as the real index, and return a
+	 * structured result indicating whether persistence is working.
+	 */
+	$runDbSmokeTest(workspaceId: string): Promise<{ ok: boolean; reason?: string }>;
+
+	/**
+	 * Minimal index status query used by the renderer-side proxy. This can
+	 * return an uninitialized/default state until the full indexing pipeline
+	 * is wired through the extension host.
+	 */
+	$getStatus(workspaceId: string): Promise<IndexStatusDto>;
+
+	/**
+	 * Builds a full on-disk index of the workspace file tree using the
+	 * persistent SQLite backend. Implementations must fail loudly when the
+	 * database is unavailable.
+	 */
+	$buildFullIndex(workspaceId: string, roots: UriComponents[], token: CancellationToken): Promise<IndexStatusDto>;
+
+	/**
+	 * Incrementally refreshes specific paths. For the initial file-tree-only
+	 * phase this may re-use the full indexer implementation.
+	 */
+	$refreshPaths(workspaceId: string, uris: UriComponents[], token: CancellationToken): Promise<IndexStatusDto>;
+
+	/**
+	 * Incrementally re-indexes the given saved files by computing chunks and
+	 * updating per-file metadata. Implementations must use a single SQLite
+	 * transaction per file and skip unchanged files based on their content
+	 * hash.
+	 */
+	$indexSavedFiles(workspaceId: string, uris: UriComponents[], token: CancellationToken): Promise<IndexStatusDto>;
+
+	/**
+	 * Dev-only end-to-end verification entry point. Runs a full tree index,
+	 * selects a deterministic subset of discovered files, indexes them, and
+	 * logs PASS/FAIL based on DB-backed status deltas.
+	 */
+	$devRunE2EIndexTest(workspaceId: string, roots: UriComponents[], token: CancellationToken): Promise<void>;
+
+	/**
+	 * Promoted internal API for querying similar chunks using the local
+	 * embeddings store. This is read-only and does not modify the index.
+	 */
+	$querySimilarChunksInternal(workspaceId: string, query: string, topK: number): Promise<DevSimilarChunkHitDto[]>;
+
+	/**
+	 * Safely deletes all index data for the given workspace and resets
+	 * its state to idle. This is the only destructive operation allowed.
+	 */
+	$deleteIndex(workspaceId: string): Promise<void>;
+
+	/**
+	 * Safely deletes all index data for the given workspace and resets
+	 * its state to idle, then rebuilds from scratch. This is the only destructive operation allowed.
+	 */
+	$rebuildWorkspaceIndex(workspaceId: string, reason?: string): Promise<void>;
+
+	/**
+	 * Phase 10: Control plane - Pause indexing operations for a workspace.
+	 */
+	$pauseIndexing(workspaceId: string, reason?: string): Promise<void>;
+
+	/**
+	 * Phase 10: Control plane - Resume indexing operations for a workspace.
+	 */
+	$resumeIndexing(workspaceId: string): Promise<void>;
+
+	/**
+	 * Phase 10: Control plane - Trigger vector index backfill for a workspace.
+	 */
+	$triggerVectorBackfill(workspaceId: string): Promise<void>;
+
+	/**
+	 * Phase 11: Dev-only context assembly for query.
+	 */
+	$devAssembleContextForQuery(
+		workspaceId: string,
+		query: string,
+		options: { maxChars?: number; maxTokens?: number },
+		token: CancellationToken
+	): Promise<ContextItemDto[]>;
+
+	/**
+	 * Phase 11: Dev-only repo overview.
+	 */
+	$devGetRepoOverview(workspaceId: string, token: CancellationToken): Promise<RepoOverviewDto>;
 }
 
 export interface IExtensionChatAgentMetadata extends Dto<IChatAgentMetadata> {
@@ -3320,6 +3517,7 @@ export const MainContext = {
 	MainThreadBulkEdits: createProxyIdentifier<MainThreadBulkEditsShape>('MainThreadBulkEdits'),
 	MainThreadLanguageModels: createProxyIdentifier<MainThreadLanguageModelsShape>('MainThreadLanguageModels'),
 	MainThreadEmbeddings: createProxyIdentifier<MainThreadEmbeddingsShape>('MainThreadEmbeddings'),
+	MainThreadIndexing: createProxyIdentifier<MainThreadIndexingShape>('MainThreadIndexing'),
 	MainThreadChatAgents2: createProxyIdentifier<MainThreadChatAgentsShape2>('MainThreadChatAgents2'),
 	MainThreadCodeMapper: createProxyIdentifier<MainThreadCodeMapperShape>('MainThreadCodeMapper'),
 	MainThreadLanguageModelTools: createProxyIdentifier<MainThreadLanguageModelToolsShape>('MainThreadChatSkills'),
@@ -3455,6 +3653,7 @@ export const ExtHostContext = {
 	ExtHostChatContext: createProxyIdentifier<ExtHostChatContextShape>('ExtHostChatContext'),
 	ExtHostSpeech: createProxyIdentifier<ExtHostSpeechShape>('ExtHostSpeech'),
 	ExtHostEmbeddings: createProxyIdentifier<ExtHostEmbeddingsShape>('ExtHostEmbeddings'),
+	ExtHostIndexing: createProxyIdentifier<ExtHostIndexingShape>('ExtHostIndexing'),
 	ExtHostAiRelatedInformation: createProxyIdentifier<ExtHostAiRelatedInformationShape>('ExtHostAiRelatedInformation'),
 	ExtHostAiEmbeddingVector: createProxyIdentifier<ExtHostAiEmbeddingVectorShape>('ExtHostAiEmbeddingVector'),
 	ExtHostAiSettingsSearch: createProxyIdentifier<ExtHostAiSettingsSearchShape>('ExtHostAiSettingsSearch'),

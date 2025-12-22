@@ -54,7 +54,15 @@ export interface IndexStatusDTO {
 	lastIndexedTime?: number;
 	totalFiles?: number;
 	indexedFiles?: number;
+	totalChunks?: number;
+	embeddedChunks?: number;
 	embeddingModel?: string;
+	/**
+	 * Optional on-disk path to the underlying index database. Exposed only
+	 * for diagnostics and support tooling; callers must not read or mutate
+	 * the file directly.
+	 */
+	dbPath?: string;
 }
 
 export interface MergedContextBundle {

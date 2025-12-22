@@ -431,4 +431,10 @@ import './contrib/opener/browser/opener.contribution.js';
 // VYBE Chat
 import './contrib/vybeChat/browser/contribution/vybeChat.contribution.js';
 
+// VYBE Settings
+import './contrib/vybeSettings/browser/vybeSettings.contribution.js';
+
+// VYBE Indexing
+import './contrib/indexing/browser/indexing.contribution.js';
+
 //#endregion

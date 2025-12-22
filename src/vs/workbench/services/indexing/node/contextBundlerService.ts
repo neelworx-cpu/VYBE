@@ -71,7 +71,7 @@ export class ContextBundlerService extends Disposable implements IContextBundler
 			engineMetadata: {
 				selectionStrategy: 'hybrid',
 				indexFreshness: 'fresh',
-				embeddingModel: this.configurationService.getValue<string>(CONFIG_EMBEDDING_MODEL) || 'nomic-ai/CodeRankEmbed'
+				embeddingModel: this.configurationService.getValue<string>(CONFIG_EMBEDDING_MODEL) || 'coderank-embed'
 			}
 		};
 	}

@@ -58,6 +58,7 @@ import { IExtHostDocumentsAndEditors } from './extHostDocumentsAndEditors.js';
 import { IExtHostEditorTabs } from './extHostEditorTabs.js';
 import { ExtHostEmbeddings } from './extHostEmbedding.js';
 import { ExtHostAiEmbeddingVector } from './extHostEmbeddingVector.js';
+import { ExtHostIndexing } from './extHostIndexing.js';
 import { Extension, IExtHostExtensionService } from './extHostExtensionService.js';
 import { ExtHostFileSystem } from './extHostFileSystem.js';
 import { IExtHostConsumerFileSystem } from './extHostFileSystemConsumer.js';
@@ -235,6 +236,9 @@ export function createApiFactoryAndRegisterActors(accessor: ServicesAccessor): I
 	const extHostStatusBar = rpcProtocol.set(ExtHostContext.ExtHostStatusBar, new ExtHostStatusBar(rpcProtocol, extHostCommands.converter));
 	const extHostSpeech = rpcProtocol.set(ExtHostContext.ExtHostSpeech, new ExtHostSpeech(rpcProtocol));
 	const extHostEmbeddings = rpcProtocol.set(ExtHostContext.ExtHostEmbeddings, new ExtHostEmbeddings(rpcProtocol));
+	const extHostIndexing = new ExtHostIndexing(accessor.get(IExtHostConfiguration), accessor.get(ILogService), accessor.get(IExtHostInitDataService), accessor.get(IExtHostWorkspace), extHostFileSystemEvent, extHostDocumentsAndEditors);
+	console.log('[extHost.api.impl] ExtHostIndexing created, embedding runtime initialization should start automatically');
+	rpcProtocol.set(ExtHostContext.ExtHostIndexing, extHostIndexing);
 
 	rpcProtocol.set(ExtHostContext.ExtHostMcp, accessor.get(IExtHostMpcService));
 

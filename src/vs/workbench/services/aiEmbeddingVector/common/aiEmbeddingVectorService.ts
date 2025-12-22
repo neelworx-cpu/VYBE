@@ -63,8 +63,8 @@ export class AiEmbeddingVectorService implements IAiEmbeddingVectorService {
 		const cancellablePromises: Array<CancelablePromise<number[][]>> = [];
 
 		const timer = timeout(AiEmbeddingVectorService.DEFAULT_TIMEOUT);
-		const disposable = token.onCancellationRequested(() => {
-			disposable.dispose();
+		const cancellationDisposable = token.onCancellationRequested(() => {
+			cancellationDisposable.dispose();
 			timer.cancel();
 		});
 
@@ -105,6 +105,12 @@ export class AiEmbeddingVectorService implements IAiEmbeddingVectorService {
 			}
 			return result;
 		} finally {
+			// Always dispose the listener we attached to the caller's token and
+			// cancel the shared timeout to avoid accumulating listeners and
+			// timers across many embedding requests.
+			cancellationDisposable.dispose();
+			timer.cancel();
+
 			stopwatch.stop();
 			this.logService.trace(`[AiEmbeddingVectorService]: getEmbeddingVector took ${stopwatch.elapsed()}ms`);
 		}

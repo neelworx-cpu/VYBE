@@ -223,13 +223,23 @@ export class VybeMcpRouter {
 		const ws = parseWorkspaceId(request.workspaceId);
 		const status = await this.indexService.getStatus(ws);
 		const state = status.state as ListIndexStatusResponse['state'];
+
+		// Prefer richer diagnostics when available so tools can inspect the
+		// underlying store without reading the database directly.
+		const diagnostics = typeof this.indexService.getDiagnostics === 'function'
+			? await this.indexService.getDiagnostics(ws, undefined)
+			: undefined;
+
 		return {
 			workspaceId: request.workspaceId,
 			state,
-			indexedFiles: status.indexedFiles ?? status.indexedFileCount,
-			totalFiles: status.totalFiles ?? status.indexedFileCount,
-			lastIndexedTime: status.lastIndexedTime ?? status.lastUpdated,
-			embeddingModel: status.embeddingModel,
+			indexedFiles: diagnostics?.indexedFiles ?? status.indexedFiles ?? status.indexedFileCount,
+			totalFiles: diagnostics?.totalFiles ?? status.totalFiles ?? status.indexedFileCount,
+			totalChunks: diagnostics?.totalChunks,
+			embeddedChunks: diagnostics?.embeddedChunks,
+			lastIndexedTime: diagnostics?.lastIndexedTime ?? status.lastIndexedTime ?? status.lastUpdated,
+			embeddingModel: diagnostics?.embeddingModel ?? status.embeddingModel,
+			dbPath: diagnostics?.dbPath,
 			errorMessage: status.errorMessage
 		};
 	}

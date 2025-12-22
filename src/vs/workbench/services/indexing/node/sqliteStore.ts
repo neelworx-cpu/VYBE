@@ -83,10 +83,19 @@ interface MetadataEntry {
 export class SqliteStore {
 	private readonly dbCache = new Map<string, InstanceType<SqliteModule['Database']>>();
 
+	/**
+	 * When true, the store is considered inert for the lifetime of the
+	 * process. This typically happens when `@vscode/sqlite3` cannot be
+	 * loaded or when the database cannot be opened at all. All operations
+	 * will become no-ops in this case.
+	 */
+	private dbUnavailable = false;
+	private dbUnavailableReason: string | undefined;
+
 	constructor(
 		private readonly environmentService: IEnvironmentService,
 		_fileService: IFileService,
-		_logService: ILogService,
+		private readonly logService: ILogService,
 	) { }
 
 	private workspaceKey(workspace: IWorkspaceIdentifier): string {
@@ -99,7 +108,53 @@ export class SqliteStore {
 		return path.join(storageHome, workspaceId, 'vybe-index.db');
 	}
 
+	/**
+	 * Returns the effective on-disk database path for the given workspace
+	 * when running in a native environment. When SQLite is not available,
+	 * this returns undefined so callers can surface a meaningful diagnostic.
+	 */
+	getDbPath(workspace: IWorkspaceIdentifier): string | undefined {
+		const deps = getNodeDeps();
+		if (!deps) {
+			return undefined;
+		}
+		return this.dbPath(workspace, deps.path);
+	}
+
+	/**
+	 * Whether the underlying SQLite store is available. When this returns
+	 * false, callers should treat the index as unavailable and surface an
+	 * error state instead of pretending the index is simply empty.
+	 */
+	isAvailable(): boolean {
+		if (this.dbUnavailable) {
+			return false;
+		}
+		const deps = getNodeDeps();
+		if (!deps) {
+			this.markUnavailable('Native sqlite dependencies are not available; local index store is disabled.');
+			return false;
+		}
+		return true;
+	}
+
+	getUnavailableReason(): string | undefined {
+		return this.dbUnavailableReason;
+	}
+
+	private markUnavailable(message: string, dbPath?: string): void {
+		if (this.dbUnavailable) {
+			return;
+		}
+		this.dbUnavailable = true;
+		this.dbUnavailableReason = dbPath ? `${message} (db: ${dbPath})` : message;
+		this.logService.warn('[SqliteStore] ' + this.dbUnavailableReason);
+	}
+
 	private async open(workspace: IWorkspaceIdentifier): Promise<InstanceType<SqliteModule['Database']> | undefined> {
+		if (this.dbUnavailable) {
+			return undefined;
+		}
 		const key = this.workspaceKey(workspace);
 		const existing = this.dbCache.get(key);
 		if (existing) {
@@ -107,18 +162,25 @@ export class SqliteStore {
 		}
 		const deps = getNodeDeps();
 		if (!deps) {
+			this.markUnavailable('Failed to load @vscode/sqlite3; local index store is disabled.');
 			return undefined;
 		}
 		const dbPath = this.dbPath(workspace, deps.path);
 		if (!dbPath) {
 			return undefined;
 		}
-		await deps.fs.promises.mkdir(deps.path.dirname(dbPath), { recursive: true });
-		// eslint-disable-next-line new-cap
-		const db = new deps.sqlite.Database(dbPath);
-		this.dbCache.set(key, db);
-		await this.initialize(db);
-		return db;
+		try {
+			await deps.fs.promises.mkdir(deps.path.dirname(dbPath), { recursive: true });
+			// eslint-disable-next-line new-cap
+			const db = new deps.sqlite.Database(dbPath);
+			this.dbCache.set(key, db);
+			await this.initialize(db);
+			return db;
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			this.markUnavailable(`Failed to open SQLite database: ${message}`, dbPath);
+			return undefined;
+		}
 	}
 
 	private async initialize(db: InstanceType<SqliteModule['Database']>): Promise<void> {
@@ -408,6 +470,13 @@ export class SqliteStore {
 		const db = await this.open(workspace);
 		if (!db) { return 0; }
 		const row = await this.get<any>(db, `SELECT COUNT(*) as c FROM chunks WHERE workspace=?`, [this.workspaceKey(workspace)]);
+		return row?.c ?? 0;
+	}
+
+	async embeddingCount(workspace: IWorkspaceIdentifier): Promise<number> {
+		const db = await this.open(workspace);
+		if (!db) { return 0; }
+		const row = await this.get<any>(db, `SELECT COUNT(*) as c FROM embeddings WHERE workspace=?`, [this.workspaceKey(workspace)]);
 		return row?.c ?? 0;
 	}
 

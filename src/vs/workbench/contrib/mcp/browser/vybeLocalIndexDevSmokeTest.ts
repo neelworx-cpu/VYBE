@@ -103,6 +103,9 @@ export class VybeLocalIndexDevSmokeTest extends Disposable {
 			state: payload.state,
 			indexedFiles: payload.indexedFiles ?? payload.totalFiles,
 			totalFiles: payload.totalFiles,
+			totalChunks: payload.totalChunks,
+			embeddedChunks: payload.embeddedChunks,
+			dbPath: payload.dbPath,
 			embeddingModel: payload.embeddingModel ?? payload.engineMetadata?.embeddingModel,
 			snippetCount: Array.isArray(payload.snippets) ? payload.snippets.length : undefined,
 			symbolCount: Array.isArray(payload.symbols) ? payload.symbols.length : undefined,
@@ -137,7 +140,21 @@ export class VybeLocalIndexDevSmokeTest extends Disposable {
 		while (Date.now() - start < timeoutMs) {
 			const status = this.parseToolJson(await this.invoke('vybe.list_index_status', { workspaceId: this.workspaceId ?? '' }));
 			if (status?.indexedFiles && status.indexedFiles > 0) {
-				return status;
+				// When embeddings are enabled we additionally expect at least
+				// some chunks and embeddings to exist for a healthy index.
+				if (this.getFlags().embeddings) {
+					const hasChunks = typeof status.totalChunks === 'number' ? status.totalChunks > 0 : true;
+					const hasEmbeddings = typeof status.embeddedChunks === 'number' ? status.embeddedChunks > 0 : true;
+					if (hasChunks && hasEmbeddings) {
+						return status;
+					}
+					this.logService.warn('[vybe dev smoke test] files indexed but zero chunks/embeddings', {
+						totalChunks: status.totalChunks,
+						embeddedChunks: status.embeddedChunks
+					});
+				} else {
+					return status;
+				}
 			}
 			// If we reached ready but have zero files, stop polling to avoid spamming logs.
 			if (status?.state === 'ready' && (status.totalFiles === 0 || status.indexedFiles === 0)) {
