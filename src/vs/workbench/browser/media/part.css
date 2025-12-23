@@ -120,7 +120,7 @@
 /* Extends from top, but STOPS to make room for terminal below */
 .monaco-workbench .part.editor {
 	border-radius: 6px;
-	margin-right: 3px;
+	margin-right: 2px; /* VYBE: Reduced from 3px to 2px to test gap alignment */
 	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
 	border: none;
 	background-color: var(--vscode-sideBar-background); /* VYBE: Use theme panel color */
@@ -130,7 +130,7 @@
 /* Positioned ONLY under the Editor, NOT full width */
 .monaco-workbench .part.panel.bottom {
 	border-radius: 6px;
-	margin-right: 3px;
+	margin-right: 2px; /* VYBE: Reduced from 3px to 2px to test gap alignment */
 	margin-bottom: 13px;
 	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
 	border: none;
