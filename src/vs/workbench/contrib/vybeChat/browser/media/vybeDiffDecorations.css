@@ -1,0 +1,33 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* VYBE Diff Decorations - Visual highlights for AI-generated code edits */
+
+/* Whole-line highlight for added lines */
+.monaco-editor .vybe-diff-line-added {
+	background-color: rgba(46, 160, 67, 0.1);
+}
+
+/* Whole-line highlight for edited lines */
+.monaco-editor .vybe-diff-line-edited {
+	background-color: rgba(0, 102, 204, 0.1);
+}
+
+/* Whole-line highlight for deleted lines */
+.monaco-editor .vybe-diff-line-deleted {
+	background-color: rgba(231, 76, 60, 0.1);
+}
+
+/* Gutter glyph marker for lines with pending diffs */
+.monaco-editor .vybe-diff-glyph {
+	background-color: rgba(0, 102, 204, 0.3);
+	width: 3px;
+}
+
+/* Optional border for pending diffs */
+.monaco-editor .vybe-diff-pending-border {
+	border-left: 2px solid rgba(0, 102, 204, 0.5);
+}
+

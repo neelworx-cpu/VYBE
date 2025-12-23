@@ -7,6 +7,15 @@ import { $, append, addDisposableListener, getWindow } from '../../../../../../b
 import { Disposable } from '../../../../../../base/common/lifecycle.js';
 import { DomScrollableElement } from '../../../../../../base/browser/ui/scrollbar/scrollableElement.js';
 import { ScrollbarVisibility } from '../../../../../../base/common/scrollable.js';
+import { IVybeEditService } from '../../../common/vybeEditService.js';
+import { VybeEditedFileSummary } from '../../../common/vybeEditTypes.js';
+import { IModelService } from '../../../../../../editor/common/services/model.js';
+import { ILanguageService } from '../../../../../../editor/common/languages/language.js';
+import { getIconClasses } from '../../../../../../editor/common/services/getIconClasses.js';
+import { basename } from '../../../../../../base/common/resources.js';
+import { URI } from '../../../../../../base/common/uri.js';
+import { FileKind } from '../../../../../../platform/files/common/files.js';
+import { ILabelService } from '../../../../../../platform/label/common/label.js';
 
 export interface EditedFile {
 	id: string;
@@ -38,10 +47,27 @@ export class FilesEditedToolbar extends Disposable {
 	private onAcceptFileCallback: ((fileId: string) => void) | null = null;
 	private onRemoveFileCallback: ((fileId: string) => void) | null = null;
 
-	constructor(private parent: HTMLElement) {
+	constructor(
+		private parent: HTMLElement,
+		@IVybeEditService private readonly _editService: IVybeEditService,
+		@IModelService private readonly _modelService: IModelService,
+		@ILanguageService private readonly _languageService: ILanguageService,
+		@ILabelService private readonly _labelService: ILabelService
+	) {
 		super();
 		this.toolbar = this.renderToolbar();
 		this.setupThemeObserver();
+
+		// Subscribe to edit service events
+		this._register(this._editService.onDidChangeEditedFiles(() => {
+			this._syncFromEditService();
+		}));
+
+		// Wire actions to edit service
+		this.wireActions();
+
+		// Initial sync
+		this._syncFromEditService();
 	}
 
 	private isDarkTheme(): boolean {
@@ -486,6 +512,10 @@ export class FilesEditedToolbar extends Disposable {
 		this._register(addDisposableListener(button, 'click', (e) => {
 			e.stopPropagation();
 			const buttonText = span.textContent?.trim();
+			const isDisabled = button.getAttribute('data-disabled') === 'true';
+			if (isDisabled) {
+				return; // Don't handle clicks on disabled buttons
+			}
 			if (buttonText === 'Undo All' && this.onUndoAllCallback) {
 				this.onUndoAllCallback();
 			} else if (buttonText === 'Review' && this.onReviewCallback) {
@@ -564,6 +594,97 @@ export class FilesEditedToolbar extends Disposable {
 
 	public setOnRemoveFile(callback: (fileId: string) => void): void {
 		this.onRemoveFileCallback = callback;
+	}
+
+	/**
+	 * Wires action callbacks to IVybeEditService methods.
+	 * This should be called after construction to enable accept/reject functionality.
+	 */
+	private wireActions(): void {
+		// Wire Keep All to acceptAll
+		this.setOnKeepAll(() => {
+			void this._editService.acceptAll();
+		});
+
+		// Wire Undo All to rejectAll
+		this.setOnUndoAll(() => {
+			void this._editService.rejectAll();
+		});
+
+		// Wire Accept File to acceptFile
+		this.setOnAcceptFile((fileId: string) => {
+			try {
+				const uri = URI.parse(fileId);
+				void this._editService.acceptFile(uri);
+			} catch (error) {
+				console.error('[FilesEditedToolbar] Error parsing URI for acceptFile', error);
+			}
+		});
+
+		// Wire Remove File to rejectFile
+		this.setOnRemoveFile((fileId: string) => {
+			try {
+				const uri = URI.parse(fileId);
+				void this._editService.rejectFile(uri);
+			} catch (error) {
+				console.error('[FilesEditedToolbar] Error parsing URI for rejectFile', error);
+			}
+		});
+	}
+
+	/**
+	 * Syncs file list from IVybeEditService.
+	 * Filters to only files with pending diffs and converts summaries to EditedFile format.
+	 */
+	private _syncFromEditService(): void {
+		try {
+			const summaries = this._editService.getEditedFiles();
+			const pendingSummaries = summaries.filter((summary: VybeEditedFileSummary) => summary.hasPendingDiffs);
+
+			// Clear existing files
+			this.files.clear();
+
+			// Convert summaries to EditedFile and populate map
+			for (const summary of pendingSummaries) {
+				const editedFile = this._convertSummaryToEditedFile(summary);
+				this.files.set(editedFile.id, editedFile);
+			}
+
+			// Update UI
+			this.updateFiles();
+		} catch (error) {
+			console.error('[FilesEditedToolbar] Error syncing from edit service', error);
+		}
+	}
+
+	/**
+	 * Converts a VybeEditedFileSummary to an EditedFile.
+	 */
+	private _convertSummaryToEditedFile(summary: VybeEditedFileSummary): EditedFile {
+		const uri = summary.uri;
+		const id = uri.toString();
+		const name = basename(uri) || uri.path.split('/').pop() || 'unknown';
+
+		// Get workspace-relative path
+		let path: string;
+		try {
+			path = this._labelService.getUriLabel(uri, { relative: true });
+		} catch {
+			// Fallback to URI path if label service fails
+			path = uri.path;
+		}
+
+		// Get icon classes
+		const iconClasses = getIconClasses(this._modelService, this._languageService, uri, FileKind.FILE);
+
+		return {
+			id,
+			name,
+			path,
+			iconClasses,
+			additions: summary.addedLines,
+			deletions: summary.removedLines
+		};
 	}
 
 	private updateFiles(): void {

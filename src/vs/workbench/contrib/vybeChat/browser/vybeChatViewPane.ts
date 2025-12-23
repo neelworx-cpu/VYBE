@@ -201,7 +201,7 @@ export class VybeChatViewPane extends ViewPane {
 
 
 		// Render composer at the bottom
-		this.composer = this._register(new MessageComposer(container, this._speechService));
+		this.composer = this._register(this.instantiationService.createInstance(MessageComposer, container, this._speechService));
 
 		// VYBE-PATCH-START: test-helpers
 		// Expose composer globally for testing

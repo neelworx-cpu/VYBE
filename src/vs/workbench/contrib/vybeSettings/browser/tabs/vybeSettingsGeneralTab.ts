@@ -4,9 +4,17 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as DOM from '../../../../../base/browser/dom.js';
+import { addDisposableListener, EventType } from '../../../../../base/browser/dom.js';
 import { createSection, createCell, createButton } from '../vybeSettingsComponents.js';
+import { IStorageService, StorageScope, StorageTarget } from '../../../../../platform/storage/common/storage.js';
+import { DisposableStore } from '../../../../../base/common/lifecycle.js';
+import { STORAGE_KEY_ENABLE_DIFF_DECORATIONS } from '../../../../contrib/vybeChat/browser/contribution/vybeDiffDecorations.contribution.js';
 
-export function renderGeneralTab(parent: HTMLElement): void {
+export function renderGeneralTab(
+	parent: HTMLElement,
+	storageService: IStorageService,
+	disposables: DisposableStore
+): void {
 	// Account section
 	const accountSection = createSection(parent, null);
 	const accountSectionList = accountSection.querySelector('.cursor-settings-section-list') as HTMLElement;
@@ -95,6 +103,43 @@ export function renderGeneralTab(parent: HTMLElement): void {
 		action: { type: 'switch', checked: true },
 		hasDivider: true
 	});
+
+	// AI Edits section
+	const aiEditsSection = createSection(parent, 'AI Edits');
+	const aiEditsSectionList = aiEditsSection.querySelector('.cursor-settings-section-list') as HTMLElement;
+	const aiEditsSubSection = DOM.append(aiEditsSectionList, DOM.$('.cursor-settings-sub-section'));
+
+	// Get current value from storage (default: false)
+	const diffDecorationsEnabled = storageService.getBoolean(STORAGE_KEY_ENABLE_DIFF_DECORATIONS, StorageScope.APPLICATION, false);
+	const diffDecorationsCell = createCell(aiEditsSubSection, {
+		label: 'Enable Diff Decorations',
+		description: 'Show visual highlights for AI-generated code edits. When enabled, pending diffs will be highlighted in the editor with color-coded line highlights and gutter markers.',
+		action: { type: 'switch', checked: diffDecorationsEnabled }
+	});
+
+	// Wire up toggle
+	const diffDecorationsSwitch = diffDecorationsCell.querySelector('.solid-switch') as HTMLElement;
+	if (diffDecorationsSwitch) {
+		const updateToggleVisual = (checked: boolean) => {
+			const bgFill = diffDecorationsSwitch.querySelector('.solid-switch-bg-fill') as HTMLElement;
+			const knob = diffDecorationsSwitch.querySelector('.solid-switch-knob') as HTMLElement;
+			if (bgFill && knob) {
+				diffDecorationsSwitch.style.background = checked ? 'rgb(85, 165, 131)' : 'rgba(128, 128, 128, 0.3)';
+				bgFill.style.opacity = checked ? '1' : '0';
+				bgFill.style.width = checked ? '100%' : '0%';
+				knob.style.left = checked ? 'calc(100% - 16px)' : '2px';
+				diffDecorationsSwitch.setAttribute('data-checked', String(checked));
+			}
+		};
+
+		disposables.add(addDisposableListener(diffDecorationsSwitch, EventType.CLICK, (e) => {
+			e.stopPropagation();
+			const current = storageService.getBoolean(STORAGE_KEY_ENABLE_DIFF_DECORATIONS, StorageScope.APPLICATION, false);
+			const newValue = !current;
+			updateToggleVisual(newValue);
+			storageService.store(STORAGE_KEY_ENABLE_DIFF_DECORATIONS, newValue, StorageScope.APPLICATION, StorageTarget.USER);
+		}));
+	}
 
 	// Privacy section
 	const privacySection = createSection(parent, 'Privacy');

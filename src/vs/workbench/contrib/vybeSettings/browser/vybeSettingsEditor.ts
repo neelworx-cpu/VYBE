@@ -46,6 +46,7 @@ export class VybeSettingsEditor extends EditorPane {
 	private tabTitleEl!: HTMLElement;
 	private selectedTab: string = 'general';
 	private readonly tabDisposables: DisposableStore = new DisposableStore();
+	private readonly storageService: IStorageService;
 
 	constructor(
 		group: IEditorGroup,
@@ -60,6 +61,7 @@ export class VybeSettingsEditor extends EditorPane {
 		@ICommandService private readonly commandService: ICommandService
 	) {
 		super(VybeSettingsEditor.ID, group, telemetryService, themeService, storageService);
+		this.storageService = storageService;
 		this._register(this.tabDisposables);
 	}
 
@@ -326,7 +328,7 @@ export class VybeSettingsEditor extends EditorPane {
 		this.tabContentEl = tabContent;
 
 		// Render General tab content
-		renderGeneralTab(tabContent);
+		renderGeneralTab(tabContent, this.storageService, this.tabDisposables);
 
 		// Create VS Code native scrollbar - wraps contentWrapper
 		this.contentScrollable = this._register(new DomScrollableElement(contentWrapper, {
@@ -426,7 +428,7 @@ export class VybeSettingsEditor extends EditorPane {
 
 			switch (tabId) {
 				case 'general':
-					renderGeneralTab(this.tabContentEl);
+					renderGeneralTab(this.tabContentEl, this.storageService, this.tabDisposables);
 					break;
 				case 'agents':
 					renderAgentsTab(this.tabContentEl);

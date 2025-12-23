@@ -21,3 +21,18 @@ import './vybeTerminalPromptBarActions.js';
 
 // Register actions
 import '../actions/vybeChatActions.js';
+
+// Register diff service
+import './vybeDiffService.contribution.js';
+
+// Register edit service
+import './vybeEditService.contribution.js';
+
+// Register diff zone manager
+import './vybeDiffZoneManager.contribution.js';
+
+// Register diff decorations configuration
+import './vybeDiffDecorations.contribution.js';
+
+// Register checkpoint service
+import './vybeCheckpointService.contribution.js';

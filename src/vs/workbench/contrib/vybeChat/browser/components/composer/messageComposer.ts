@@ -18,6 +18,7 @@ import { FilesEditedToolbar } from './filesEditedToolbar.js';
 import { QuestionnaireToolbar } from './questionnaireToolbar.js';
 import { ISpeechService } from '../../../../../../workbench/contrib/speech/common/speechService.js';
 import { CancellationTokenSource } from '../../../../../../base/common/cancellation.js';
+import { IInstantiationService } from '../../../../../../platform/instantiation/common/instantiation.js';
 
 export class MessageComposer extends Disposable {
 	private readonly _onSend = this._register(new Emitter<string>());
@@ -117,7 +118,8 @@ export class MessageComposer extends Disposable {
 		parent: HTMLElement,
 		_speechService?: ISpeechService,
 		openDropdownsDownward: boolean = false,
-		startInReadonlyMode: boolean = false
+		startInReadonlyMode: boolean = false,
+		@IInstantiationService private readonly _instantiationService?: IInstantiationService
 	) {
 		super();
 		this.openDropdownsDownward = openDropdownsDownward;
@@ -243,7 +245,13 @@ export class MessageComposer extends Disposable {
 		composerOuter.style.position = 'relative'; // For absolute positioning of toolbar
 
 		// Files edited toolbar (positioned absolutely at top of composer, inserted BEFORE inputBox)
-		this.filesEditedToolbar = this._register(new FilesEditedToolbar(composerOuter));
+		// Use instantiation service for proper DI
+		if (this._instantiationService) {
+			this.filesEditedToolbar = this._register(this._instantiationService.createInstance(FilesEditedToolbar, composerOuter));
+		} else {
+			// This should not happen in normal operation, but handle gracefully
+			console.warn('[MessageComposer] IInstantiationService not available, FilesEditedToolbar will not be created');
+		}
 
 		// Questionnaire toolbar (positioned absolutely at top of composer, appears when AI needs to ask questions)
 		this.questionnaireToolbar = this._register(new QuestionnaireToolbar(composerOuter));
