@@ -8,9 +8,9 @@
  * Registers the checkpoint service as a singleton.
  */
 
-import { registerSingleton } from '../../../../../platform/instantiation/common/extensions.js';
+import { registerSingleton, InstantiationType } from '../../../../../platform/instantiation/common/extensions.js';
 import { IVybeCheckpointService } from '../../common/vybeCheckpointService.js';
 import { VybeCheckpointServiceImpl } from '../vybeCheckpointServiceImpl.js';
 
-registerSingleton(IVybeCheckpointService, VybeCheckpointServiceImpl, true);
+registerSingleton(IVybeCheckpointService, VybeCheckpointServiceImpl, InstantiationType.Delayed);
 

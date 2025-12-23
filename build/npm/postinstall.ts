@@ -21,21 +21,30 @@ function log(dir: string, message: string) {
 	}
 }
 
-function run(command: string, args: string[], opts: child_process.SpawnSyncOptions) {
+function run(command: string, args: string[], opts: child_process.SpawnSyncOptions, allowFailure = false) {
 	log(opts.cwd as string || '.', '$ ' + command + ' ' + args.join(' '));
 
 	const result = child_process.spawnSync(command, args, opts);
 
 	if (result.error) {
+		if (allowFailure) {
+			console.warn(`⚠️  Failed to spawn process (continuing): ${result.error}`);
+			return false;
+		}
 		console.error(`ERR Failed to spawn process: ${result.error}`);
 		process.exit(1);
 	} else if (result.status !== 0) {
+		if (allowFailure) {
+			console.warn(`⚠️  Process exited with code: ${result.status} (continuing)`);
+			return false;
+		}
 		console.error(`ERR Process exited with code: ${result.status}`);
 		process.exit(result.status);
 	}
+	return true;
 }
 
-function npmInstall(dir: string, opts?: child_process.SpawnSyncOptions) {
+function npmInstall(dir: string, opts?: child_process.SpawnSyncOptions, allowFailure = false) {
 	opts = {
 		env: { ...process.env },
 		...(opts ?? {}),
@@ -52,7 +61,7 @@ function npmInstall(dir: string, opts?: child_process.SpawnSyncOptions) {
 
 		opts.cwd = root;
 		if (process.env['npm_config_arch'] === 'arm64') {
-			run('sudo', ['docker', 'run', '--rm', '--privileged', 'multiarch/qemu-user-static', '--reset', '-p', 'yes'], opts);
+			run('sudo', ['docker', 'run', '--rm', '--privileged', 'multiarch/qemu-user-static', '--reset', '-p', 'yes'], opts, allowFailure);
 		}
 		run('sudo', [
 			'docker', 'run',
@@ -63,11 +72,11 @@ function npmInstall(dir: string, opts?: child_process.SpawnSyncOptions) {
 			'-w', path.resolve('/root/vscode', dir),
 			process.env['VSCODE_REMOTE_DEPENDENCIES_CONTAINER_NAME'],
 			'sh', '-c', `\"chown -R root:root ${path.resolve('/root/vscode', dir)} && export PATH="/root/vscode/.build/nodejs-musl/usr/local/bin:$PATH" && npm i -g node-gyp-build && npm ci\"`
-		], opts);
-		run('sudo', ['chown', '-R', `${userinfo.uid}:${userinfo.gid}`, `${path.resolve(root, dir)}`], opts);
+		], opts, allowFailure);
+		run('sudo', ['chown', '-R', `${userinfo.uid}:${userinfo.gid}`, `${path.resolve(root, dir)}`], opts, allowFailure);
 	} else {
 		log(dir, 'Installing dependencies...');
-		run(npm, command.split(' '), opts);
+		run(npm, command.split(' '), opts, allowFailure);
 	}
 	removeParcelWatcherPrebuild(dir);
 }
@@ -176,7 +185,7 @@ for (const dir of dirs) {
 		if (process.env['VSCODE_REMOTE_NODE_GYP']) { opts.env!['npm_config_node_gyp'] = process.env['VSCODE_REMOTE_NODE_GYP']; }
 
 		setNpmrcConfig('remote', opts.env!);
-		npmInstall(dir, opts);
+		npmInstall(dir, opts, true); // Allow failure for remote package (@parcel/watcher build issues)
 		continue;
 	}
 

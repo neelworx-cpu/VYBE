@@ -13,9 +13,7 @@ import { Disposable } from '../../../../base/common/lifecycle.js';
 import { generateUuid } from '../../../../base/common/uuid.js';
 import { URI } from '../../../../base/common/uri.js';
 import { IModelService } from '../../../../editor/common/services/model.js';
-import { ITextModel } from '../../../../editor/common/model.js';
 import { EditOperation, ISingleEditOperation } from '../../../../editor/common/core/editOperation.js';
-import { Range } from '../../../../editor/common/core/range.js';
 import { IUndoRedoService, UndoRedoElementType, UndoRedoGroup, IWorkspaceUndoRedoElement } from '../../../../platform/undoRedo/common/undoRedo.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { IVybeCheckpointService } from '../common/vybeCheckpointService.js';
@@ -154,6 +152,7 @@ export class VybeCheckpointServiceImpl extends Disposable implements IVybeCheckp
 			if (checkpoint.affectedUris.length > 0) {
 				const workspaceElement: IWorkspaceUndoRedoElement = {
 					type: UndoRedoElementType.Workspace,
+					resources: checkpoint.affectedUris,
 					label: `Restore checkpoint: ${checkpoint.label}`,
 					code: 'vybe.checkpoint.restore',
 					undo: async () => {
