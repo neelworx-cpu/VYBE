@@ -12,7 +12,8 @@ import {
 	IExtensionManagementService, IExtensionGalleryService, ILocalExtension, IGalleryExtension,
 	DidUninstallExtensionEvent, InstallExtensionEvent, IGalleryExtensionAssets, InstallOperation, IExtensionTipsService, InstallExtensionResult, getTargetPlatform, IExtensionsControlManifest, UninstallExtensionEvent, Metadata
 } from '../../../../../platform/extensionManagement/common/extensionManagement.js';
-import { IWorkbenchExtensionEnablementService, EnablementState, IExtensionManagementServerService, IExtensionManagementServer, IProfileAwareExtensionManagementService, IWorkbenchExtensionManagementService } from '../../../../services/extensionManagement/common/extensionManagement.js';
+import { IWorkbenchExtensionEnablementService, EnablementState, IExtensionManagementServerService, IExtensionManagementServer, IProfileAwareExtensionManagementService, IWorkbenchExtensionManagementService, IResourceExtension } from '../../../../services/extensionManagement/common/extensionManagement.js';
+import { IMarkdownString } from '../../../../../base/common/htmlContent.js';
 import { IExtensionRecommendationsService } from '../../../../services/extensionRecommendations/common/extensionRecommendations.js';
 import { getGalleryExtensionId } from '../../../../../platform/extensionManagement/common/extensionManagementUtil.js';
 import { anExtensionManagementServerService, TestExtensionEnablementService } from '../../../../services/extensionManagement/test/browser/extensionEnablementService.test.js';
@@ -115,7 +116,7 @@ suite('ExtensionsWorkbenchServiceTest', () => {
 				local.publisherId = metadata.publisherId!;
 				return local;
 			},
-			async canInstall() { return true; },
+			async canInstall(_extension: IGalleryExtension | IResourceExtension): Promise<true | IMarkdownString> { return true; },
 			getTargetPlatform: async () => getTargetPlatform(platform, arch),
 			async resetPinnedStateForAllUserExtensions(pinned: boolean) { }
 		});

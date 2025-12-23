@@ -302,7 +302,7 @@ export class PackageJSONContribution implements IJSONContribution {
 			cp.execFile(commandPath, args, options, (error, stdout) => {
 				if (!error) {
 					try {
-						const content = JSON.parse(stdout);
+						const content = JSON.parse(String(stdout ?? ''));
 						const version = content['dist-tags.latest'] || content['version'];
 						resolve({
 							description: content['description'],

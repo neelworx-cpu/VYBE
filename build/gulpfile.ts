@@ -5,7 +5,9 @@
 import { EventEmitter } from 'events';
 import { fileURLToPath } from 'url';
 import path from 'path';
-import glob from 'glob';
+import { createRequire } from 'module';
+const requireGlob = createRequire(import.meta.url);
+const glob = requireGlob('glob');
 import gulp from 'gulp';
 import { createRequire } from 'node:module';
 import { monacoTypecheckTask /* , monacoTypecheckWatchTask */ } from './gulpfile.editor.ts';

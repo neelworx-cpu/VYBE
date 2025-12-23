@@ -21,6 +21,8 @@
     "test-build-scripts": "cd build && npm run test",
     "preinstall": "node --import ./build/node/import-meta-dirname-polyfill.mjs --import tsx build/npm/preinstall.ts",
     "postinstall": "node --import ./build/node/import-meta-dirname-polyfill.mjs --import tsx build/npm/postinstall.ts",
+    "vybe:setup": "node scripts/vybe-build-check.mjs",
+    "vybe:verify": "node scripts/vybe-build-check.mjs",
     "compile": "npm run gulp compile",
     "compile-check-ts-native": "tsgo --project ./src/tsconfig.json --noEmit --skipLibCheck",
     "watch": "npm-run-all -lp watch-client watch-extensions",

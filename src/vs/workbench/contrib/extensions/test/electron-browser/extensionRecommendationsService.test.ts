@@ -9,7 +9,8 @@ import * as uuid from '../../../../../base/common/uuid.js';
 import {
 	IExtensionGalleryService, IGalleryExtensionAssets, IGalleryExtension, IExtensionManagementService, IExtensionTipsService, getTargetPlatform,
 } from '../../../../../platform/extensionManagement/common/extensionManagement.js';
-import { IWorkbenchExtensionEnablementService, IWorkbenchExtensionManagementService } from '../../../../services/extensionManagement/common/extensionManagement.js';
+import { IWorkbenchExtensionEnablementService, IWorkbenchExtensionManagementService, IResourceExtension } from '../../../../services/extensionManagement/common/extensionManagement.js';
+import { IMarkdownString } from '../../../../../base/common/htmlContent.js';
 import { ExtensionGalleryService } from '../../../../../platform/extensionManagement/common/extensionGalleryService.js';
 import { TestInstantiationService } from '../../../../../platform/instantiation/test/common/instantiationServiceMock.js';
 import { Emitter, Event } from '../../../../../base/common/event.js';
@@ -230,7 +231,7 @@ suite('ExtensionRecommendationsService Test', () => {
 			onDidChangeProfile: Event.None,
 			onProfileAwareDidInstallExtensions: Event.None,
 			async getInstalled() { return []; },
-			async canInstall() { return true; },
+			async canInstall(_extension: IGalleryExtension | IResourceExtension): Promise<true | IMarkdownString> { return true; },
 			async getExtensionsControlManifest() { return { malicious: [], deprecated: {}, search: [], publisherMapping: {} }; },
 			async getTargetPlatform() { return getTargetPlatform(platform, arch); },
 		});

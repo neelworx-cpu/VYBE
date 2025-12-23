@@ -38,6 +38,12 @@
 - **macOS/Linux**: See instructions above using `nvm`
 - **Windows**: See [WINDOWS_SETUP.md](WINDOWS_SETUP.md) for detailed Windows setup instructions
 
+### VYBE Extensions Setup
+
+If you're working with VYBE extensions or experiencing a blank IDE:
+- See [VYBE_EXTENSIONS_SETUP.md](VYBE_EXTENSIONS_SETUP.md) for detailed setup and troubleshooting
+- Run `npm run vybe:verify` to check VYBE extension configuration
+
 ### Troubleshooting
 
 If you get a "Node version mismatch" error:

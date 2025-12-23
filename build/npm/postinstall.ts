@@ -21,21 +21,30 @@ function log(dir: string, message: string) {
 	}
 }
 
-function run(command: string, args: string[], opts: child_process.SpawnSyncOptions) {
+function run(command: string, args: string[], opts: child_process.SpawnSyncOptions, allowFailure = false) {
 	log(opts.cwd as string || '.', '$ ' + command + ' ' + args.join(' '));
 
 	const result = child_process.spawnSync(command, args, opts);
 
 	if (result.error) {
+		if (allowFailure) {
+			console.warn(`⚠️  Failed to spawn process (continuing): ${result.error}`);
+			return false;
+		}
 		console.error(`ERR Failed to spawn process: ${result.error}`);
 		process.exit(1);
 	} else if (result.status !== 0) {
+		if (allowFailure) {
+			console.warn(`⚠️  Process exited with code: ${result.status} (continuing)`);
+			return false;
+		}
 		console.error(`ERR Process exited with code: ${result.status}`);
 		process.exit(result.status);
 	}
+	return true;
 }
 
-function npmInstall(dir: string, opts?: child_process.SpawnSyncOptions) {
+function npmInstall(dir: string, opts?: child_process.SpawnSyncOptions, allowFailure = false) {
 	opts = {
 		env: { ...process.env },
 		...(opts ?? {}),
@@ -67,7 +76,12 @@ function npmInstall(dir: string, opts?: child_process.SpawnSyncOptions) {
 		run('sudo', ['chown', '-R', `${userinfo.uid}:${userinfo.gid}`, `${path.resolve(root, dir)}`], opts);
 	} else {
 		log(dir, 'Installing dependencies...');
-		run(npm, command.split(' '), opts);
+		const success = run(npm, command.split(' '), opts, allowFailure);
+		if (!success && allowFailure) {
+			console.warn(`\n⚠️  Installation failed for ${dir}, but continuing with other packages.`);
+			console.warn(`   This may affect file watching functionality.`);
+			console.warn(`   If you need file watching, try: cd ${dir} && npm install\n`);
+		}
 	}
 	removeParcelWatcherPrebuild(dir);
 }
@@ -176,7 +190,9 @@ for (const dir of dirs) {
 		if (process.env['VSCODE_REMOTE_NODE_GYP']) { opts.env!['npm_config_node_gyp'] = process.env['VSCODE_REMOTE_NODE_GYP']; }
 
 		setNpmrcConfig('remote', opts.env!);
-		npmInstall(dir, opts);
+		// Allow remote package installation to fail - @parcel/watcher native build may fail
+		// but the app can still run (file watching will fall back to polling)
+		npmInstall(dir, opts, true);
 		continue;
 	}
 

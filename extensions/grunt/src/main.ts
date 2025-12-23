@@ -22,9 +22,9 @@ function exec(command: string, options: cp.ExecOptions): Promise<{ stdout: strin
 	return new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
 		cp.exec(command, options, (error, stdout, stderr) => {
 			if (error) {
-				reject({ error, stdout, stderr });
+				reject({ error, stdout: String(stdout ?? ''), stderr: String(stderr ?? '') });
 			}
-			resolve({ stdout, stderr });
+			resolve({ stdout: String(stdout ?? ''), stderr: String(stderr ?? '') });
 		});
 	});
 }

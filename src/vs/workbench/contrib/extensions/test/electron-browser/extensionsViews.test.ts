@@ -11,9 +11,10 @@ import { IExtensionsWorkbenchService } from '../../common/extensions.js';
 import { ExtensionsWorkbenchService } from '../../browser/extensionsWorkbenchService.js';
 import {
 	IExtensionManagementService, IExtensionGalleryService, ILocalExtension, IGalleryExtension, IQueryOptions,
-	getTargetPlatform, SortBy
+	getTargetPlatform, SortBy, Metadata
 } from '../../../../../platform/extensionManagement/common/extensionManagement.js';
-import { IWorkbenchExtensionEnablementService, EnablementState, IExtensionManagementServerService, IExtensionManagementServer, IProfileAwareExtensionManagementService, IWorkbenchExtensionManagementService } from '../../../../services/extensionManagement/common/extensionManagement.js';
+import { IWorkbenchExtensionEnablementService, EnablementState, IExtensionManagementServerService, IExtensionManagementServer, IProfileAwareExtensionManagementService, IWorkbenchExtensionManagementService, IResourceExtension } from '../../../../services/extensionManagement/common/extensionManagement.js';
+import { IMarkdownString } from '../../../../../base/common/htmlContent.js';
 import { IExtensionRecommendationsService, ExtensionRecommendationReason } from '../../../../services/extensionRecommendations/common/extensionRecommendations.js';
 import { getGalleryExtensionId } from '../../../../../platform/extensionManagement/common/extensionManagementUtil.js';
 import { TestExtensionEnablementService } from '../../../../services/extensionManagement/test/browser/extensionEnablementService.test.js';
@@ -104,10 +105,10 @@ suite('ExtensionsViews Tests', () => {
 			onProfileAwareDidInstallExtensions: Event.None,
 			async getInstalled() { return []; },
 			async getInstalledWorkspaceExtensions() { return []; },
-			async canInstall() { return true; },
+			async canInstall(_extension: IGalleryExtension | IResourceExtension): Promise<true | IMarkdownString> { return true; },
 			async getExtensionsControlManifest() { return { malicious: [], deprecated: {}, search: [], publisherMapping: {} }; },
 			async getTargetPlatform() { return getTargetPlatform(platform, arch); },
-			async updateMetadata(local) { return local; }
+			async updateMetadata(local: ILocalExtension, _metadata: Partial<Metadata>): Promise<ILocalExtension> { return local; }
 		});
 		instantiationService.stub(IRemoteAgentService, RemoteAgentService);
 		instantiationService.stub(IContextKeyService, new MockContextKeyService());

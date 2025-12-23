@@ -32,7 +32,15 @@ import minimist from 'minimist';
 import { compileBuildWithoutManglingTask, compileBuildWithManglingTask } from './gulpfile.compile.ts';
 import { compileNonNativeExtensionsBuildTask, compileNativeExtensionsBuildTask, compileAllExtensionsBuildTask, compileExtensionMediaBuildTask, cleanExtensionsBuildTask } from './gulpfile.extensions.ts';
 import { promisify } from 'util';
-import globCallback from 'glob';
+import { createRequire } from 'module';
+const requireGlob = createRequire(import.meta.url);
+const globModule = requireGlob('glob');
+// glob v5: module itself is a function (async callback version)
+// Ensure we get the function, not an object wrapper
+const globCallback = (typeof globModule === 'function') ? globModule : (globModule.glob || globModule.default || globModule);
+if (typeof globCallback !== 'function') {
+	throw new Error(`glob module did not export a function. Got: ${typeof globCallback}`);
+}
 import rceditCallback from 'rcedit';
 
 

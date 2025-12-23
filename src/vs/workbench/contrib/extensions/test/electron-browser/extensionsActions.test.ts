@@ -12,7 +12,8 @@ import {
 	IExtensionManagementService, IExtensionGalleryService, ILocalExtension, IGalleryExtension,
 	DidUninstallExtensionEvent, InstallExtensionEvent, IExtensionIdentifier, InstallOperation, IExtensionTipsService, InstallExtensionResult, getTargetPlatform, IExtensionsControlManifest, UninstallExtensionEvent, Metadata
 } from '../../../../../platform/extensionManagement/common/extensionManagement.js';
-import { IWorkbenchExtensionEnablementService, EnablementState, IExtensionManagementServerService, IExtensionManagementServer, ExtensionInstallLocation, IProfileAwareExtensionManagementService, IWorkbenchExtensionManagementService } from '../../../../services/extensionManagement/common/extensionManagement.js';
+import { IWorkbenchExtensionEnablementService, EnablementState, IExtensionManagementServerService, IExtensionManagementServer, ExtensionInstallLocation, IProfileAwareExtensionManagementService, IWorkbenchExtensionManagementService, IResourceExtension } from '../../../../services/extensionManagement/common/extensionManagement.js';
+import { IMarkdownString } from '../../../../../base/common/htmlContent.js';
 import { IExtensionRecommendationsService } from '../../../../services/extensionRecommendations/common/extensionRecommendations.js';
 import { getGalleryExtensionId } from '../../../../../platform/extensionManagement/common/extensionManagementUtil.js';
 import { TestExtensionEnablementService } from '../../../../services/extensionManagement/test/browser/extensionEnablementService.test.js';
@@ -114,7 +115,7 @@ function setupTest(disposables: Pick<DisposableStore, 'add'>) {
 			local.publisherId = metadata.publisherId!;
 			return local;
 		},
-		async canInstall() { return true; },
+		async canInstall(_extension: IGalleryExtension | IResourceExtension): Promise<true | IMarkdownString> { return true; },
 		async getTargetPlatform() { return getTargetPlatform(platform, arch); },
 	});
 

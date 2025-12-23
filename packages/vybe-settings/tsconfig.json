@@ -1,0 +1,22 @@
+{
+  "extends": "../../src/tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "../../src/vs/workbench/contrib/vybeSettings",
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "composite": true,
+    "module": "nodenext",
+    "moduleResolution": "nodenext"
+  },
+  "include": [
+    "../../src/vs/workbench/contrib/vybeSettings/**/*.ts"
+  ],
+  "exclude": [
+    "**/*.test.ts",
+    "**/test/**"
+  ],
+  "references": []
+}
+

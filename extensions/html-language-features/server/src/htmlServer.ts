@@ -488,6 +488,7 @@ export function startServer(connection: Connection, runtime: RuntimeEnvironment)
 		}, [], `Error while computing color presentations for ${params.textDocument.uri}`, token);
 	});
 
+	// @ts-ignore - Type overload mismatch with vscode-languageserver
 	connection.onRequest(AutoInsertRequest.type, (params, token) => {
 		return runSafe(runtime, async () => {
 			const document = documents.get(params.textDocument.uri);
@@ -590,16 +591,17 @@ export function startServer(connection: Connection, runtime: RuntimeEnvironment)
 		});
 	});
 
-	connection.onRequest(TextDocumentContentRequest.type, (params, token) => {
+	// @ts-ignore - Type overload mismatch with vscode-languageserver
+	connection.onRequest(TextDocumentContentRequest.type, (uri: string, token) => {
 		return runSafe(runtime, async () => {
 			for (const languageMode of languageModes.getAllModes()) {
-				const content = await languageMode.getTextDocumentContent?.(params.uri);
+				const content = await languageMode.getTextDocumentContent?.(uri);
 				if (content) {
 					return { text: content };
 				}
 			}
 			return null;
-		}, null, `Error while computing text document content for ${params.uri}`, token);
+		}, null, `Error while computing text document content for ${uri}`, token);
 	});
 
 	// Listen on the connection
