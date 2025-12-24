@@ -102,7 +102,7 @@ export class VybeSettingsEditor extends EditorPane {
 			width: 28px;
 			height: 28px;
 			border-radius: 50%;
-			background-color: rgba(20, 20, 20, 0.04);
+			background-color: var(--vscode-list-inactiveSelectionBackground, rgba(128, 128, 128, 0.1));
 			display: flex;
 			align-items: center;
 			justify-content: center;
@@ -115,7 +115,7 @@ export class VybeSettingsEditor extends EditorPane {
 			margin: 0;
 			font-size: 12px;
 			text-transform: uppercase;
-			color: rgba(20, 20, 20, 0.37);
+			color: var(--vscode-descriptionForeground, rgba(128, 128, 128, 0.6));
 			text-align: center;
 		`;
 
@@ -138,7 +138,7 @@ export class VybeSettingsEditor extends EditorPane {
 		plan.style.cssText = `
 			margin: 0;
 			font-size: 12px;
-			color: rgba(20, 20, 20, 0.55);
+			color: var(--vscode-descriptionForeground, rgba(128, 128, 128, 0.7));
 			overflow: hidden;
 			text-overflow: ellipsis;
 			white-space: nowrap;
@@ -193,7 +193,7 @@ export class VybeSettingsEditor extends EditorPane {
 				divider.style.cssText = `
 					margin: 8px 0;
 					border: none;
-					border-top: 1px solid rgba(20, 20, 20, 0.07);
+					border-top: 1px solid var(--vscode-panel-border, var(--vscode-widget-border, rgba(128, 128, 128, 0.2)));
 					width: 100%;
 				`;
 			} else {
@@ -224,7 +224,7 @@ export class VybeSettingsEditor extends EditorPane {
 				}));
 
 				const icon = DOM.append(cell, DOM.$(`span.codicon.${item.icon}`));
-				icon.style.cssText = 'font-size: 16px; color: rgba(20, 20, 20, 0.55);';
+				icon.style.cssText = 'font-size: 16px; color: var(--vscode-descriptionForeground, rgba(128, 128, 128, 0.7));';
 
 				const label = DOM.append(cell, DOM.$('span.cursor-settings-sidebar-cell-label'));
 				label.textContent = item.label;
@@ -248,7 +248,7 @@ export class VybeSettingsEditor extends EditorPane {
 		footerDivider.style.cssText = `
 			margin: 8px 0;
 			border: none;
-			border-top: 1px solid rgba(20, 20, 20, 0.07);
+			border-top: 1px solid var(--vscode-panel-border, var(--vscode-widget-border, rgba(128, 128, 128, 0.2)));
 			width: 100%;
 		`;
 
@@ -265,7 +265,7 @@ export class VybeSettingsEditor extends EditorPane {
 		`;
 
 		const docsIcon = DOM.append(footerCell, DOM.$('span.codicon.codicon-book'));
-		docsIcon.style.cssText = 'font-size: 16px; color: rgba(20, 20, 20, 0.55);';
+		docsIcon.style.cssText = 'font-size: 16px; color: var(--vscode-descriptionForeground, rgba(128, 128, 128, 0.7));';
 
 		const docsLabel = DOM.append(footerCell, DOM.$('span.cursor-settings-sidebar-cell-label'));
 		docsLabel.textContent = 'Docs';
@@ -277,7 +277,7 @@ export class VybeSettingsEditor extends EditorPane {
 		`;
 
 		const externalIcon = DOM.append(footerCell, DOM.$('span.codicon.codicon-link-external'));
-		externalIcon.style.cssText = 'font-size: 16px; color: rgba(20, 20, 20, 0.55);';
+		externalIcon.style.cssText = 'font-size: 16px; color: var(--vscode-descriptionForeground, rgba(128, 128, 128, 0.7));';
 
 		return sidebar;
 	}

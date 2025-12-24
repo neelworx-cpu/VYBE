@@ -106,7 +106,7 @@ function createEmptyState(parent: HTMLElement, title: string, description: strin
 	emptyDesc.textContent = description;
 	emptyDesc.style.cssText = `
 		font-size: 12px;
-		color: rgba(20, 20, 20, 0.55);
+		color: var(--vscode-descriptionForeground, rgba(128, 128, 128, 0.7));
 		margin: 0;
 	`;
 
@@ -198,7 +198,7 @@ export function renderIndexingDocsTab(
 	const indexingDesc = DOM.append(indexingLeading, DOM.$('div.cursor-settings-cell-description'));
 	indexingDesc.style.cssText = `
 		font-size: 12px;
-		color: rgba(20, 20, 20, 0.55);
+		color: var(--vscode-descriptionForeground, rgba(128, 128, 128, 0.7));
 		line-height: 16px;
 	`;
 
@@ -222,9 +222,9 @@ export function renderIndexingDocsTab(
 		align-items: center;
 		justify-content: center;
 		gap: 5px;
-		border: 1px solid rgba(20, 20, 20, 0.2);
+		border: 1px solid var(--vscode-panel-border, var(--vscode-widget-border, rgba(128, 128, 128, 0.4)));
 		color: var(--vscode-foreground);
-		background-color: rgba(20, 20, 20, 0.1);
+		background-color: var(--vscode-list-inactiveSelectionBackground, rgba(128, 128, 128, 0.1));
 		transition: all 0.2s ease;
 	`;
 
@@ -248,9 +248,9 @@ export function renderIndexingDocsTab(
 		align-items: center;
 		justify-content: center;
 		gap: 5px;
-		border: 1px solid rgba(20, 20, 20, 0.2);
+		border: 1px solid var(--vscode-panel-border, var(--vscode-widget-border, rgba(128, 128, 128, 0.4)));
 		color: var(--vscode-foreground);
-		background-color: rgba(20, 20, 20, 0.05);
+		background-color: var(--vscode-list-inactiveSelectionBackground, rgba(128, 128, 128, 0.05));
 		transition: all 0.2s ease;
 	`;
 	const vectorIcon = DOM.append(vectorIndicator, DOM.$('span.codicon'));
@@ -320,7 +320,7 @@ export function renderIndexingDocsTab(
 	structuralProgressTrack.style.cssText = `
 		width: 100%;
 		height: 8px;
-		background-color: rgba(20, 20, 20, 0.1);
+		background-color: var(--vscode-list-inactiveSelectionBackground, rgba(128, 128, 128, 0.1));
 		border-radius: 4px;
 		overflow: hidden;
 		position: relative;
@@ -336,7 +336,7 @@ export function renderIndexingDocsTab(
 	`;
 
 	const structuralProgressDetails = DOM.append(structuralProgressContainer, DOM.$('div.indexing-progress-details'));
-	structuralProgressDetails.style.cssText = 'font-size: 12px; color: rgba(20, 20, 20, 0.55);';
+	structuralProgressDetails.style.cssText = 'font-size: 12px; color: var(--vscode-descriptionForeground, rgba(128, 128, 128, 0.7));';
 
 	// Semantic Indexing (Embeddings) Progress Bar
 	const embeddingProgressContainer = DOM.append(progressContainer, DOM.$('div.indexing-progress-container'));
@@ -361,7 +361,7 @@ export function renderIndexingDocsTab(
 	embeddingProgressTrack.style.cssText = `
 		width: 100%;
 		height: 8px;
-		background-color: rgba(20, 20, 20, 0.1);
+		background-color: var(--vscode-list-inactiveSelectionBackground, rgba(128, 128, 128, 0.1));
 		border-radius: 4px;
 		overflow: hidden;
 		position: relative;
@@ -377,7 +377,7 @@ export function renderIndexingDocsTab(
 	`;
 
 	const embeddingProgressDetails = DOM.append(embeddingProgressContainer, DOM.$('div.indexing-progress-details'));
-	embeddingProgressDetails.style.cssText = 'font-size: 12px; color: rgba(20, 20, 20, 0.55);';
+	embeddingProgressDetails.style.cssText = 'font-size: 12px; color: var(--vscode-descriptionForeground, rgba(128, 128, 128, 0.7));';
 
 	// Pause/Resume/Rebuild buttons will be moved to buttonContainer (right side) later
 	const pauseButton = DOM.$('div.cursor-button.cursor-button-tertiary.cursor-button-tertiary-clickable.cursor-button-small');
@@ -393,7 +393,7 @@ export function renderIndexingDocsTab(
 		align-items: center;
 		justify-content: center;
 		gap: 4px;
-		border: 1px solid rgba(20, 20, 20, 0.15);
+		border: 1px solid var(--vscode-input-border, rgba(128, 128, 128, 0.3));
 		color: var(--vscode-foreground);
 		background: transparent;
 	`;
@@ -447,7 +447,7 @@ export function renderIndexingDocsTab(
 		position: relative;
 		width: 100%;
 		height: 1px;
-		background-color: rgba(20, 20, 20, 0.07);
+		background-color: var(--vscode-list-inactiveSelectionBackground, rgba(128, 128, 128, 0.15));
 	`;
 
 	// Row 2: Model status on LEFT | Sync, Delete Index on RIGHT
@@ -470,7 +470,7 @@ export function renderIndexingDocsTab(
 		min-width: 0;
 		flex-shrink: 1;
 		gap: 4px;
-		border: 1px solid rgba(20, 20, 20, 0.15);
+		border: 1px solid var(--vscode-input-border, rgba(128, 128, 128, 0.3));
 		border-radius: 5px;
 		background: transparent;
 	`;
@@ -569,7 +569,7 @@ export function renderIndexingDocsTab(
 		align-items: center;
 		justify-content: center;
 		gap: 4px;
-		border: 1px solid rgba(20, 20, 20, 0.15);
+		border: 1px solid var(--vscode-input-border, rgba(128, 128, 128, 0.3));
 		color: var(--vscode-foreground);
 		background: transparent;
 	`;
@@ -604,8 +604,8 @@ export function renderIndexingDocsTab(
 		if (!status || !hasValidWorkspace || !indexingEnabled) {
 			statusPillIcon.className = 'codicon codicon-folder';
 			statusPillText.textContent = 'No Workspace';
-			statusPill.style.backgroundColor = 'rgba(20, 20, 20, 0.1)';
-			statusPill.style.borderColor = 'rgba(20, 20, 20, 0.2)';
+			statusPill.style.backgroundColor = 'var(--vscode-list-inactiveSelectionBackground, rgba(128, 128, 128, 0.1))';
+			statusPill.style.borderColor = 'var(--vscode-panel-border, var(--vscode-widget-border, rgba(128, 128, 128, 0.4)))';
 			statusPill.style.color = 'var(--vscode-foreground)';
 			statusPillIcon.style.color = 'var(--vscode-foreground)';
 		} else {
@@ -649,15 +649,15 @@ export function renderIndexingDocsTab(
 			} else if (state === IndexState.Idle || state === IndexState.Uninitialized) {
 				statusPillIcon.className = 'codicon codicon-circle-outline';
 				statusPillText.textContent = 'Idle';
-				statusPill.style.backgroundColor = 'rgba(20, 20, 20, 0.1)';
-				statusPill.style.borderColor = 'rgba(20, 20, 20, 0.2)';
+				statusPill.style.backgroundColor = 'var(--vscode-list-inactiveSelectionBackground, rgba(128, 128, 128, 0.1))';
+				statusPill.style.borderColor = 'var(--vscode-panel-border, var(--vscode-widget-border, rgba(128, 128, 128, 0.4)))';
 				statusPill.style.color = 'var(--vscode-foreground)';
 				statusPillIcon.style.color = 'var(--vscode-foreground)';
 			} else {
 				statusPillIcon.className = 'codicon codicon-loading codicon-modifier-spin';
 				statusPillText.textContent = 'Loading...';
-				statusPill.style.backgroundColor = 'rgba(20, 20, 20, 0.1)';
-				statusPill.style.borderColor = 'rgba(20, 20, 20, 0.2)';
+				statusPill.style.backgroundColor = 'var(--vscode-list-inactiveSelectionBackground, rgba(128, 128, 128, 0.1))';
+				statusPill.style.borderColor = 'var(--vscode-panel-border, var(--vscode-widget-border, rgba(128, 128, 128, 0.4)))';
 				statusPill.style.color = 'var(--vscode-foreground)';
 				statusPillIcon.style.color = 'var(--vscode-foreground)';
 			}
@@ -686,8 +686,8 @@ export function renderIndexingDocsTab(
 		} else {
 			vectorIcon.className = 'codicon codicon-loading codicon-modifier-spin';
 			vectorText.textContent = 'Loading...';
-			vectorIndicator.style.backgroundColor = 'rgba(20, 20, 20, 0.1)';
-			vectorIndicator.style.borderColor = 'rgba(20, 20, 20, 0.2)';
+			vectorIndicator.style.backgroundColor = 'var(--vscode-list-inactiveSelectionBackground, rgba(128, 128, 128, 0.1))';
+			vectorIndicator.style.borderColor = 'var(--vscode-panel-border, var(--vscode-widget-border, rgba(128, 128, 128, 0.4)))';
 			vectorIndicator.style.color = 'var(--vscode-foreground)';
 			vectorIcon.style.color = 'var(--vscode-foreground)';
 			vectorIndicator.title = 'Vector: Loading...';
@@ -1359,7 +1359,7 @@ export function renderIndexingDocsTab(
 		DOM.clearNode(ignoreDesc);
 		ignoreDesc.style.cssText = `
 			font-size: 12px;
-			color: rgba(20, 20, 20, 0.55);
+			color: var(--vscode-descriptionForeground, rgba(128, 128, 128, 0.7));
 			line-height: 16px;
 		`;
 
@@ -1403,7 +1403,7 @@ export function renderIndexingDocsTab(
 	docsTitle.style.cssText = `
 		font-size: 12px;
 		font-weight: 400;
-		color: rgba(20, 20, 20, 0.55);
+		color: var(--vscode-descriptionForeground, rgba(128, 128, 128, 0.7));
 		letter-spacing: 0.07px;
 		line-height: 14px;
 	`;
@@ -1412,7 +1412,7 @@ export function renderIndexingDocsTab(
 	docsDesc.textContent = 'Crawl and index custom resources and developer docs';
 	docsDesc.style.cssText = `
 		font-size: 12px;
-		color: rgba(20, 20, 20, 0.55);
+		color: var(--vscode-descriptionForeground, rgba(128, 128, 128, 0.7));
 		line-height: 16px;
 	`;
 
@@ -1443,12 +1443,12 @@ export function renderIndexingDocsTab(
 		justify-content: space-between;
 		align-items: center;
 		padding: 8px 12px 12px 12px;
-		border-top: 1px solid rgba(20, 20, 20, 0.07);
+		border-top: 1px solid var(--vscode-panel-border, var(--vscode-widget-border, rgba(128, 128, 128, 0.2)));
 	`;
 
 	const diagnosticsLabel = DOM.append(diagnosticsContainer, DOM.$('span'));
 	diagnosticsLabel.textContent = 'Export Index Diagnostics (JSON)';
-	diagnosticsLabel.style.cssText = 'font-size: 12px; color: rgba(20, 20, 20, 0.7);';
+	diagnosticsLabel.style.cssText = 'font-size: 12px; color: var(--vscode-descriptionForeground, rgba(128, 128, 128, 0.8));';
 
 	const diagnosticsButton = DOM.append(diagnosticsContainer, DOM.$('div.cursor-button.cursor-button-tertiary.cursor-button-tertiary-clickable.cursor-button-small'));
 	diagnosticsButton.textContent = 'Export';
@@ -1464,7 +1464,7 @@ export function renderIndexingDocsTab(
 		align-items: center;
 		justify-content: center;
 		gap: 4px;
-		border: 1px solid rgba(20, 20, 20, 0.15);
+		border: 1px solid var(--vscode-input-border, rgba(128, 128, 128, 0.3));
 		color: var(--vscode-foreground);
 		background: transparent;
 	`;
