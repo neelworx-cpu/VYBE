@@ -213,21 +213,23 @@ export function renderIndexingDocsTab(
 	statusPill.style.cssText = `
 		user-select: none;
 		flex-shrink: 0;
-		padding: 3px 6px;
-		border-radius: 5px;
+		padding: 4px 8px;
+		border-radius: 6px;
 		font-size: 12px;
+		font-weight: 500;
 		line-height: 16px;
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
-		gap: 4px;
-		border: 1px solid rgba(20, 20, 20, 0.15);
+		gap: 5px;
+		border: 1px solid rgba(20, 20, 20, 0.2);
 		color: var(--vscode-foreground);
 		background-color: rgba(20, 20, 20, 0.1);
+		transition: all 0.2s ease;
 	`;
 
 	const statusPillIcon = DOM.append(statusPill, DOM.$('span.codicon'));
-	statusPillIcon.style.cssText = 'font-size: 12px;';
+	statusPillIcon.style.cssText = 'font-size: 13px; display: inline-flex; align-items: center;';
 
 	const statusPillText = DOM.append(statusPill, DOM.$('span'));
 	statusPillText.textContent = 'Loading...';
@@ -237,22 +239,25 @@ export function renderIndexingDocsTab(
 	vectorIndicator.style.cssText = `
 		user-select: none;
 		flex-shrink: 0;
-		padding: 3px 6px;
-		border-radius: 5px;
+		padding: 4px 8px;
+		border-radius: 6px;
 		font-size: 12px;
+		font-weight: 500;
 		line-height: 16px;
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
-		gap: 4px;
-		border: 1px solid rgba(20, 20, 20, 0.15);
+		gap: 5px;
+		border: 1px solid rgba(20, 20, 20, 0.2);
 		color: var(--vscode-foreground);
 		background-color: rgba(20, 20, 20, 0.05);
+		transition: all 0.2s ease;
 	`;
 	const vectorIcon = DOM.append(vectorIndicator, DOM.$('span.codicon'));
-	vectorIcon.style.cssText = 'font-size: 12px;';
+	vectorIcon.style.cssText = 'font-size: 13px; display: inline-flex; align-items: center;';
 	const vectorText = DOM.append(vectorIndicator, DOM.$('span'));
-	vectorText.textContent = 'Vector: Loading...';
+	vectorText.textContent = 'Loading...';
+	vectorIndicator.title = 'Vector: Loading...';
 
 	// Phase 12: Error banner (initially hidden)
 	const errorBanner = DOM.append(indexingCell, DOM.$('div.indexing-error-banner'));
@@ -394,7 +399,8 @@ export function renderIndexingDocsTab(
 	`;
 	const pauseIcon = DOM.append(pauseButton, DOM.$('span.codicon.codicon-debug-pause'));
 	pauseIcon.style.cssText = 'font-size: 12px;';
-	pauseButton.appendChild(document.createTextNode('Pause'));
+	pauseButton.title = 'Pause Indexing';
+	pauseButton.setAttribute('aria-label', 'Pause Indexing');
 
 	// Buttons footer - two rows
 	const progressFooter = DOM.append(progressContainer, DOM.$('div.indexing-progress-footer'));
@@ -425,13 +431,15 @@ export function renderIndexingDocsTab(
 	resumeButton.style.cssText = pauseButton.style.cssText;
 	const resumeIcon = DOM.append(resumeButton, DOM.$('span.codicon.codicon-play'));
 	resumeIcon.style.cssText = 'font-size: 12px;';
-	resumeButton.appendChild(document.createTextNode('Resume'));
+	resumeButton.title = 'Resume Indexing';
+	resumeButton.setAttribute('aria-label', 'Resume Indexing');
 
 	const rebuildButton = DOM.append(rightButtonsRow1, DOM.$('div.cursor-button.cursor-button-tertiary.cursor-button-tertiary-clickable.cursor-button-small'));
 	rebuildButton.style.cssText = pauseButton.style.cssText;
-	const rebuildIcon = DOM.append(rebuildButton, DOM.$('span.codicon.codicon-refresh'));
+	const rebuildIcon = DOM.append(rebuildButton, DOM.$('span.codicon.codicon-build'));
 	rebuildIcon.style.cssText = 'font-size: 12px;';
-	rebuildButton.appendChild(document.createTextNode('Rebuild'));
+	rebuildButton.title = 'Rebuild Index';
+	rebuildButton.setAttribute('aria-label', 'Rebuild Index');
 
 	// Divider line (between row 1 and row 2)
 	const divider = DOM.append(progressFooter, DOM.$('.cursor-settings-cell-divider'));
@@ -568,7 +576,8 @@ export function renderIndexingDocsTab(
 
 	const syncIcon = DOM.append(syncButton, DOM.$('span.codicon.codicon-refresh'));
 	syncIcon.style.cssText = 'font-size: 12px;';
-	syncButton.appendChild(document.createTextNode('Sync'));
+	syncButton.title = 'Sync Index';
+	syncButton.setAttribute('aria-label', 'Sync Index');
 
 	// Delete Index button
 	const deleteButtonContainer = DOM.append(rightButtonsRow2, DOM.$('div'));
@@ -579,7 +588,8 @@ export function renderIndexingDocsTab(
 
 	const deleteIcon = DOM.append(deleteButton, DOM.$('span.codicon.codicon-trash'));
 	deleteIcon.style.cssText = 'font-size: 12px;';
-	deleteButton.appendChild(document.createTextNode('Delete Index'));
+	deleteButton.title = 'Delete Index';
+	deleteButton.setAttribute('aria-label', 'Delete Index');
 
 
 	// Store last formatted timestamp to avoid recalculation on every update
@@ -595,55 +605,92 @@ export function renderIndexingDocsTab(
 			statusPillIcon.className = 'codicon codicon-folder';
 			statusPillText.textContent = 'No Workspace';
 			statusPill.style.backgroundColor = 'rgba(20, 20, 20, 0.1)';
+			statusPill.style.borderColor = 'rgba(20, 20, 20, 0.2)';
+			statusPill.style.color = 'var(--vscode-foreground)';
+			statusPillIcon.style.color = 'var(--vscode-foreground)';
 		} else {
 			const state = status.state;
 			if (status.paused) {
 				statusPillIcon.className = 'codicon codicon-debug-pause';
 				statusPillText.textContent = 'Paused';
 				statusPill.style.backgroundColor = 'rgba(255, 200, 0, 0.25)';
+				statusPill.style.borderColor = 'rgba(255, 200, 0, 0.4)';
+				statusPill.style.color = 'var(--vscode-foreground)';
+				statusPillIcon.style.color = 'var(--vscode-foreground)';
 			} else if (status.rebuilding) {
 				statusPillIcon.className = 'codicon codicon-loading codicon-modifier-spin';
 				statusPillText.textContent = 'Rebuilding';
 				statusPill.style.backgroundColor = 'rgba(0, 100, 255, 0.25)';
+				statusPill.style.borderColor = 'rgba(0, 100, 255, 0.4)';
+				statusPill.style.color = 'var(--vscode-foreground)';
+				statusPillIcon.style.color = 'var(--vscode-foreground)';
 			} else if (state === IndexState.Building || state === IndexState.Indexing) {
 				statusPillIcon.className = 'codicon codicon-sync codicon-modifier-spin';
 				statusPillText.textContent = 'Building';
 				statusPill.style.backgroundColor = 'rgba(0, 100, 255, 0.25)';
+				statusPill.style.borderColor = 'rgba(0, 100, 255, 0.4)';
+				statusPill.style.color = 'var(--vscode-foreground)';
+				statusPillIcon.style.color = 'var(--vscode-foreground)';
 			} else if (state === IndexState.Ready) {
-				statusPillIcon.className = 'codicon codicon-check';
+				statusPillIcon.className = 'codicon codicon-verified-filled';
 				statusPillText.textContent = 'Ready';
-				statusPill.style.backgroundColor = 'rgba(0, 200, 0, 0.25)';
+				statusPill.style.backgroundColor = 'rgba(0, 200, 0, 0.2)';
+				statusPill.style.borderColor = 'rgba(0, 200, 0, 0.4)';
+				statusPill.style.color = 'rgb(0, 150, 0)';
+				statusPillIcon.style.color = 'rgb(0, 150, 0)';
+				statusPill.title = 'Index is ready and up to date';
 			} else if (state === IndexState.Degraded || state === IndexState.Error) {
 				statusPillIcon.className = 'codicon codicon-warning';
 				statusPillText.textContent = state === IndexState.Degraded ? 'Degraded' : 'Error';
 				statusPill.style.backgroundColor = 'rgba(255, 0, 0, 0.25)';
+				statusPill.style.borderColor = 'rgba(255, 0, 0, 0.4)';
+				statusPill.style.color = 'var(--vscode-foreground)';
+				statusPillIcon.style.color = 'var(--vscode-foreground)';
 			} else if (state === IndexState.Idle || state === IndexState.Uninitialized) {
 				statusPillIcon.className = 'codicon codicon-circle-outline';
 				statusPillText.textContent = 'Idle';
 				statusPill.style.backgroundColor = 'rgba(20, 20, 20, 0.1)';
+				statusPill.style.borderColor = 'rgba(20, 20, 20, 0.2)';
+				statusPill.style.color = 'var(--vscode-foreground)';
+				statusPillIcon.style.color = 'var(--vscode-foreground)';
 			} else {
 				statusPillIcon.className = 'codicon codicon-loading codicon-modifier-spin';
 				statusPillText.textContent = 'Loading...';
 				statusPill.style.backgroundColor = 'rgba(20, 20, 20, 0.1)';
+				statusPill.style.borderColor = 'rgba(20, 20, 20, 0.2)';
+				statusPill.style.color = 'var(--vscode-foreground)';
+				statusPillIcon.style.color = 'var(--vscode-foreground)';
 			}
 		}
 
 		// Phase 12: Update vector readiness indicator
 		if (status && status.retrievalMode) {
 			if (status.retrievalMode === 'sqlite-vector' && status.vectorIndexReady) {
-				vectorIcon.className = 'codicon codicon-check';
-				vectorText.textContent = 'Vector: sqlite-vector';
-				vectorIndicator.style.backgroundColor = 'rgba(0, 200, 0, 0.25)';
+				vectorIcon.className = 'codicon codicon-zap';
+				vectorText.textContent = 'sqlite-vector';
+				vectorIndicator.style.backgroundColor = 'rgba(85, 165, 255, 0.15)';
+				vectorIndicator.style.borderColor = 'rgba(85, 165, 255, 0.4)';
+				vectorIndicator.style.color = 'rgb(50, 130, 220)';
+				vectorIcon.style.color = 'rgb(50, 130, 220)';
+				vectorIndicator.title = 'Vector: sqlite-vector (Fast)';
 			} else {
 				// TS fallback is the default and works fine - it's just slower than sqlite-vector
-				vectorIcon.className = 'codicon codicon-check';
-				vectorText.textContent = 'Vector: TS (default)';
-				vectorIndicator.style.backgroundColor = 'rgba(0, 200, 0, 0.25)';
+				vectorIcon.className = 'codicon codicon-zap';
+				vectorText.textContent = 'TS';
+				vectorIndicator.style.backgroundColor = 'rgba(150, 150, 150, 0.15)';
+				vectorIndicator.style.borderColor = 'rgba(150, 150, 150, 0.3)';
+				vectorIndicator.style.color = 'rgb(120, 120, 120)';
+				vectorIcon.style.color = 'rgb(120, 120, 120)';
+				vectorIndicator.title = 'Vector: TypeScript (Fallback)';
 			}
 		} else {
 			vectorIcon.className = 'codicon codicon-loading codicon-modifier-spin';
-			vectorText.textContent = 'Vector: Loading...';
+			vectorText.textContent = 'Loading...';
 			vectorIndicator.style.backgroundColor = 'rgba(20, 20, 20, 0.1)';
+			vectorIndicator.style.borderColor = 'rgba(20, 20, 20, 0.2)';
+			vectorIndicator.style.color = 'var(--vscode-foreground)';
+			vectorIcon.style.color = 'var(--vscode-foreground)';
+			vectorIndicator.title = 'Vector: Loading...';
 		}
 
 		// Phase 12: Update error banner
@@ -748,20 +795,61 @@ export function renderIndexingDocsTab(
 		// Remove the duplicate check we added earlier since we handle it above
 
 		const indexedFiles = status.indexedFiles ?? status.indexedFileCount ?? 0;
-		const totalFiles = status.totalFiles ?? indexedFiles;
+		// CRITICAL FIX: Handle case where totalFiles is 0 but indexedFiles > 0 (Windows-specific issue)
+		// If totalFiles is undefined or 0, but we have indexed files, use indexedFiles as the total
+		// This prevents showing 0% when we actually have files indexed (e.g., 81 files indexed but 0% shown)
+		let totalFiles = status.totalFiles ?? 0;
+		const originalTotalFiles = totalFiles;
+
+		// Windows-specific fix: If totalFiles is 0 but we have indexed files, use indexedFiles as total
+		// This handles the case where the database query returns 0 for totalFiles but files are actually indexed
+		// This is a known issue on Windows where totalFiles might not be tracked correctly
+		if (totalFiles === 0 && indexedFiles > 0) {
+			// If totalFiles is 0 but we have indexed files, use indexedFiles as the total
+			// This ensures percentage calculation works: 81/81 = 100% instead of 81/0 = undefined
+			totalFiles = indexedFiles;
+		}
 
 		// Calculate structural indexing percentage
-		// Only show 100% when state is Ready AND all files are indexed
+		// CRITICAL: Always calculate percentage if we have indexed files, even if totalFiles was originally 0
 		let structuralPercentage = 0;
-		if (totalFiles > 0) {
-			const isIndexingComplete = status.state === IndexState.Ready && indexedFiles >= totalFiles;
-			if (isIndexingComplete) {
-				structuralPercentage = 100;
+
+		// CRITICAL FIX: If we have indexed files, we MUST show a percentage > 0
+		// This ensures we never show 0% when files are actually indexed
+		if (indexedFiles > 0) {
+			if (totalFiles > 0) {
+				const isIndexingComplete = status.state === IndexState.Ready && indexedFiles >= totalFiles;
+				if (isIndexingComplete) {
+					structuralPercentage = 100;
+				} else {
+					const rawPercentage = (indexedFiles / totalFiles) * 100;
+					structuralPercentage = Math.min(99, Math.max(1, Math.round(rawPercentage))); // Cap at 99% but ensure at least 1%
+				}
 			} else {
-				const rawPercentage = (indexedFiles / totalFiles) * 100;
-				structuralPercentage = Math.min(99, Math.round(rawPercentage)); // Cap at 99% until truly complete
+				// totalFiles is 0 but we have indexed files - show progress based on state
+				// This should not happen after our fix above (totalFiles should = indexedFiles), but safety check
+				// ALWAYS show 100% if we have indexed files but totalFiles is 0 (means tracking is broken)
+				structuralPercentage = 100;
 			}
+		} else if (indexedFiles === 0 && totalFiles > 0) {
+			// No files indexed yet, but we know the total - show 0%
+			structuralPercentage = 0;
+		} else {
+			// No files indexed and no total - show 0%
+			structuralPercentage = 0;
 		}
+
+		// DEBUG: Always log the calculation for troubleshooting (remove after fix verified)
+		console.log('[IndexingUI] Percentage calculation:', {
+			indexedFiles,
+			originalTotalFiles,
+			totalFiles,
+			state: status.state,
+			calculatedPercentage: structuralPercentage,
+			statusIndexedFiles: status.indexedFiles,
+			statusIndexedFileCount: status.indexedFileCount,
+			statusTotalFiles: status.totalFiles
+		});
 
 		// Calculate embedding percentage
 		// Only show 100% when state is Ready AND all chunks are embedded AND no pending/in-progress chunks
@@ -800,17 +888,19 @@ export function renderIndexingDocsTab(
 		switch (status.state) {
 			case IndexState.Uninitialized:
 			case IndexState.Idle:
-				structuralProgressValueLabel.textContent = '0%';
+				// CRITICAL FIX: Use calculated percentage if we have indexed files, don't hardcode 0%
+				// This fixes Windows issue where state is Idle but files are indexed
+				structuralProgressValueLabel.textContent = `${structuralPercentage}%`;
+				structuralProgressFill.style.width = `${structuralPercentage}%`;
 				// After rebuild, show 0 files indexed (not stale totalFiles count)
 				if (indexedFiles === 0 && totalFiles === 0) {
 					structuralProgressDetails.textContent = 'Not indexed • Click Sync to start indexing.';
 				} else if (indexedFiles === 0 && totalFiles > 0) {
 					structuralProgressDetails.textContent = `0 files indexed of ${totalFiles.toLocaleString()} discovered • Click Sync to start indexing.`;
 				} else {
-					// Shouldn't happen, but show actual counts if they exist
+					// Show actual counts if they exist (Windows fix: shows "81 files indexed" with correct percentage)
 					structuralProgressDetails.textContent = `${indexedFiles.toLocaleString()} files indexed`;
 				}
-				structuralProgressFill.style.width = '0%';
 				syncButton.style.opacity = '1';
 				syncButton.style.pointerEvents = 'auto';
 				break;

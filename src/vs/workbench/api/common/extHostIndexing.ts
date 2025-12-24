@@ -423,7 +423,11 @@ export class ExtHostIndexing implements ExtHostIndexingShape {
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	private modelManager: any | undefined; // Store ModelManager instance to query download status
 	private sqliteVectorAvailable: boolean | undefined = undefined; // Cached detection result
-	private vectorExtensionManager: { getExtensionPath(): string | undefined; ensureExtension(deps: { fs: typeof import('fs'); path: typeof import('path'); https: typeof import('https') }, token?: CancellationToken): Promise<string | undefined> } | undefined;
+	private vectorExtensionManager: {
+		getExtensionPath(): string | undefined;
+		ensureExtension(deps: { fs: typeof import('fs'); path: typeof import('path'); https: typeof import('https') }, token?: CancellationToken): Promise<string | undefined>;
+		getManualDownloadInfo(): { url: string; instructions: string; expectedPath: string };
+	} | undefined;
 
 	// Phase 10: Concurrency tracking for resource budgets
 	private activeFullScans = 0;
@@ -455,6 +459,23 @@ export class ExtHostIndexing implements ExtHostIndexingShape {
 			if (deps && this.initData.environment.globalStorageHome) {
 				const globalStoragePath = this.initData.environment.globalStorageHome.fsPath;
 				const userDataPath = deps.path.dirname(deps.path.dirname(globalStoragePath)); // Go up from globalStorage to User, then to userDataPath
+
+				// ADD: Enhanced logging for Windows debugging
+				this.logService.info('[ExtHostIndexing] Computing userDataPath for sqlite-vector', {
+					platform: process.platform,
+					globalStoragePath,
+					userDataPath,
+					dirnameOnce: deps.path.dirname(globalStoragePath),
+					dirnameTwice: deps.path.dirname(deps.path.dirname(globalStoragePath)),
+					userDataPathExists: deps.fs.existsSync(userDataPath)
+				});
+
+				// Verify the path exists
+				if (deps.fs.existsSync(userDataPath)) {
+					this.logService.info('[ExtHostIndexing] userDataPath exists for sqlite-vector', { userDataPath });
+				} else {
+					this.logService.warn('[ExtHostIndexing] userDataPath does not exist for sqlite-vector', { userDataPath });
+				}
 
 				// Dynamically import VectorExtensionManager only in Node context
 				import('../../../workbench/services/indexing/node/vectorExtensionManager.js').then(async module => {
@@ -591,6 +612,23 @@ export class ExtHostIndexing implements ExtHostIndexingShape {
 			// Derive userDataPath from globalStorageHome (e.g., ~/Library/Application Support/code-oss-dev/User/globalStorage -> ~/Library/Application Support/code-oss-dev)
 			const globalStoragePath = this.initData.environment.globalStorageHome.fsPath;
 			userDataPath = deps.path.dirname(deps.path.dirname(globalStoragePath)); // Go up from globalStorage to User, then to userDataPath
+
+			// ADD: Enhanced logging for Windows debugging
+			this.logService.info('[ExtHostIndexing] Computing userDataPath for embedding model', {
+				platform: process.platform,
+				globalStoragePath,
+				userDataPath,
+				dirnameOnce: deps.path.dirname(globalStoragePath),
+				dirnameTwice: deps.path.dirname(deps.path.dirname(globalStoragePath)),
+				userDataPathExists: deps.fs.existsSync(userDataPath)
+			});
+
+			// Verify the path exists and is accessible
+			if (deps.fs.existsSync(userDataPath)) {
+				this.logService.info('[ExtHostIndexing] userDataPath exists and is accessible', { userDataPath });
+			} else {
+				this.logService.warn('[ExtHostIndexing] userDataPath does not exist, will be created', { userDataPath });
+			}
 
 			const modelId = 'coderank-embed';
 			modelManager = new ModelManager(modelId, '1.0.0', userDataPath, this.logService);
@@ -1649,10 +1687,33 @@ export class ExtHostIndexing implements ExtHostIndexingShape {
 			}
 
 			// Detect retrieval mode and vector index readiness.
+			// ADD: Force clear cache before checking to ensure fresh detection
+			// This ensures we re-detect if extension was downloaded after initial check
+			// CHANGE: Always clear cache to force fresh detection on every status check
+			const previousCache = this.sqliteVectorAvailable;
+			this.logService.info('[ExtHostIndexing] Checking vector index readiness', {
+				workspaceId,
+				cachedResult: previousCache,
+				hasRuntime: !!runtime,
+				clearingCache: true
+			});
+			// ADD: Use console.log for maximum visibility in extension host
+			if (typeof console !== 'undefined' && console.log) {
+				console.log('[ExtHostIndexing] FORCING FRESH DETECTION - clearing cache', {
+					previousCache,
+					workspaceId,
+					platform: process.platform,
+					arch: process.arch
+				});
+			}
+			this.sqliteVectorAvailable = undefined; // Always clear cache to force fresh detection
+
 			let retrievalMode: 'ts' | 'sqlite-vector' = 'ts';
 			let vectorIndexReady = false;
 			try {
+				this.logService.info('[ExtHostIndexing] Calling isVectorIndexReady', { workspaceId });
 				const isReady = await this.isVectorIndexReady(db, workspaceId, runtime, deps);
+				this.logService.info('[ExtHostIndexing] isVectorIndexReady returned', { workspaceId, isReady });
 				if (isReady) {
 					retrievalMode = 'sqlite-vector';
 					vectorIndexReady = true;
@@ -1873,9 +1934,139 @@ export class ExtHostIndexing implements ExtHostIndexingShape {
 	 * Results are cached per instance to avoid repeated detection attempts.
 	 */
 	private async detectSqliteVector(db: SqliteDatabase, deps: SqliteDeps): Promise<boolean> {
+		// ADD: Log detection attempt with platform info
+		// ADD: Use console.log for maximum visibility in extension host
+		if (typeof console !== 'undefined' && console.log) {
+			console.log('[ExtHostIndexing] detectSqliteVector CALLED', {
+				platform: process.platform,
+				arch: process.arch,
+				cachedResult: this.sqliteVectorAvailable,
+				hasVectorExtensionManager: !!this.vectorExtensionManager
+			});
+		}
+		this.logService.info('[ExtHostIndexing] detectSqliteVector called', {
+			platform: process.platform,
+			arch: process.arch,
+			cachedResult: this.sqliteVectorAvailable,
+			hasVectorExtensionManager: !!this.vectorExtensionManager
+		});
+
+		// CRITICAL FIX: Always try to ensure extension is downloaded FIRST if VectorExtensionManager exists
+		// This ensures the file exists before we check paths
+		if (this.vectorExtensionManager) {
+			const existingPath = this.vectorExtensionManager.getExtensionPath();
+
+			// CRITICAL: On Windows, if root version exists but x64 doesn't, we need to fix it
+			// The root version often fails to load due to architecture/dependency issues
+			if (process.platform === 'win32' && existingPath && !existingPath.includes('\\x64\\') && !existingPath.includes('\\x86\\')) {
+				const version = '0.9.52';
+				const baseDir = deps.path.join(deps.path.dirname(deps.path.dirname(this.initData.environment.globalStorageHome!.fsPath)), 'extensions', 'sqlite-vector', version);
+				const x64Path = deps.path.join(baseDir, 'x64', 'vector0.dll');
+
+				// If x64 doesn't exist but root does, try to copy it or re-download
+				if (!deps.fs.existsSync(x64Path) && deps.fs.existsSync(existingPath)) {
+					if (typeof console !== 'undefined' && console.log) {
+						console.log('[ExtHostIndexing] ⚠️ Root DLL exists but x64 missing - attempting to fix...');
+					}
+					this.logService.warn('[ExtHostIndexing] Root DLL exists but x64 missing - attempting to fix');
+
+					try {
+						// Create x64 directory
+						await deps.fs.promises.mkdir(deps.path.dirname(x64Path), { recursive: true });
+						// Copy root version to x64 (might work if it's actually x64)
+						await deps.fs.promises.copyFile(existingPath, x64Path);
+						if (typeof console !== 'undefined' && console.log) {
+							console.log('[ExtHostIndexing] ✅ Copied root DLL to x64 directory', { x64Path });
+						}
+						this.logService.info('[ExtHostIndexing] Copied root DLL to x64 directory', { x64Path });
+					} catch (copyErr) {
+						// Copy failed, try re-downloading
+						if (typeof console !== 'undefined' && console.log) {
+							console.log('[ExtHostIndexing] Copy failed, re-downloading x64 version...');
+						}
+						this.logService.info('[ExtHostIndexing] Copy failed, re-downloading x64 version');
+						try {
+							const https = nodeRequire('https') as typeof import('https');
+							const downloadedPath = await this.vectorExtensionManager.ensureExtension({ fs: deps.fs, path: deps.path, https }, CancellationToken.None);
+							if (downloadedPath && deps.fs.existsSync(downloadedPath)) {
+								if (typeof console !== 'undefined' && console.log) {
+									console.log('[ExtHostIndexing] ✅✅✅ x64 version downloaded successfully', { path: downloadedPath });
+								}
+								this.logService.info('[ExtHostIndexing] x64 version downloaded successfully', { path: downloadedPath });
+								this.sqliteVectorAvailable = undefined; // Clear cache
+							}
+						} catch (downloadErr) {
+							// Download failed, continue with root version
+							if (typeof console !== 'undefined' && console.warn) {
+								console.warn('[ExtHostIndexing] ⚠️ Re-download failed, will try root version', { error: downloadErr instanceof Error ? downloadErr.message : String(downloadErr) });
+							}
+							this.logService.warn('[ExtHostIndexing] Re-download failed, will try root version');
+						}
+					}
+				}
+			}
+
+			if (!existingPath || !deps.fs.existsSync(existingPath)) {
+				// Extension doesn't exist - try to download it NOW before checking paths
+				if (typeof console !== 'undefined' && console.log) {
+					console.log('[ExtHostIndexing] 🔽 Extension not found, attempting download BEFORE path detection...');
+				}
+				this.logService.info('[ExtHostIndexing] Extension not found, attempting download before path detection');
+				try {
+					const https = nodeRequire('https') as typeof import('https');
+					const downloadedPath = await this.vectorExtensionManager.ensureExtension({ fs: deps.fs, path: deps.path, https }, CancellationToken.None);
+					if (downloadedPath && deps.fs.existsSync(downloadedPath)) {
+						if (typeof console !== 'undefined' && console.log) {
+							console.log('[ExtHostIndexing] ✅✅✅ Extension downloaded successfully BEFORE detection', { path: downloadedPath });
+						}
+						this.logService.info('[ExtHostIndexing] Extension downloaded successfully before detection', { path: downloadedPath });
+						// Clear cache to force fresh detection with the new file
+						this.sqliteVectorAvailable = undefined;
+					} else {
+						if (typeof console !== 'undefined' && console.warn) {
+							console.warn('[ExtHostIndexing] ⚠️ Download completed but file not found at returned path', { downloadedPath });
+						}
+						this.logService.warn('[ExtHostIndexing] Download completed but file not found at returned path', { downloadedPath });
+					}
+				} catch (downloadErr) {
+					const errMsg = downloadErr instanceof Error ? downloadErr.message : String(downloadErr);
+					const errStack = downloadErr instanceof Error ? downloadErr.stack : undefined;
+					if (typeof console !== 'undefined' && console.error) {
+						console.error('[ExtHostIndexing] ❌ Download attempt failed before detection', {
+							error: errMsg,
+							stack: errStack
+						});
+					}
+					this.logService.error('[ExtHostIndexing] Download attempt failed before detection', {
+						error: errMsg,
+						stack: errStack
+					});
+				}
+			} else {
+				if (typeof console !== 'undefined' && console.log) {
+					console.log('[ExtHostIndexing] ✅ Extension already exists, skipping download', { path: existingPath });
+				}
+				this.logService.info('[ExtHostIndexing] Extension already exists, skipping download', { path: existingPath });
+			}
+		}
+
 		if (this.sqliteVectorAvailable !== undefined) {
-			this.logService.trace('[ExtHostIndexing] detectSqliteVector: using cached result', { result: this.sqliteVectorAvailable });
-			return this.sqliteVectorAvailable;
+			// CHANGE: Use info level so it's visible
+			this.logService.info('[ExtHostIndexing] detectSqliteVector: cached result', { result: this.sqliteVectorAvailable });
+			// ADD: If cached as false, always re-check if vectorExtensionManager exists
+			// This handles the case where the extension was downloaded after the first failed detection
+			// or if the extension path changed
+			if (!this.sqliteVectorAvailable && this.vectorExtensionManager) {
+				const extPath = this.vectorExtensionManager.getExtensionPath();
+				if (extPath && deps.fs.existsSync(extPath)) {
+					this.logService.info('[ExtHostIndexing] detectSqliteVector: cached false but extension exists, re-detecting', { extPath });
+					this.sqliteVectorAvailable = undefined; // Clear cache to force re-detection
+				}
+			} else if (this.sqliteVectorAvailable === true) {
+				// If cached as true, return immediately (no need to re-check)
+				this.logService.info('[ExtHostIndexing] detectSqliteVector: returning cached true');
+				return true;
+			}
 		}
 
 		// Check SQLite version first (for diagnostics)
@@ -1946,43 +2137,224 @@ export class ExtHostIndexing implements ExtHostIndexingShape {
 				}
 
 				if (userDataPath) {
-					// First, check if VectorExtensionManager has the path
+					// ADD: Enhanced logging for Windows debugging
+					this.logService.info('[ExtHostIndexing] detectSqliteVector - computed paths', {
+						platform,
+						arch,
+						globalStoragePath: this.initData.environment.globalStorageHome?.fsPath,
+						userDataPath,
+						userDataPathExists: deps.fs.existsSync(userDataPath),
+						extName
+					});
+
+					// CRITICAL: Always check VectorExtensionManager path FIRST (highest priority)
+					// This ensures we use the path from the manager which knows the correct location
 					if (this.vectorExtensionManager) {
 						const extPath = this.vectorExtensionManager.getExtensionPath();
-						if (extPath) {
+						if (extPath && deps.fs.existsSync(extPath)) {
+							if (typeof console !== 'undefined' && console.log) {
+								console.log('[ExtHostIndexing] ✅ Extension found via VectorExtensionManager (EXISTS)', { extPath });
+							}
+							this.logService.info('[ExtHostIndexing] sqlite-vector found via VectorExtensionManager', { extPath });
+							// Add as FIRST path (highest priority)
+							possiblePaths.unshift(extPath);
+
+							// CRITICAL FIX: On Windows, if we found root path but x64 exists, prefer x64
+							// The x64 version is more likely to work correctly
+							if (platform === 'win32' && !extPath.includes('\\x64\\') && !extPath.includes('\\x86\\')) {
+								const versionNum = '0.9.52'; // Pin to specific version
+								const x64Path = deps.path.join(userDataPath, 'extensions', 'sqlite-vector', versionNum, 'x64', `vector0.${extName}`);
+								if (deps.fs.existsSync(x64Path)) {
+									if (typeof console !== 'undefined' && console.log) {
+										console.log('[ExtHostIndexing] ✅ Found x64 version, using it instead of root', { x64Path, rootPath: extPath });
+									}
+									this.logService.info('[ExtHostIndexing] Found x64 version, preferring it over root', { x64Path, rootPath: extPath });
+									// Replace root path with x64 path at the front
+									possiblePaths[0] = x64Path;
+								}
+							}
+						} else if (extPath) {
+							// Path exists but file doesn't - still add it in case it gets created
+							if (typeof console !== 'undefined' && console.warn) {
+								console.warn('[ExtHostIndexing] ⚠️ VectorExtensionManager path exists but file not found', { extPath });
+							}
+							this.logService.warn('[ExtHostIndexing] VectorExtensionManager path exists but file not found', { extPath });
 							possiblePaths.push(extPath);
 						} else {
-							// Extension not found - try to download it (non-blocking)
+							// Extension not found - try to download it and WAIT for it
 							// Get https module for download
 							try {
 								const https = nodeRequire('https') as typeof import('https');
-								this.vectorExtensionManager.ensureExtension({ fs: deps.fs, path: deps.path, https }, CancellationToken.None).then(downloadedPath => {
+								// CHANGE: Wait for download to complete instead of non-blocking
+								if (typeof console !== 'undefined' && console.log) {
+									console.log('[ExtHostIndexing] 🔽 sqlite-vector NOT FOUND, STARTING DOWNLOAD...', {
+										userDataPath: this.vectorExtensionManager ? 'available' : 'not available',
+										hasVectorExtensionManager: !!this.vectorExtensionManager
+									});
+								}
+								this.logService.info('[ExtHostIndexing] sqlite-vector not found, downloading...');
+								try {
+									const downloadedPath = await this.vectorExtensionManager.ensureExtension({ fs: deps.fs, path: deps.path, https }, CancellationToken.None);
 									if (downloadedPath) {
-										// Invalidate cache so next detection will find it
+										if (typeof console !== 'undefined' && console.log) {
+											console.log('[ExtHostIndexing] ✅✅✅ sqlite-vector DOWNLOADED SUCCESSFULLY ✅✅✅', { path: downloadedPath });
+										}
+										this.logService.info('[ExtHostIndexing] sqlite-vector downloaded successfully', { path: downloadedPath });
+										// Verify file exists
+										if (deps.fs.existsSync(downloadedPath)) {
+											if (typeof console !== 'undefined' && console.log) {
+												console.log('[ExtHostIndexing] ✅ Downloaded file EXISTS and is verified', { path: downloadedPath });
+											}
+										} else {
+											if (typeof console !== 'undefined' && console.error) {
+												console.error('[ExtHostIndexing] ❌ Downloaded file DOES NOT EXIST!', { path: downloadedPath });
+											}
+										}
+										// Invalidate cache so detection will find it
 										this.sqliteVectorAvailable = undefined;
+										// Add downloaded path as FIRST priority
+										if (!possiblePaths.includes(downloadedPath)) {
+											possiblePaths.unshift(downloadedPath);
+										}
+
+										// CRITICAL: Re-check VectorExtensionManager path after download
+										// It might return a different path (e.g., normalized or in subdirectory)
+										const extPathAfterDownload = this.vectorExtensionManager.getExtensionPath();
+										if (extPathAfterDownload) {
+											if (extPathAfterDownload !== downloadedPath) {
+												if (typeof console !== 'undefined' && console.log) {
+													console.log('[ExtHostIndexing] Path from getExtensionPath differs from downloaded path', {
+														downloadedPath,
+														extPath: extPathAfterDownload
+													});
+												}
+												this.logService.info('[ExtHostIndexing] sqlite-vector path from getExtensionPath differs from downloaded path', {
+													downloadedPath,
+													extPath: extPathAfterDownload
+												});
+												// Add as first priority if it exists
+												if (deps.fs.existsSync(extPathAfterDownload) && !possiblePaths.includes(extPathAfterDownload)) {
+													possiblePaths.unshift(extPathAfterDownload);
+												} else if (!possiblePaths.includes(extPathAfterDownload)) {
+													possiblePaths.push(extPathAfterDownload);
+												}
+											} else {
+												if (typeof console !== 'undefined' && console.log) {
+													console.log('[ExtHostIndexing] ✅ Path confirmed via getExtensionPath', { extPath: extPathAfterDownload });
+												}
+												this.logService.info('[ExtHostIndexing] sqlite-vector path confirmed via getExtensionPath', { extPath: extPathAfterDownload });
+											}
+										}
+									} else {
+										// ADD: Use console.warn for visibility
+										if (typeof console !== 'undefined' && console.warn) {
+											console.warn('[ExtHostIndexing] ⚠️ sqlite-vector download returned no path - checking if file exists at expected location');
+										}
+										this.logService.warn('[ExtHostIndexing] sqlite-vector download returned no path - checking if file exists at expected location');
+										// ADD: Check if file exists even though download returned undefined
+										const expectedPath = this.vectorExtensionManager.getExtensionPath();
+										if (expectedPath && deps.fs.existsSync(expectedPath)) {
+											if (typeof console !== 'undefined' && console.log) {
+												console.log('[ExtHostIndexing] ✅ sqlite-vector file exists at expected path despite download returning undefined', { path: expectedPath });
+											}
+											this.logService.info('[ExtHostIndexing] sqlite-vector file exists at expected path despite download returning undefined', { path: expectedPath });
+											possiblePaths.push(expectedPath);
+										} else {
+											// ADD: Log when expected path also doesn't exist
+											if (typeof console !== 'undefined' && console.error) {
+												console.error('[ExtHostIndexing] ❌ sqlite-vector not found at expected path either', { expectedPath });
+											}
+											this.logService.warn('[ExtHostIndexing] sqlite-vector not found at expected path either', { expectedPath });
+										}
 									}
-								}).catch(err => {
+								} catch (err) {
 									const errMsg = err instanceof Error ? err.message : String(err);
-									this.logService.error('[ExtHostIndexing] Auto-download of sqlite-vector extension failed', { error: errMsg });
-								});
+									const errStack = err instanceof Error ? err.stack : undefined;
+									// ADD: Use console.error for maximum visibility
+									if (typeof console !== 'undefined' && console.error) {
+										console.error('[ExtHostIndexing] ❌❌❌ sqlite-vector DOWNLOAD FAILED ❌❌❌', {
+											error: errMsg,
+											stack: errStack,
+											userDataPath: this.vectorExtensionManager ? 'available' : 'not available'
+										});
+									}
+									this.logService.error('[ExtHostIndexing] Auto-download of sqlite-vector extension failed', { error: errMsg, stack: errStack });
+
+									// ADD: Even if download failed, check if extension already exists
+									const existingPath = this.vectorExtensionManager.getExtensionPath();
+									if (existingPath && deps.fs.existsSync(existingPath)) {
+										if (typeof console !== 'undefined' && console.log) {
+											console.log('[ExtHostIndexing] ✅ sqlite-vector found at existing path despite download failure', { path: existingPath });
+										}
+										this.logService.info('[ExtHostIndexing] sqlite-vector found at existing path despite download failure', { path: existingPath });
+										possiblePaths.push(existingPath);
+									}
+								}
 							} catch (e) {
 								const errMsg = e instanceof Error ? e.message : String(e);
+								// ADD: Use console.error for visibility
+								if (typeof console !== 'undefined' && console.error) {
+									console.error('[ExtHostIndexing] ❌ Failed to get https module for auto-download', { error: errMsg });
+								}
 								this.logService.warn('[ExtHostIndexing] Failed to get https module for auto-download', { error: errMsg });
 							}
 						}
+					} else {
+						// ADD: Log when VectorExtensionManager is not available
+						if (typeof console !== 'undefined' && console.warn) {
+							console.warn('[ExtHostIndexing] ⚠️ VectorExtensionManager not available - cannot auto-download sqlite-vector', {
+								userDataPath: userDataPath || 'undefined',
+								platform: process.platform,
+								arch: process.arch
+							});
+						}
+						this.logService.warn('[ExtHostIndexing] VectorExtensionManager not available - cannot auto-download sqlite-vector', {
+							userDataPath: userDataPath || 'undefined'
+						});
 					}
 
 					// Version-pinned path: userDataPath/extensions/sqlite-vector/0.9.52/
 					const version = '0.9.52'; // Pin to specific version
 					// The actual binary is named vector0.dylib/so/dll (not vector-darwin-arm64.dylib)
 					const vector0Name = `vector0.${extName}`;
-					possiblePaths.push(deps.path.join(userDataPath, 'extensions', 'sqlite-vector', version, vector0Name));
-					possiblePaths.push(deps.path.join(userDataPath, 'extensions', 'sqlite-vector', vector0Name));
+
+					// For Windows, check both x64 and x86 subdirectories
+					if (platform === 'win32') {
+						// Check x64 (64-bit) subdirectory
+						const x64Path = deps.path.join(userDataPath, 'extensions', 'sqlite-vector', version, 'x64', vector0Name);
+						possiblePaths.push(deps.path.normalize(x64Path));
+
+						// Check x86 (32-bit) subdirectory
+						const x86Path = deps.path.join(userDataPath, 'extensions', 'sqlite-vector', version, 'x86', vector0Name);
+						possiblePaths.push(deps.path.normalize(x86Path));
+
+						// Also check root for backward compatibility
+						const rootPath = deps.path.join(userDataPath, 'extensions', 'sqlite-vector', version, vector0Name);
+						possiblePaths.push(deps.path.normalize(rootPath));
+					} else {
+						// For other platforms, check root
+						const primaryPath = deps.path.join(userDataPath, 'extensions', 'sqlite-vector', version, vector0Name);
+						const normalizedPrimaryPath = deps.path.normalize(primaryPath);
+						possiblePaths.push(normalizedPrimaryPath);
+					}
+
 					// Also try old naming patterns (legacy)
-					possiblePaths.push(deps.path.join(userDataPath, 'extensions', 'sqlite-vector', version, binaryName));
-					possiblePaths.push(deps.path.join(userDataPath, 'extensions', 'sqlite-vector', binaryName));
-					possiblePaths.push(deps.path.join(userDataPath, 'extensions', 'sqlite-vector', version, `vector.${extName}`));
-					possiblePaths.push(deps.path.join(userDataPath, 'extensions', 'sqlite-vector', `vector.${extName}`));
+					possiblePaths.push(deps.path.normalize(deps.path.join(userDataPath, 'extensions', 'sqlite-vector', vector0Name)));
+					possiblePaths.push(deps.path.normalize(deps.path.join(userDataPath, 'extensions', 'sqlite-vector', version, binaryName)));
+					possiblePaths.push(deps.path.normalize(deps.path.join(userDataPath, 'extensions', 'sqlite-vector', binaryName)));
+					possiblePaths.push(deps.path.normalize(deps.path.join(userDataPath, 'extensions', 'sqlite-vector', version, `vector.${extName}`)));
+					possiblePaths.push(deps.path.normalize(deps.path.join(userDataPath, 'extensions', 'sqlite-vector', `vector.${extName}`)));
+
+					// ADD: Enhanced logging for Windows debugging
+					const firstPath = possiblePaths.length > 0 ? possiblePaths[0] : 'none';
+					this.logService.info('[ExtHostIndexing] Checking sqlite-vector paths', {
+						platform,
+						arch,
+						userDataPath,
+						firstPath,
+						firstPathExists: firstPath !== 'none' ? deps.fs.existsSync(firstPath) : false,
+						possiblePathsCount: possiblePaths.length
+					});
 				}
 			} catch {
 				// Ignore path construction errors
@@ -1994,10 +2366,41 @@ export class ExtHostIndexing implements ExtHostIndexingShape {
 			possiblePaths.push(binaryName);
 			possiblePaths.push(`vector.${extName}`);
 
+			// ADD: Log which paths exist before trying to load
+			const existingPaths: string[] = [];
+			const missingPaths: string[] = [];
+			for (const extPath of possiblePaths) {
+				if (deps.fs.existsSync(extPath)) {
+					existingPaths.push(extPath);
+				} else {
+					missingPaths.push(extPath);
+				}
+			}
+			if (typeof console !== 'undefined' && console.log) {
+				console.log('[ExtHostIndexing] Path check results:', {
+					existing: existingPaths,
+					missing: missingPaths.slice(0, 5) // Log first 5 missing
+				});
+			}
+			this.logService.info('[ExtHostIndexing] Path existence check', {
+				existingCount: existingPaths.length,
+				missingCount: missingPaths.length,
+				existingPaths: existingPaths.slice(0, 5),
+				missingPaths: missingPaths.slice(0, 5)
+			});
+
 			for (const extPath of possiblePaths) {
 				try {
 					// Check if file exists before trying to load
 					if (deps.fs.existsSync(extPath)) {
+						if (typeof console !== 'undefined' && console.log) {
+							console.log('[ExtHostIndexing] ✅ File EXISTS, attempting to load', { path: extPath });
+						}
+						this.logService.info('[ExtHostIndexing] Attempting to load sqlite-vector extension', {
+							path: extPath,
+							fileExists: true,
+							platform: process.platform
+						});
 
 						// Enable extension loading (some SQLite builds require this)
 						try {
@@ -2012,19 +2415,221 @@ export class ExtHostIndexing implements ExtHostIndexingShape {
 									}
 								});
 							});
-						} catch {
-							// Ignore PRAGMA errors
+						} catch (pragmaErr) {
+							// Ignore PRAGMA errors but log them
+							this.logService.trace('[ExtHostIndexing] PRAGMA load_extension error (ignored)', {
+								error: pragmaErr instanceof Error ? pragmaErr.message : String(pragmaErr)
+							});
 						}
 
-						await new Promise<void>((resolve, reject) => {
-							(db as SqliteDatabase & { loadExtension: (path: string, cb?: (err: Error | null) => void) => void }).loadExtension(extPath, (err: Error | null) => {
-								if (err) {
-									reject(err);
-								} else {
-									resolve();
-								}
+						// CRITICAL FIX: Check if extension is already loaded before attempting to load it again
+						// Loading an extension multiple times causes "error during initialization"
+						try {
+							const alreadyLoadedCheck = new Promise<string>((resolve, reject) => {
+								db.get(`SELECT vector_version() as version`, [], (err: Error | null, row: SqliteRow | undefined) => {
+									if (err) {
+										reject(err);
+									} else {
+										const version = (row as { version?: string })?.version || 'unknown';
+										resolve(version);
+									}
+								});
 							});
+							const version = await Promise.race([alreadyLoadedCheck, new Promise<string>((_, reject) => setTimeout(() => reject(new Error('timeout')), 500))]);
+							// Extension is already loaded!
+							if (typeof console !== 'undefined' && console.log) {
+								console.log('[ExtHostIndexing] ✅ Extension already loaded, skipping loadExtension', { version, path: extPath });
+							}
+							this.logService.info('[ExtHostIndexing] Extension already loaded, skipping loadExtension', { version, path: extPath });
+							this.sqliteVectorAvailable = true;
+							return true;
+						} catch (checkErr) {
+							// Extension not loaded yet, continue with loading
+							const checkErrMsg = checkErr instanceof Error ? checkErr.message : String(checkErr);
+							if (!checkErrMsg.includes('no such function') && !checkErrMsg.includes('timeout')) {
+								// Unexpected error during check, log it
+								this.logService.trace('[ExtHostIndexing] Pre-load check failed (expected if not loaded)', { error: checkErrMsg });
+							}
+						}
+
+						// ADD: Log before attempting loadExtension
+						// CRITICAL FIX: On Windows, ensure path is absolute and properly formatted
+						let normalizedPath = extPath;
+						if (process.platform === 'win32') {
+							// Resolve to absolute path and normalize separators
+							normalizedPath = deps.path.resolve(extPath);
+							// SQLite on Windows might prefer forward slashes or need backslashes escaped
+							// Try with backslashes first (Windows native)
+							normalizedPath = normalizedPath.replace(/\//g, '\\');
+						} else {
+							normalizedPath = deps.path.resolve(extPath);
+						}
+
+						if (typeof console !== 'undefined' && console.log) {
+							console.log('[ExtHostIndexing] Calling loadExtension', {
+								originalPath: extPath,
+								normalizedPath: normalizedPath,
+								fileExists: deps.fs.existsSync(normalizedPath),
+								platform: process.platform
+							});
+						}
+						this.logService.info('[ExtHostIndexing] Calling loadExtension', {
+							originalPath: extPath,
+							normalizedPath: normalizedPath,
+							fileExists: deps.fs.existsSync(normalizedPath),
+							platform: process.platform
 						});
+
+						try {
+							await new Promise<void>((resolve, reject) => {
+								(db as SqliteDatabase & { loadExtension: (path: string, cb?: (err: Error | null) => void) => void }).loadExtension(normalizedPath, (err: Error | null) => {
+									if (err) {
+										// ADD: Detailed error logging with console.error for visibility
+										const errMsg = err.message || String(err);
+										const errCode = (err as any).code;
+
+										// CRITICAL FIX: If error is "error during initialization", check if extension is actually loaded
+										// This can happen if extension was already loaded on a previous call
+										if (errMsg.includes('error during initialization') || errMsg.includes('initialization')) {
+											// Check if extension is actually available despite the error
+											const quickCheck = new Promise<string>((resolveCheck, rejectCheck) => {
+												db.get(`SELECT vector_version() as version`, [], (checkErr: Error | null, checkRow: SqliteRow | undefined) => {
+													if (checkErr) {
+														rejectCheck(checkErr);
+													} else {
+														const version = (checkRow as { version?: string })?.version || 'unknown';
+														resolveCheck(version);
+													}
+												});
+											});
+											Promise.race([quickCheck, new Promise<string>((_, rejectTimeout) => setTimeout(() => rejectTimeout(new Error('timeout')), 500))])
+												.then((version) => {
+													// Extension is actually loaded! The error was misleading
+													if (typeof console !== 'undefined' && console.log) {
+														console.log('[ExtHostIndexing] ✅ Extension loaded despite initialization error', { version, path: extPath });
+													}
+													this.logService.info('[ExtHostIndexing] Extension loaded despite initialization error', { version, path: extPath });
+													this.sqliteVectorAvailable = true;
+													resolve();
+												})
+												.catch(() => {
+													// Extension is not actually loaded, continue with normal error handling below
+													// Don't return here - let it fall through to normal error handling
+												});
+											// If extension check succeeded, we already returned above
+											// If it failed, continue with normal error handling below
+										}
+
+										// Normal error handling
+										if (typeof console !== 'undefined' && console.error) {
+											console.error('[ExtHostIndexing] ❌ loadExtension FAILED', {
+												originalPath: extPath,
+												normalizedPath: normalizedPath,
+												error: errMsg,
+												errorCode: errCode,
+												platform: process.platform,
+												arch: process.arch,
+												fileExists: deps.fs.existsSync(normalizedPath)
+											});
+										}
+										this.logService.warn('[ExtHostIndexing] loadExtension failed', {
+											originalPath: extPath,
+											normalizedPath: normalizedPath,
+											error: errMsg,
+											errorCode: errCode,
+											platform: process.platform,
+											arch: process.arch,
+											fileExists: deps.fs.existsSync(normalizedPath)
+										});
+
+										// CRITICAL FIX: On Windows, if backslashes failed, try forward slashes
+										// Some SQLite bindings prefer forward slashes even on Windows
+										if (process.platform === 'win32' && normalizedPath.includes('\\')) {
+											const forwardSlashPath = normalizedPath.replace(/\\/g, '/');
+											if (typeof console !== 'undefined' && console.log) {
+												console.log('[ExtHostIndexing] Retrying with forward slashes', { path: forwardSlashPath });
+											}
+											this.logService.info('[ExtHostIndexing] Retrying loadExtension with forward slashes', { path: forwardSlashPath });
+											// Try again with forward slashes
+											(db as SqliteDatabase & { loadExtension: (path: string, cb?: (err: Error | null) => void) => void }).loadExtension(forwardSlashPath, (retryErr: Error | null) => {
+												if (retryErr) {
+													// Both attempts failed
+													reject(err); // Use original error
+												} else {
+													// Forward slashes worked!
+													if (typeof console !== 'undefined' && console.log) {
+														console.log('[ExtHostIndexing] ✅ loadExtension succeeded with forward slashes', { path: forwardSlashPath });
+													}
+													this.logService.info('[ExtHostIndexing] loadExtension succeeded with forward slashes', { path: forwardSlashPath });
+													resolve();
+												}
+											});
+											return; // Don't reject yet, wait for retry
+										}
+
+										reject(err);
+										if (typeof console !== 'undefined' && console.error) {
+											console.error('[ExtHostIndexing] ❌ loadExtension FAILED', {
+												originalPath: extPath,
+												normalizedPath: normalizedPath,
+												error: errMsg,
+												errorCode: errCode,
+												platform: process.platform,
+												arch: process.arch,
+												fileExists: deps.fs.existsSync(normalizedPath)
+											});
+										}
+										this.logService.warn('[ExtHostIndexing] loadExtension failed', {
+											originalPath: extPath,
+											normalizedPath: normalizedPath,
+											error: errMsg,
+											errorCode: errCode,
+											platform: process.platform,
+											arch: process.arch,
+											fileExists: deps.fs.existsSync(normalizedPath)
+										});
+
+										// CRITICAL FIX: On Windows, if backslashes failed, try forward slashes
+										// Some SQLite bindings prefer forward slashes even on Windows
+										if (process.platform === 'win32' && normalizedPath.includes('\\')) {
+											const forwardSlashPath = normalizedPath.replace(/\\/g, '/');
+											if (typeof console !== 'undefined' && console.log) {
+												console.log('[ExtHostIndexing] Retrying with forward slashes', { path: forwardSlashPath });
+											}
+											this.logService.info('[ExtHostIndexing] Retrying loadExtension with forward slashes', { path: forwardSlashPath });
+											// Try again with forward slashes
+											(db as SqliteDatabase & { loadExtension: (path: string, cb?: (err: Error | null) => void) => void }).loadExtension(forwardSlashPath, (retryErr: Error | null) => {
+												if (retryErr) {
+													// Both attempts failed
+													reject(err); // Use original error
+												} else {
+													// Forward slashes worked!
+													if (typeof console !== 'undefined' && console.log) {
+														console.log('[ExtHostIndexing] ✅ loadExtension succeeded with forward slashes', { path: forwardSlashPath });
+													}
+													this.logService.info('[ExtHostIndexing] loadExtension succeeded with forward slashes', { path: forwardSlashPath });
+													resolve();
+												}
+											});
+											return; // Don't reject yet, wait for retry
+										}
+
+										reject(err);
+									} else {
+										this.logService.info('[ExtHostIndexing] loadExtension succeeded', { path: extPath });
+										resolve();
+									}
+								});
+							});
+						} catch (loadErr) {
+							// ADD: Log loadExtension errors
+							this.logService.error('[ExtHostIndexing] loadExtension threw exception', {
+								path: extPath,
+								error: loadErr instanceof Error ? loadErr.message : String(loadErr),
+								stack: loadErr instanceof Error ? loadErr.stack : undefined
+							});
+							continue; // Try next path
+						}
 
 						// Verify it loaded by checking for scalar functions (vector_version)
 						try {
@@ -2044,22 +2649,103 @@ export class ExtHostIndexing implements ExtHostIndexingShape {
 							const funcTimeoutPromise = new Promise<string>((_, reject) => {
 								setTimeout(() => reject(new Error('vector function check timeout')), 1000);
 							});
-							await Promise.race([funcCheckPromise, funcTimeoutPromise]);
+							const version = await Promise.race([funcCheckPromise, funcTimeoutPromise]);
+							const successInfo = {
+								path: extPath,
+								version,
+								platform: process.platform,
+								arch: process.arch
+							};
+							// ADD: Use console.log for maximum visibility
+							if (typeof console !== 'undefined' && console.log) {
+								console.log('[ExtHostIndexing] ✅✅✅ sqlite-vector LOADED SUCCESSFULLY ✅✅✅', successInfo);
+							}
+							this.logService.info('[ExtHostIndexing] ✅ sqlite-vector loaded successfully', successInfo);
+							// ADD: Cache the positive result
 							this.sqliteVectorAvailable = true;
 							return true;
-						} catch {
+						} catch (funcErr) {
 							// Extension loaded but scalar functions not available, try next path.
+							this.logService.warn('[ExtHostIndexing] vector_version() check failed after loadExtension', {
+								path: extPath,
+								error: funcErr instanceof Error ? funcErr.message : String(funcErr)
+							});
 							continue;
 						}
+					} else {
+						// ADD: Log when file doesn't exist (but only once per path to avoid spam)
+						if (possiblePaths.indexOf(extPath) < 3) { // Only log first 3 missing paths
+							this.logService.info('[ExtHostIndexing] sqlite-vector path does not exist', { path: extPath });
+						}
 					}
-				} catch {
-					// Loading failed, try next path.
+				} catch (err) {
+					// ADD: Log all errors, not just silently continue
+					this.logService.warn('[ExtHostIndexing] Error checking/loading sqlite-vector path', {
+						path: extPath,
+						error: err instanceof Error ? err.message : String(err)
+					});
 					continue;
 				}
 			}
 		}
 
-		// Extension not available - use TS fallback (which works reliably).
+		// Extension not available - gracefully fall back to TS implementation (which works reliably).
+		// ADD: Log why detection failed for debugging
+		let computedUserDataPath: string | undefined;
+		if (this.initData.environment.globalStorageHome) {
+			const globalStoragePath = this.initData.environment.globalStorageHome.fsPath;
+			computedUserDataPath = deps.path.dirname(deps.path.dirname(globalStoragePath));
+		}
+
+		// Get manual download info if VectorExtensionManager is available
+		let manualDownloadInfo: { url: string; instructions: string; expectedPath: string } | undefined;
+		if (this.vectorExtensionManager) {
+			try {
+				manualDownloadInfo = this.vectorExtensionManager.getManualDownloadInfo();
+			} catch (e) {
+				// Ignore errors getting manual download info
+				this.logService.trace('[ExtHostIndexing] Failed to get manual download info', {
+					error: e instanceof Error ? e.message : String(e)
+				});
+			}
+		}
+
+		const failureInfo = {
+			platform: process.platform,
+			arch: process.arch,
+			hasLoadExtension,
+			possiblePathsChecked: possiblePaths.length,
+			userDataPath: computedUserDataPath || 'undefined',
+			possiblePaths: possiblePaths.slice(0, 10), // Log first 10 paths
+			fallback: 'TypeScript implementation (reliable, but slower)',
+			manualDownloadAvailable: !!manualDownloadInfo,
+			...(manualDownloadInfo ? {
+				manualDownloadUrl: manualDownloadInfo.url,
+				manualDownloadPath: manualDownloadInfo.expectedPath
+			} : {})
+		};
+
+		// ADD: Use console.warn (not error) since we have a working fallback
+		if (typeof console !== 'undefined' && console.warn) {
+			console.warn('[ExtHostIndexing] ⚠️ sqlite-vector not available - using TypeScript fallback');
+			console.warn('[ExtHostIndexing] Message: Vector search will use TypeScript implementation. This is slower but works reliably.');
+
+			if (manualDownloadInfo) {
+				console.warn('[ExtHostIndexing] 📥 MANUAL DOWNLOAD OPTION: If you want to use sqlite-vector for better performance:');
+				console.warn('[ExtHostIndexing] Download URL:', manualDownloadInfo.url);
+				console.warn('[ExtHostIndexing] Expected Path:', manualDownloadInfo.expectedPath);
+				console.warn('[ExtHostIndexing] Instructions:');
+				// Split instructions by newline and log each line
+				manualDownloadInfo.instructions.split('\n').forEach((line, index) => {
+					console.warn(`[ExtHostIndexing]   ${index + 1}. ${line}`);
+				});
+				console.warn('[ExtHostIndexing] ⚠️ NOTE: If DLL exists but fails to load, you may need Visual C++ Runtime:');
+				console.warn('[ExtHostIndexing]   Download: https://aka.ms/vs/17/release/vc_redist.x64.exe');
+			}
+
+			console.warn('[ExtHostIndexing] Failure details:', failureInfo);
+		}
+		this.logService.info('[ExtHostIndexing] sqlite-vector extension not available - using TypeScript fallback', failureInfo);
 		this.sqliteVectorAvailable = false;
 		return false;
 	}
@@ -2069,14 +2755,17 @@ export class ExtHostIndexing implements ExtHostIndexingShape {
 	 */
 	private async isVectorIndexReady(db: SqliteDatabase, workspaceId: string, runtime: ILocalEmbeddingRuntime | undefined, deps: SqliteDeps): Promise<boolean> {
 		if (!runtime) {
-			this.logService.trace('[ExtHostIndexing] Vector index not ready: no runtime', { workspaceId });
+			this.logService.warn('[ExtHostIndexing] Vector index not ready: no runtime', { workspaceId });
 			return false;
 		}
 
 		try {
+			this.logService.info('[ExtHostIndexing] isVectorIndexReady: calling detectSqliteVector', { workspaceId });
 			const hasVector = await this.detectSqliteVector(db, deps);
+			this.logService.info('[ExtHostIndexing] isVectorIndexReady: detectSqliteVector returned', { workspaceId, hasVector });
 			if (!hasVector) {
-				this.logService.trace('[ExtHostIndexing] Vector index not ready: sqlite-vector extension not detected', { workspaceId });
+				// CHANGE: Use warn level so it's visible in console
+				this.logService.warn('[ExtHostIndexing] Vector index not ready: sqlite-vector extension not detected', { workspaceId });
 				return false;
 			}
 
@@ -2095,7 +2784,8 @@ export class ExtHostIndexing implements ExtHostIndexingShape {
 			}
 		} catch (e) {
 			const errMsg = e instanceof Error ? e.message : String(e);
-			this.logService.trace('[ExtHostIndexing] Vector index not ready: detection failed', { workspaceId, error: errMsg });
+			// CHANGE: Use warn level so it's visible in console
+			this.logService.warn('[ExtHostIndexing] Vector index not ready: detection failed', { workspaceId, error: errMsg });
 			return false;
 		}
 	}
@@ -4253,26 +4943,110 @@ export class ExtHostIndexing implements ExtHostIndexingShape {
 			this.logService.info('[ExtHostIndexing] cancelled background indexing for rebuilt workspace', { workspaceId });
 		}
 
+		// ADD: Close any active database connections before deleting the file
+		// This is critical on Windows where open file handles prevent deletion
 		try {
-			// Delete the database file FIRST if it exists (before trying to open it).
-			// This avoids errors when trying to query an incompatible schema.
+			// Try to open and immediately close the database to release any locks
+			// This helps release file handles that might be held by the OS
+			let tempDb: SqliteDatabase | undefined;
 			try {
-				await deps.fs.promises.unlink(dbPath);
-				this.logService.info('[ExtHostIndexing] deleted existing database', { dbPath });
+				tempDb = await openDatabaseWithRetry(deps.sqlite, dbPath, 1, 100);
+				// Close it immediately to release the lock
+				await new Promise<void>((resolve, reject) => {
+					tempDb!.close(err => err ? reject(err) : resolve());
+				});
+				this.logService.info('[ExtHostIndexing] closed existing database connection', { dbPath });
 			} catch (e) {
-				const errorWithCode = e as ErrorWithCode;
-				if (errorWithCode.code !== 'ENOENT') {
-					// File doesn't exist is fine, but other errors should be logged.
-					const message = e instanceof Error ? e.message : String(e);
-					this.logService.warn('[ExtHostIndexing] failed to delete database file (may not exist)', { dbPath, message });
+				// If we can't open it, it might not exist or be locked - that's okay
+				this.logService.trace('[ExtHostIndexing] could not open database for closing (may not exist)', {
+					dbPath,
+					error: e instanceof Error ? e.message : String(e)
+				});
+			}
+		} catch (e) {
+			// Ignore errors when trying to close - proceed with delete attempt
+			this.logService.trace('[ExtHostIndexing] error closing database before rebuild', {
+				error: e instanceof Error ? e.message : String(e)
+			});
+		}
+
+		// ADD: Wait longer for Windows to release the file handle
+		await new Promise(resolve => setTimeout(resolve, 500));
+
+		try {
+			// Delete the database file with retry logic for Windows file locking issues
+			const maxRetries = 10; // Increased from 5 to 10
+			let lastError: Error | undefined;
+			for (let attempt = 0; attempt < maxRetries; attempt++) {
+				try {
+					await deps.fs.promises.unlink(dbPath);
+					this.logService.info('[ExtHostIndexing] deleted existing database', { dbPath, attempt: attempt + 1 });
+					break; // Success, exit retry loop
+				} catch (e) {
+					const errorWithCode = e as ErrorWithCode;
+					if (errorWithCode.code === 'ENOENT') {
+						// File doesn't exist - that's fine, we can proceed
+						this.logService.info('[ExtHostIndexing] database file does not exist (already deleted)', { dbPath });
+						break;
+					}
+
+					lastError = e instanceof Error ? e : new Error(String(e));
+
+					// Check if it's a locking error (Windows-specific)
+					const isLockError = errorWithCode.code === 'EBUSY' ||
+						errorWithCode.code === 'EPERM' ||
+						errorWithCode.code === 'EACCES' ||
+						(lastError.message && (lastError.message.includes('locked') || lastError.message.includes('being used') || lastError.message.includes('resource busy')));
+
+					if (isLockError && attempt < maxRetries - 1) {
+						// Exponential backoff with longer delays: 200ms, 400ms, 800ms, 1600ms, 3200ms...
+						const delay = 200 * Math.pow(2, attempt);
+						this.logService.warn('[ExtHostIndexing] database file is locked, retrying delete', {
+							dbPath,
+							attempt: attempt + 1,
+							maxRetries,
+							delay,
+							error: lastError.message,
+							code: errorWithCode.code
+						});
+						await new Promise(resolve => setTimeout(resolve, delay));
+						continue;
+					}
+
+					// Not a retryable error or out of retries
+					const message = lastError.message || String(lastError);
+					this.logService.error('[ExtHostIndexing] failed to delete database file after all retries', {
+						dbPath,
+						attempt: attempt + 1,
+						maxRetries,
+						error: message,
+						code: errorWithCode.code
+					});
+					throw lastError;
 				}
 			}
 
 			// Open a fresh database and initialize with correct schema.
+			// ADD: Wait a bit more to ensure file system has released the file handle (Windows needs more time)
+			await new Promise(resolve => setTimeout(resolve, 300));
+
 			let db: SqliteDatabase | undefined;
 			try {
 				await deps.fs.promises.mkdir(deps.path.dirname(dbPath), { recursive: true });
-				db = await openDatabaseWithRetry(deps.sqlite, dbPath);
+				// ADD: Use retry logic with more attempts for Windows (5 retries with 100ms initial delay)
+				try {
+					db = await openDatabaseWithRetry(deps.sqlite, dbPath, 5, 100);
+				} catch (openErr) {
+					const category = classifySqliteError(openErr);
+					if (category === 'BusyOrLocked') {
+						// Database is still locked - wait longer and retry once more
+						this.logService.warn('[ExtHostIndexing] database still locked after delete, waiting longer', { dbPath });
+						await new Promise(resolve => setTimeout(resolve, 500));
+						db = await openDatabaseWithRetry(deps.sqlite, dbPath, 3, 200);
+					} else {
+						throw openErr;
+					}
+				}
 				await this.ensureSchema(db, deps);
 
 				// Reset index state to idle and clear rebuilding flag.
