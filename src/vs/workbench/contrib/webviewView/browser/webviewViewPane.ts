@@ -298,6 +298,15 @@ export class WebviewViewPane extends ViewPane {
 	}
 
 	private findRootContainer(container: HTMLElement): HTMLElement | undefined {
+		// Prefer clipping to the Sidebar part to avoid overlay bleed past its border
+		let el: HTMLElement | null = container;
+		while (el && el !== el.ownerDocument.body) {
+			if (el.classList && el.classList.contains('part') && el.classList.contains('sidebar')) {
+				return el;
+			}
+			el = el.parentElement;
+		}
+		// Fallback to previous behavior: clip to the nearest scrollable container
 		return findParentWithClass(container, 'monaco-scrollable-element') ?? undefined;
 	}
 }
