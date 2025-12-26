@@ -399,8 +399,10 @@ export function renderIndexingDocsTab(
 	`;
 	const pauseIcon = DOM.append(pauseButton, DOM.$('span.codicon.codicon-debug-pause'));
 	pauseIcon.style.cssText = 'font-size: 12px;';
-	pauseButton.title = 'Pause Indexing';
-	pauseButton.setAttribute('aria-label', 'Pause Indexing');
+	pauseButton.title = 'Pause indexing';
+	pauseButton.setAttribute('aria-label', 'Pause indexing');
+	pauseButton.setAttribute('tabindex', '0');
+	pauseButton.setAttribute('role', 'button');
 
 	// Buttons footer - two rows
 	const progressFooter = DOM.append(progressContainer, DOM.$('div.indexing-progress-footer'));
@@ -431,15 +433,19 @@ export function renderIndexingDocsTab(
 	resumeButton.style.cssText = pauseButton.style.cssText;
 	const resumeIcon = DOM.append(resumeButton, DOM.$('span.codicon.codicon-play'));
 	resumeIcon.style.cssText = 'font-size: 12px;';
-	resumeButton.title = 'Resume Indexing';
-	resumeButton.setAttribute('aria-label', 'Resume Indexing');
+	resumeButton.title = 'Start indexing';
+	resumeButton.setAttribute('aria-label', 'Start indexing');
+	resumeButton.setAttribute('tabindex', '0');
+	resumeButton.setAttribute('role', 'button');
 
 	const rebuildButton = DOM.append(rightButtonsRow1, DOM.$('div.cursor-button.cursor-button-tertiary.cursor-button-tertiary-clickable.cursor-button-small'));
 	rebuildButton.style.cssText = pauseButton.style.cssText;
 	const rebuildIcon = DOM.append(rebuildButton, DOM.$('span.codicon.codicon-build'));
 	rebuildIcon.style.cssText = 'font-size: 12px;';
-	rebuildButton.title = 'Rebuild Index';
-	rebuildButton.setAttribute('aria-label', 'Rebuild Index');
+	rebuildButton.title = 'Rebuild index';
+	rebuildButton.setAttribute('aria-label', 'Rebuild index');
+	rebuildButton.setAttribute('tabindex', '0');
+	rebuildButton.setAttribute('role', 'button');
 
 	// Divider line (between row 1 and row 2)
 	const divider = DOM.append(progressFooter, DOM.$('.cursor-settings-cell-divider'));
@@ -576,8 +582,10 @@ export function renderIndexingDocsTab(
 
 	const syncIcon = DOM.append(syncButton, DOM.$('span.codicon.codicon-refresh'));
 	syncIcon.style.cssText = 'font-size: 12px;';
-	syncButton.title = 'Sync Index';
-	syncButton.setAttribute('aria-label', 'Sync Index');
+	syncButton.title = 'Sync index';
+	syncButton.setAttribute('aria-label', 'Sync index');
+	syncButton.setAttribute('tabindex', '0');
+	syncButton.setAttribute('role', 'button');
 
 	// Delete Index button
 	const deleteButtonContainer = DOM.append(rightButtonsRow2, DOM.$('div'));
@@ -588,8 +596,10 @@ export function renderIndexingDocsTab(
 
 	const deleteIcon = DOM.append(deleteButton, DOM.$('span.codicon.codicon-trash'));
 	deleteIcon.style.cssText = 'font-size: 12px;';
-	deleteButton.title = 'Delete Index';
-	deleteButton.setAttribute('aria-label', 'Delete Index');
+	deleteButton.title = 'Delete index';
+	deleteButton.setAttribute('aria-label', 'Delete index');
+	deleteButton.setAttribute('tabindex', '0');
+	deleteButton.setAttribute('role', 'button');
 
 
 	// Store last formatted timestamp to avoid recalculation on every update
@@ -1419,7 +1429,19 @@ export function renderIndexingDocsTab(
 	const docsTrailing = DOM.append(docsHeader, DOM.$('.cursor-settings-section-header-trailing-items'));
 	docsTrailing.style.cssText = 'flex-shrink: 0;';
 
-	createSecondaryButton(docsTrailing, 'Add Doc');
+	// Replace Add Doc text button with icon-only button + tooltip
+	const addDocBtn = createSecondaryButton(docsTrailing, '');
+	const addDocIcon = addDocBtn.querySelector('.codicon');
+	if (addDocIcon) {
+		addDocIcon.classList.remove('codicon-plus');
+		addDocIcon.classList.add('codicon-add');
+	}
+	const addDocLabel = addDocBtn.querySelector('span.truncate') as HTMLElement;
+	if (addDocLabel) addDocLabel.textContent = '';
+	addDocBtn.title = 'Add doc';
+	addDocBtn.setAttribute('aria-label', 'Add doc');
+	addDocBtn.setAttribute('tabindex', '0');
+	addDocBtn.setAttribute('role', 'button');
 
 	const docsSectionList = DOM.append(docsSection, DOM.$('.cursor-settings-section-list'));
 	docsSectionList.style.cssText = 'display: flex; flex-direction: column; gap: 12px;';
@@ -1446,12 +1468,12 @@ export function renderIndexingDocsTab(
 		border-top: 1px solid var(--vscode-panel-border, var(--vscode-widget-border, rgba(128, 128, 128, 0.2)));
 	`;
 
+	// Convert export diagnostics to icon+tooltip and remove label text
 	const diagnosticsLabel = DOM.append(diagnosticsContainer, DOM.$('span'));
-	diagnosticsLabel.textContent = 'Export Index Diagnostics (JSON)';
+	diagnosticsLabel.textContent = '';
 	diagnosticsLabel.style.cssText = 'font-size: 12px; color: var(--vscode-descriptionForeground, rgba(128, 128, 128, 0.8));';
 
 	const diagnosticsButton = DOM.append(diagnosticsContainer, DOM.$('div.cursor-button.cursor-button-tertiary.cursor-button-tertiary-clickable.cursor-button-small'));
-	diagnosticsButton.textContent = 'Export';
 	diagnosticsButton.style.cssText = `
 		user-select: none;
 		flex-shrink: 0;
@@ -1468,6 +1490,15 @@ export function renderIndexingDocsTab(
 		color: var(--vscode-foreground);
 		background: transparent;
 	`;
+	const diagnosticsIcon = DOM.append(diagnosticsButton, DOM.$('span.codicon codicon-save')) as HTMLElement;
+	if (diagnosticsIcon) {
+		diagnosticsIcon.className = 'codicon codicon-save';
+		diagnosticsIcon.style.cssText = 'font-size: 12px;';
+	}
+	diagnosticsButton.title = 'Export index diagnostics';
+	diagnosticsButton.setAttribute('aria-label', 'Export index diagnostics');
+	diagnosticsButton.setAttribute('tabindex', '0');
+	diagnosticsButton.setAttribute('role', 'button');
 
 	addDisposableListener(diagnosticsButton, EventType.CLICK, async () => {
 		if (!hasValidWorkspace || !indexingEnabled || !indexingWorkspace) {
