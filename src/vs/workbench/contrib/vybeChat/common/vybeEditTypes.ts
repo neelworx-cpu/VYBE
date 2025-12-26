@@ -70,10 +70,20 @@ export interface DiffArea {
 	readonly uri: URI;
 	/** All diffs in this area, keyed by diffId */
 	readonly diffs: Map<string, Diff>;
-	/** Immutable baseline snapshot at transaction start */
+	/** Immutable baseline snapshot at transaction start (full file) */
 	readonly originalSnapshot: string;
+	/** BLOCKER 1: Region-specific baseline for the diff area [startLine:endLine] */
+	originalCode: string;
 	/** Timestamp when this diff area was created */
 	readonly createdAt: number;
+	/** PHASE D2: Start line of the diff area in the current file model (1-indexed, mutable) */
+	startLine: number;
+	/** PHASE D2: End line of the diff area in the current file model (1-indexed, mutable) */
+	endLine: number;
+	/** BLOCKER 4: Whether this diff area is currently streaming */
+	isStreaming: boolean;
+	/** BLOCKER 4: Optional stream request ID for abort */
+	streamRequestId?: string;
 }
 
 /**
@@ -98,8 +108,30 @@ export interface DiffZone {
 }
 
 /**
+ * PHASE D5: Snapshot of a diff area for checkpoint restoration.
+ * BLOCKER 3: Extended to include full diff state for exact restoration.
+ */
+export interface DiffAreaSnapshot {
+	/** DiffArea identifier */
+	readonly diffAreaId: string;
+	/** File URI */
+	readonly uri: URI;
+	/** Baseline snapshot (full file) */
+	readonly originalSnapshot: string;
+	/** BLOCKER 3: Region baseline for the diff area */
+	readonly originalCode: string;
+	/** Start line in current file (1-indexed) */
+	readonly startLine: number;
+	/** End line in current file (1-indexed) */
+	readonly endLine: number;
+	/** BLOCKER 3: Full diff objects map (preserves diff IDs) */
+	readonly diffs: Map<string, Diff>;
+}
+
+/**
  * Snapshot for undo/redo across multiple files.
  * Enables checkpoint-based navigation through edit history.
+ * PHASE D5: Extended to include diff area state.
  */
 export interface Checkpoint {
 	/** Unique identifier for this checkpoint */
@@ -110,6 +142,8 @@ export interface Checkpoint {
 	readonly label: string;
 	/** File content snapshots at checkpoint time, keyed by URI */
 	readonly fileSnapshots: Map<URI, string>;
+	/** PHASE D5: Diff area snapshots at checkpoint time, keyed by diffAreaId */
+	readonly diffAreaSnapshots: Map<string, DiffAreaSnapshot>;
 	/** Creation timestamp */
 	readonly timestamp: number;
 	/** Optional description */

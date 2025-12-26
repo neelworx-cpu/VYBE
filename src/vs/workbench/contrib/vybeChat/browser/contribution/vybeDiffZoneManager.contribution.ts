@@ -5,32 +5,13 @@
 
 /**
  * VYBE DiffZone Manager Contribution
- * Initializes the diff zone manager as a workbench contribution.
+ * Registers the diff zone manager as a singleton service.
  */
 
-import { Disposable } from '../../../../../base/common/lifecycle.js';
-import { IWorkbenchContribution, WorkbenchPhase, registerWorkbenchContribution2 } from '../../../../../workbench/common/contributions.js';
-import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
+import { registerSingleton, InstantiationType } from '../../../../../platform/instantiation/common/extensions.js';
+import { IVybeDiffZoneManager } from '../../common/vybeDiffZoneManager.js';
 import { VybeDiffZoneManager } from '../vybeDiffZoneManager.js';
 
-/**
- * Workbench contribution that initializes the DiffZone manager.
- * This ensures the manager starts listening to editor lifecycle events.
- */
-export class VybeDiffZoneManagerContribution extends Disposable implements IWorkbenchContribution {
-	static readonly ID = 'vybeDiffZoneManager';
-
-	constructor(
-		@IInstantiationService instantiationService: IInstantiationService
-	) {
-		super();
-
-		// Create and register the zone manager
-		// It will automatically start listening to editor events
-		this._register(instantiationService.createInstance(VybeDiffZoneManager));
-	}
-}
-
-// Register the contribution
-registerWorkbenchContribution2(VybeDiffZoneManagerContribution.ID, VybeDiffZoneManagerContribution, WorkbenchPhase.AfterRestored);
+// Register as singleton service so VybeEditService can inject and call refreshDecorationsForUri directly
+registerSingleton(IVybeDiffZoneManager, VybeDiffZoneManager, InstantiationType.Delayed);
 

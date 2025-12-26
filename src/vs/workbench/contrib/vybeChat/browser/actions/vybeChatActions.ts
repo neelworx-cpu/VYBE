@@ -17,6 +17,10 @@ import { DisposableStore } from '../../../../../base/common/lifecycle.js';
 import { IWorkbenchLayoutService, Parts } from '../../../../services/layout/browser/layoutService.js';
 import { IThemeService } from '../../../../../platform/theme/common/themeService.js';
 import { ICommandService } from '../../../../../platform/commands/common/commands.js';
+import { testEditWidgets } from '../commands/testEditWidgetsCommand.js';
+import { simulateAiEdits } from '../commands/simulateAiEditsCommand.js';
+import { simulateAiStreamingEdits } from '../commands/simulateAiStreamingEditsCommand.js';
+import { Categories } from '../../../../../platform/action/common/actionCommonCategories.js';
 
 /**
  * Action to create a new chat session
@@ -328,5 +332,62 @@ registerAction2(class CloseVybeChatAction extends Action2 {
 		if (sessionId) {
 			await sessionsService.closeSession(sessionId);
 		}
+	}
+});
+
+/**
+ * Test command for Phase 4 UI widgets
+ * Creates a test edit transaction and computes diffs to trigger widget display
+ */
+registerAction2(class TestEditWidgetsAction extends Action2 {
+	constructor() {
+		super({
+			id: 'vybe.testEditWidgets',
+			title: localize2('vybe.testEditWidgets', "Test Edit Widgets"),
+			category: Categories.Developer,
+			f1: true, // Available in command palette
+		});
+	}
+
+	async run(accessor: ServicesAccessor): Promise<void> {
+		await testEditWidgets(accessor);
+	}
+});
+
+/**
+ * DEV-ONLY: Simulate AI-style code edits for E2E testing
+ * Creates realistic edit transactions with multiple diffs to test Phase 4 UI widgets
+ */
+registerAction2(class SimulateAiEditsAction extends Action2 {
+	constructor() {
+		super({
+			id: 'vybe.simulateAiEdits',
+			title: localize2('vybe.simulateAiEdits', "Simulate AI Edits (E2E Test)"),
+			category: Categories.Developer,
+			f1: true, // Available in command palette
+		});
+	}
+
+	async run(accessor: ServicesAccessor): Promise<void> {
+		await simulateAiEdits(accessor);
+	}
+});
+
+/**
+ * DEV-ONLY: Simulate streaming AI-style code edits for E2E testing
+ * Creates incremental streaming updates to test Phase 4 UI widgets with streaming diffs
+ */
+registerAction2(class SimulateAiStreamingEditsAction extends Action2 {
+	constructor() {
+		super({
+			id: 'vybe.simulateAiStreamingEdits',
+			title: localize2('vybe.simulateAiStreamingEdits', "Simulate Streaming AI Edits (E2E Test)"),
+			category: Categories.Developer,
+			f1: true, // Available in command palette
+		});
+	}
+
+	async run(accessor: ServicesAccessor): Promise<void> {
+		await simulateAiStreamingEdits(accessor);
 	}
 });

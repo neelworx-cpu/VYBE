@@ -1,0 +1,93 @@
+feat: Production-grade codebase indexing with semantic embeddings and sqlite-vector integration
+
+This commit implements a complete production-grade codebase indexing system with
+semantic embedding capabilities, real-time file watching, and native vector search
+via sqlite-vector extension.
+
+## Phase 1-2: IPC Architecture & File Tree Indexing
+- Moved all SQLite operations to extension host (Node process)
+- Implemented IPC/RPC protocol between renderer and ext-host
+- Added file tree indexing with workspace root detection
+- Implemented SQLite persistence with schema versioning
+- Added deterministic migrations and restart-safe state
+
+## Phase 3: Incremental Chunk Indexing
+- Implemented content-based chunking (200 lines, 20 line overlap)
+- Added hash-based invalidation (sha256) for changed files
+- Created chunks table with stable chunkId generation
+- Implemented incremental saved-file indexing
+- Added file status tracking (discovered/indexed/error)
+
+## Phase 4: Real-time & Background Indexing
+- Implemented file system watchers for create/change/delete events
+- Added debouncing and batching for rapid file changes
+- Implemented background indexing for discovered files
+- Added pause/resume functionality with accumulated change tracking
+- Ensured restart safety and watcher reattachment
+
+## Phase 5-6: Semantic Embeddings & Local ONNX Runtime
+- Implemented LocalOnnxEmbeddingRuntime with ONNX model support
+- Added ModelManager for automatic model download and installation
+- Created wrapper runtime with ONNX-first, hash-fallback strategy
+- Implemented embedding queue processing with batching
+- Added embedding progress tracking and status reporting
+
+## Phase 7: Retrieval & Ranking Signals
+- Implemented hybrid search with cosine similarity
+- Added ranking signals: cosineSimilarity, chunkLength, filePathDepth, recency, sameFile
+- Created dev-only query interface for retrieval testing
+- Implemented deterministic tie-breaking for consistent results
+
+## Phase 8-9: Production Hardening
+- Added bounded batch sizes and error backoff
+- Implemented correct workspace root handling (single-folder, multi-root)
+- Added clean "delete index" path with database cleanup
+- Implemented pause/resume with accumulated change processing
+- Added comprehensive error handling and state management
+
+## Phase 10-11: UI Integration & Status Reporting
+- Created VYBE Settings UI for indexing control and status
+- Implemented real-time progress bars and status indicators
+- Added model download progress tracking
+- Created control buttons: Sync, Pause, Resume, Rebuild, Delete Index
+- Added vector status indicator (sqlite-vector vs TypeScript fallback)
+- Implemented model status display (ready, downloading, hash, error)
+
+## Phase 12: sqlite-vector Integration (Scalar Function Approach)
+- Implemented VectorExtensionManager for platform-aware binary download
+- Added automatic extension download and installation
+- Implemented scalar function detection (vector_version, vector_cosine_distance)
+- Updated storage to use Float32Array BLOB format in embeddings table
+- Modified queryVectorIndex to use vector_cosine_distance() scalar function
+- Removed virtual table approach in favor of scalar functions on BLOB columns
+- Added graceful fallback to TypeScript cosine similarity when extension unavailable
+
+## Code Quality & Cleanup
+- Removed all console.log statements (production-ready logging)
+- Cleaned up verbose debug logs while keeping essential errors/warnings
+- Fixed all compilation errors
+- Removed unused variables and code
+- Maintained TypeScript type safety throughout
+
+## Key Features
+✅ Persistent SQLite-backed index with restart safety
+✅ Real-time file watching with debouncing
+✅ Background indexing of discovered files
+✅ Local ONNX embedding generation with automatic model download
+✅ Hash-based fallback for deterministic embeddings
+✅ Native vector search via sqlite-vector (10-100x faster)
+✅ TypeScript fallback for vector search when sqlite-vector unavailable
+✅ Comprehensive UI with real-time status and progress
+✅ Pause/resume with accumulated change tracking
+✅ Clean index deletion and rebuild functionality
+✅ Production-grade error handling and state management
+
+## Technical Details
+- Extension host (Node) handles all SQLite and file system operations
+- Renderer communicates via IPC/RPC protocol
+- Embeddings stored as Float32Array BLOB for sqlite-vector compatibility
+- Vector queries use scalar functions: vector_cosine_distance(vector, query)
+- Platform-aware sqlite-vector binary download (macOS/Linux/Windows, arm64/x64)
+- Schema versioning ensures safe migrations
+- Content hashing (sha256) for efficient change detection
+

@@ -202,6 +202,14 @@ export interface IVybeEditService {
 	 * @returns File edit summary if the file has edits, undefined otherwise
 	 */
 	getEditedFile(uri: URI): VybeEditedFileSummary | undefined;
+
+	/**
+	 * PHASE D1: Checks if a system write is currently in progress.
+	 * System writes (accept/reject) should not trigger recomputation.
+	 *
+	 * @returns true if a system write is in progress, false otherwise
+	 */
+	isSystemWrite(): boolean;
 }
 
 /**

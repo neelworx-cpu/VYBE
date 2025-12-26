@@ -1,0 +1,560 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* VYBE File Command Bar - File-level Keep/Undo/Review buttons */
+
+/* Root Container */
+.aiFullFilePromptBarWidget {
+	bottom: 12px;
+	box-sizing: border-box;
+	color: rgba(20, 20, 20, 0.92);
+	display: block;
+	font-family: -apple-system, "system-ui", sans-serif;
+	font-size: 13px;
+	forced-color-adjust: none;
+	height: 40px;
+	justify-content: center;
+	line-height: 18.2px;
+	opacity: 1;
+	overflow-wrap: normal;
+	pointer-events: none;
+	position: absolute;
+	text-size-adjust: 100%;
+	text-wrap-mode: wrap;
+	transform: matrix(1, 0, 0, 1, 0, 0);
+	transition: transform 0.2s ease;
+	unicode-bidi: isolate;
+	user-select: none;
+	visibility: visible;
+	white-space-collapse: collapse;
+	width: 100%;
+	z-index: 10;
+}
+
+/* Outer Wrapper (First Level) */
+.aiFullFilePromptBarWidget > div {
+	align-items: center;
+	box-sizing: border-box;
+	color: rgba(20, 20, 20, 0.92);
+	display: flex;
+	font-family: -apple-system, "system-ui", sans-serif;
+	font-size: 13px;
+	forced-color-adjust: none;
+	height: 40px;
+	justify-content: center;
+	line-height: 18.2px;
+	opacity: 1;
+	overflow-wrap: normal;
+	pointer-events: none;
+	position: relative;
+	text-size-adjust: 100%;
+	text-wrap-mode: wrap;
+	unicode-bidi: isolate;
+	user-select: none;
+	visibility: visible;
+	white-space-collapse: collapse;
+	width: 100%;
+	z-index: 2530;
+}
+
+/* Inner Wrapper (Second Level) */
+.aiFullFilePromptBarWidget > div > div {
+	color: rgba(20, 20, 20, 0.92);
+	display: block;
+	font-family: -apple-system, "system-ui", sans-serif;
+	font-size: 13px;
+	forced-color-adjust: none;
+	height: 40px;
+	line-height: 18.2px;
+	overflow-wrap: normal;
+	pointer-events: none;
+	text-size-adjust: 100%;
+	text-wrap-mode: wrap;
+	unicode-bidi: isolate;
+	user-select: none;
+	visibility: visible;
+	white-space-collapse: collapse;
+	width: 100%;
+}
+
+/* Main Prompt Bar Container */
+.pure-ai-prompt-bar {
+	align-items: center;
+	color: var(--vscode-foreground, #000000);
+	column-gap: 6px;
+	display: flex;
+	font-family: var(--vscode-font-family);
+	font-size: 12px;
+	forced-color-adjust: none;
+	height: 32px;
+	justify-content: center;
+	line-height: 20px;
+	margin-bottom: 0;
+	overflow-wrap: normal;
+	pointer-events: none;
+	row-gap: 6px;
+	text-size-adjust: 100%;
+	text-wrap-mode: wrap;
+	unicode-bidi: isolate;
+	user-select: none;
+	visibility: visible;
+	white-space-collapse: collapse;
+	width: 100%;
+}
+
+/* Inner Flex Container (Button Bar - First Container) */
+.pure-ai-prompt-bar.flex.items-center.gap-\[40px\] {
+	align-items: center;
+	background-color: var(--vscode-activityBar-background, #2C2C2C);
+	border: 1px solid var(--vscode-contrastBorder, rgba(128, 128, 128, 0.2));
+	border-radius: 6px;
+	box-shadow: var(--vscode-widget-shadow, 0 2px 8px rgba(0, 0, 0, 0.1));
+	color: var(--vscode-foreground, #000000);
+	column-gap: 20px;
+	display: flex;
+	flex-direction: row;
+	font-family: var(--vscode-font-family);
+	font-size: 12px;
+	forced-color-adjust: none;
+	height: 20px;
+	justify-content: center;
+	line-height: 20px;
+	min-width: fit-content;
+	overflow-wrap: normal;
+	padding: 6px;
+	pointer-events: auto;
+	row-gap: 20px;
+	text-size-adjust: 100%;
+	text-wrap-mode: wrap;
+	unicode-bidi: isolate;
+	user-select: none;
+	visibility: visible;
+	white-space-collapse: collapse;
+	width: auto;
+}
+
+/* Navigation Controls Container (Diff Counter) */
+.flex.items-center.gap-1.ml-0\.5.min-w-\[72px\] {
+	align-items: center;
+	color: var(--vscode-foreground, #000000);
+	column-gap: 4px;
+	display: flex;
+	font-family: var(--vscode-font-family);
+	font-size: 12px;
+	forced-color-adjust: none;
+	height: 20px;
+	line-height: 20px;
+	margin-left: 2px;
+	min-width: 72px;
+	opacity: 1;
+	outline: none;
+	overflow-wrap: normal;
+	pointer-events: auto;
+	row-gap: 4px;
+	text-size-adjust: 100%;
+	text-wrap-mode: wrap;
+	unicode-bidi: isolate;
+	user-select: none;
+	visibility: visible;
+	white-space-collapse: collapse;
+	width: auto;
+}
+
+/* Icon Button Base */
+.anysphere-icon-button {
+	align-items: center;
+	background-color: transparent;
+	border: none;
+	color: var(--vscode-foreground, #000000);
+	cursor: pointer;
+	display: flex;
+	font-family: var(--vscode-font-family);
+	font-size: 12px;
+	forced-color-adjust: none;
+	height: 20px;
+	justify-content: center;
+	line-height: 20px;
+	opacity: 0.7;
+	outline: none;
+	overflow-wrap: normal;
+	pointer-events: auto;
+	text-size-adjust: 100%;
+	text-wrap-mode: wrap;
+	transition: opacity 0.2s ease;
+	unicode-bidi: isolate;
+	user-select: none;
+	visibility: visible;
+	white-space-collapse: collapse;
+	width: 20px;
+}
+
+/* Icon Button Content (Codicon) */
+.anysphere-icon-button .codicon {
+	color: rgba(20, 20, 20, 0.92);
+	cursor: pointer;
+	display: block;
+	font-family: codicon;
+	font-size: 16px;
+	height: 16px;
+	line-height: 16px;
+	pointer-events: auto;
+	text-align: center;
+	user-select: none;
+	visibility: visible;
+	width: 16px;
+	-webkit-font-smoothing: antialiased;
+}
+
+/* Diff Counter Text */
+.flex.items-center.gap-1 .opacity-60 {
+	color: var(--vscode-foreground, #000000);
+	cursor: pointer;
+	display: block;
+	font-family: var(--vscode-font-family);
+	font-feature-settings: "tnum";
+	font-size: 12px;
+	font-variant-numeric: tabular-nums;
+	forced-color-adjust: none;
+	height: auto;
+	line-height: 20px;
+	opacity: 0.8;
+	overflow-wrap: normal;
+	pointer-events: auto;
+	text-align: center;
+	text-size-adjust: 100%;
+	text-wrap-mode: nowrap;
+	unicode-bidi: isolate;
+	user-select: none;
+	visibility: visible;
+	white-space-collapse: collapse;
+	width: auto;
+}
+
+/* Actions Container */
+.diff-review-trailing-actions {
+	align-items: center;
+	color: var(--vscode-foreground, #000000);
+	column-gap: 6px;
+	display: flex;
+	flex-basis: auto;
+	flex-grow: 0;
+	flex-shrink: 0;
+	font-family: var(--vscode-font-family);
+	font-size: 12px;
+	forced-color-adjust: none;
+	height: 20px;
+	line-height: 20px;
+	opacity: 1;
+	overflow-wrap: normal;
+	pointer-events: auto;
+	row-gap: 6px;
+	text-size-adjust: 100%;
+	text-wrap-mode: wrap;
+	unicode-bidi: isolate;
+	user-select: none;
+	visibility: visible;
+	white-space-collapse: collapse;
+	width: auto;
+}
+
+/* Primary Actions Container */
+.diff-review-primary-actions {
+	align-items: center;
+	color: var(--vscode-foreground, #000000);
+	column-gap: 8px;
+	display: flex;
+	flex-shrink: 0;
+	font-family: var(--vscode-font-family);
+	font-size: 12px;
+	forced-color-adjust: none;
+	height: 20px;
+	line-height: 20px;
+	opacity: 1;
+	overflow-wrap: normal;
+	pointer-events: auto;
+	row-gap: 8px;
+	text-size-adjust: 100%;
+	text-wrap-mode: wrap;
+	unicode-bidi: isolate;
+	user-select: none;
+	visibility: visible;
+	white-space-collapse: collapse;
+	width: auto;
+}
+
+/* Outline Button (Undo All) */
+.anysphere-outline-button {
+	align-items: center;
+	background-color: var(--vscode-button-secondaryBackground, transparent);
+	border-radius: 4px;
+	border: 1px solid var(--vscode-button-border, var(--vscode-contrastBorder, rgba(128, 128, 128, 0.3)));
+	box-sizing: border-box;
+	color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+	column-gap: 4px;
+	cursor: pointer;
+	display: flex;
+	flex-shrink: 0;
+	flex-wrap: nowrap;
+	font-family: var(--vscode-font-family);
+	font-size: 12px;
+	font-weight: 400;
+	forced-color-adjust: none;
+	height: 20px;
+	justify-content: center;
+	line-height: 16px;
+	min-height: 20px;
+	opacity: 1;
+	overflow-wrap: normal;
+	padding: 2px 4px;
+	pointer-events: auto;
+	position: relative;
+	row-gap: 4px;
+	text-size-adjust: 100%;
+	text-wrap-mode: nowrap;
+	transition: background-color 0.1s ease, border-color 0.1s ease, opacity 0.1s ease;
+	unicode-bidi: isolate;
+	user-select: none;
+	visibility: visible;
+	white-space-collapse: collapse;
+	width: auto;
+}
+
+/* Primary Button (Keep All) */
+.anysphere-button {
+	align-items: center;
+	background-color: var(--vscode-button-background, #007acc);
+	border-radius: 4px;
+	border: none;
+	box-sizing: border-box;
+	color: var(--vscode-button-foreground, #ffffff);
+	column-gap: 4px;
+	cursor: pointer;
+	display: flex;
+	flex-shrink: 0;
+	flex-wrap: nowrap;
+	font-family: var(--vscode-font-family);
+	font-size: 12px;
+	font-weight: 400;
+	forced-color-adjust: none;
+	height: 20px;
+	justify-content: center;
+	line-height: 16px;
+	min-height: 20px;
+	opacity: 1;
+	overflow-wrap: normal;
+	padding: 2px 4px;
+	pointer-events: auto;
+	position: relative;
+	row-gap: 4px;
+	text-size-adjust: 100%;
+	text-wrap-mode: nowrap;
+	transition: background-color 0.1s ease, opacity 0.1s ease;
+	unicode-bidi: isolate;
+	user-select: none;
+	visibility: visible;
+	white-space-collapse: collapse;
+	width: auto;
+}
+
+/* Button Content Span */
+.anysphere-button > span,
+.anysphere-outline-button > span {
+	align-items: baseline;
+	color: inherit;
+	column-gap: 2px;
+	cursor: pointer;
+	display: flex;
+	font-family: inherit;
+	font-size: inherit;
+	height: auto;
+	line-height: inherit;
+	min-width: 0px;
+	overflow-wrap: normal;
+	overflow-x: hidden;
+	overflow-y: hidden;
+	pointer-events: auto;
+	row-gap: 2px;
+	text-size-adjust: 100%;
+	text-wrap-mode: nowrap;
+	user-select: none;
+	visibility: visible;
+	white-space-collapse: collapse;
+	width: auto;
+}
+
+/* Button Text (Truncate) */
+.anysphere-button .truncate,
+.anysphere-outline-button .truncate {
+	color: inherit;
+	cursor: pointer;
+	display: block;
+	font-family: inherit;
+	font-size: inherit;
+	height: auto;
+	line-height: inherit;
+	overflow-wrap: normal;
+	overflow-x: hidden;
+	overflow-y: hidden;
+	pointer-events: auto;
+	text-overflow: ellipsis;
+	text-size-adjust: 100%;
+	text-wrap-mode: nowrap;
+	user-select: none;
+	visibility: visible;
+	white-space-collapse: collapse;
+	width: auto;
+}
+
+/* Keyboard Shortcut Text - Inherit button text color */
+.keybinding-font-settings {
+	color: inherit;
+	cursor: pointer;
+	display: inline-block;
+	flex-shrink: 0;
+	font-family: var(--vscode-font-family);
+	font-feature-settings: "cv05";
+	font-size: 10px;
+	forced-color-adjust: none;
+	height: auto;
+	line-height: 13px;
+	margin-left: 2px;
+	opacity: 0.7;
+	overflow-wrap: normal;
+	pointer-events: auto;
+	text-size-adjust: 100%;
+	text-wrap-mode: nowrap;
+	user-select: none;
+	visibility: visible;
+	white-space-collapse: collapse;
+	width: auto;
+}
+
+/* File Navigation Container (File Counter - Second Container) */
+.aiFullFilePromptBarWidget > div > div > div > div:last-child {
+	align-items: center;
+	background-color: var(--vscode-activityBar-background, #2C2C2C);
+	border: 1px solid var(--vscode-contrastBorder, rgba(128, 128, 128, 0.2));
+	border-radius: 6px;
+	box-shadow: var(--vscode-widget-shadow, 0 2px 8px rgba(0, 0, 0, 0.1));
+	color: var(--vscode-foreground, #000000);
+	column-gap: 4px;
+	display: flex;
+	flex-direction: row;
+	font-family: var(--vscode-font-family);
+	font-size: 12px;
+	forced-color-adjust: none;
+	height: 20px;
+	justify-content: center;
+	line-height: 20px;
+	min-width: fit-content;
+	overflow-wrap: normal;
+	padding: 6px;
+	pointer-events: auto;
+	row-gap: 4px;
+	text-size-adjust: 100%;
+	text-wrap-mode: wrap;
+	unicode-bidi: isolate;
+	user-select: none;
+	visibility: visible;
+	white-space-collapse: collapse;
+	width: auto;
+	/* Ensure vertical alignment matches first container */
+	vertical-align: middle;
+}
+
+/* File Navigation Icon Buttons */
+.aiFullFilePromptBarWidget > div > div > div > div:last-child .anysphere-icon-button {
+	align-items: center;
+	background-color: rgba(0, 0, 0, 0);
+	border: none;
+	color: rgba(20, 20, 20, 0.92);
+	cursor: pointer;
+	display: flex;
+	font-family: -apple-system, "system-ui", sans-serif;
+	font-size: 13px;
+	forced-color-adjust: none;
+	height: 20px;
+	justify-content: center;
+	line-height: 18.2px;
+	opacity: 0.7;
+	outline: none;
+	overflow-wrap: normal;
+	pointer-events: auto;
+	text-size-adjust: 100%;
+	text-wrap-mode: wrap;
+	transition: opacity 0.2s ease;
+	unicode-bidi: isolate;
+	user-select: none;
+	visibility: visible;
+	white-space-collapse: collapse;
+	width: 20px;
+}
+
+/* File Counter Text */
+.aiFullFilePromptBarWidget > div > div > div > div:last-child .opacity-60 {
+	color: rgba(20, 20, 20, 0.92);
+	cursor: pointer;
+	display: block;
+	font-family: -apple-system, "system-ui", sans-serif;
+	font-feature-settings: "tnum";
+	font-size: 12px;
+	font-variant-numeric: tabular-nums;
+	forced-color-adjust: none;
+	height: 18.2031px;
+	line-height: 18.2px;
+	opacity: 0.7;
+	overflow-wrap: normal;
+	pointer-events: auto;
+	text-align: center;
+	text-size-adjust: 100%;
+	text-wrap-mode: nowrap;
+	transition: opacity 0.2s ease;
+	unicode-bidi: isolate;
+	user-select: none;
+	visibility: visible;
+	white-space-collapse: collapse;
+	width: auto;
+}
+
+/* Generic Opacity Classes */
+.opacity-60 {
+	opacity: 0.7;
+}
+
+.opacity-40 {
+	opacity: 0.7;
+}
+
+.opacity-50 {
+	opacity: 0.5;
+}
+
+/* Hover States */
+.anysphere-icon-button:hover {
+	opacity: 1;
+}
+
+.anysphere-button:hover {
+	background-color: var(--vscode-button-hoverBackground, #005a9e);
+	opacity: 1;
+}
+
+.anysphere-outline-button:hover {
+	background-color: var(--vscode-button-secondaryHoverBackground, rgba(128, 128, 128, 0.1));
+	border-color: var(--vscode-button-border, var(--vscode-contrastBorder, rgba(128, 128, 128, 0.4)));
+	opacity: 1;
+}
+
+/* Active States */
+.anysphere-button:active {
+	background-color: var(--vscode-button-hoverBackground, #005a9e);
+	opacity: 0.9;
+}
+
+.anysphere-outline-button:active {
+	background-color: var(--vscode-button-secondaryHoverBackground, rgba(128, 128, 128, 0.15));
+	opacity: 0.9;
+}
+

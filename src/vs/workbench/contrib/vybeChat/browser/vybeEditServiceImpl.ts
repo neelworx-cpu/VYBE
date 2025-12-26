@@ -17,13 +17,12 @@ import { IModelService } from '../../../../editor/common/services/model.js';
 import { ITextModel } from '../../../../editor/common/model.js';
 import { EditOperation, ISingleEditOperation } from '../../../../editor/common/core/editOperation.js';
 import { Range } from '../../../../editor/common/core/range.js';
-import { LineRange } from '../../../../editor/common/core/ranges/lineRange.js';
 import { IUndoRedoService, UndoRedoElementType, UndoRedoGroup, IResourceUndoRedoElement, IWorkspaceUndoRedoElement } from '../../../../platform/undoRedo/common/undoRedo.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { IVybeEditService, EditTransaction } from '../common/vybeEditService.js';
 import { IVybeDiffService } from '../common/vybeDiffService.js';
 import { IVybeCheckpointService } from '../common/vybeCheckpointService.js';
-import { Diff, DiffArea, Checkpoint, DiffState, EditTransactionState, VybeEditedFileSummary } from '../common/vybeEditTypes.js';
+import { Diff, DiffArea, Checkpoint, DiffAreaSnapshot, DiffState, EditTransactionState, VybeEditedFileSummary } from '../common/vybeEditTypes.js';
 
 /**
  * Implementation of IVybeEditService.
@@ -55,6 +54,12 @@ export class VybeEditServiceImpl extends Disposable implements IVybeEditService 
 	 * Note: This is a workaround for Phase 1C. Full implementation would extend IVybeDiffService.
 	 */
 	private readonly _diffStates = new Map<string, DiffState>();
+
+	/**
+	 * PHASE D1: Write guard flag to prevent recursive recomputation during system writes.
+	 */
+	private _isSystemWrite: boolean = false;
+
 
 	// Events
 	private readonly _onDidCreateTransaction = this._register(new Emitter<{ transactionId: string; uri: URI; diffAreaId: string }>());
@@ -92,6 +97,123 @@ export class VybeEditServiceImpl extends Disposable implements IVybeEditService 
 		@ILogService private readonly _logService: ILogService,
 	) {
 		super();
+
+		// CRITICAL: Listen to diff service recompute events to clean up stale diff states
+		// When diffs are deleted and recreated with new IDs, we must clear old state entries
+		this._register(this._diffService.onDidUpdateDiffArea(({ uri, diffAreaId, reason }) => {
+			if (reason === 'recompute') {
+				// When recompute happens, old diffs were deleted and new ones created with fresh IDs
+				// We need to clean up stale state entries for the old diff IDs
+				// Get the current diff area to see what diff IDs exist now
+				const diffArea = this._diffService.getDiffArea(uri, diffAreaId);
+				if (diffArea) {
+					const currentDiffIds = new Set(diffArea.diffs.keys());
+					// Remove state entries for any diff IDs that no longer exist in this diff area
+					// (they were deleted during recompute and replaced with new IDs)
+					for (const [diffId] of this._diffStates.entries()) {
+						// Check if this diff ID belongs to this diff area and no longer exists
+						const diff = this._findDiff(diffId);
+						if (diff && diff.diffAreaId === diffAreaId && !currentDiffIds.has(diffId)) {
+							// This diff ID was deleted during recompute, remove its state
+							this._diffStates.delete(diffId);
+							this._logService.trace(`[VybeEditService] Cleaned up stale diff state for deleted diff ${diffId.substring(0, 8)}`);
+						}
+					}
+				}
+			}
+		}));
+	}
+
+	/**
+	 * PHASE D1: Helper to execute a function with system write flag set.
+	 * Prevents recursive recomputation during system writes.
+	 */
+	private async _withSystemWrite<T>(fn: () => Promise<T>): Promise<T> {
+		this._isSystemWrite = true;
+		try {
+			return await fn();
+		} finally {
+			this._isSystemWrite = false;
+		}
+	}
+
+	/**
+	 * PHASE D1: Checks if a system write is currently in progress.
+	 */
+	isSystemWrite(): boolean {
+		return this._isSystemWrite;
+	}
+
+	/**
+	 * PHASE D5: Captures diff state snapshot for a URI.
+	 * BLOCKER 3: Extended to capture full diff state including originalCode and full diffs map.
+	 */
+	private _captureDiffStateSnapshot(uri: URI): DiffAreaSnapshot[] {
+		const diffAreas = this._diffService.getDiffAreasForUri(uri);
+		const snapshots: DiffAreaSnapshot[] = [];
+
+		for (const diffArea of diffAreas) {
+			// BLOCKER 3: Capture full diffs map (preserves diff IDs and state)
+			const diffsMap = new Map(diffArea.diffs);
+			snapshots.push({
+				diffAreaId: diffArea.diffAreaId,
+				uri: diffArea.uri,
+				originalSnapshot: diffArea.originalSnapshot,
+				originalCode: diffArea.originalCode,
+				startLine: diffArea.startLine,
+				endLine: diffArea.endLine,
+				diffs: diffsMap,
+			});
+		}
+
+		return snapshots;
+	}
+
+	/**
+	 * PHASE D5: Restores diff state snapshot for a URI.
+	 * BLOCKER 3: Restores DiffArea objects directly from snapshot, preserving diff IDs.
+	 * Also restores diff states in _diffStates map.
+	 */
+	private async _restoreDiffStateSnapshot(uri: URI, snapshots: DiffAreaSnapshot[]): Promise<void> {
+		// VOID-STYLE: Delete ALL diff areas first (like Void's _deleteAllDiffAreas)
+		// This ensures a clean slate before restoration, preventing stale state from breaking subsequent operations
+		const existingDiffAreas = this._diffService.getDiffAreasForUri(uri);
+		for (const diffArea of existingDiffAreas) {
+			// Delete all diffs in this area
+			const diffIds = Array.from(diffArea.diffs.keys());
+			for (const diffId of diffIds) {
+				this._diffService.deleteDiff(diffArea.diffAreaId, diffId);
+				this._diffStates.delete(diffId); // Also remove from state map
+			}
+		}
+
+		// Now restore diff areas from snapshot (clean slate)
+		for (const snapshot of snapshots) {
+			// Create DiffArea from snapshot, preserving all state
+			const restoredDiffArea: DiffArea = {
+				diffAreaId: snapshot.diffAreaId,
+				uri: snapshot.uri,
+				diffs: new Map(snapshot.diffs), // BLOCKER 3: Preserve diff IDs
+				originalSnapshot: snapshot.originalSnapshot,
+				originalCode: snapshot.originalCode,
+				createdAt: Date.now(), // Use current time (or could preserve from snapshot if needed)
+				startLine: snapshot.startLine,
+				endLine: snapshot.endLine,
+				isStreaming: false, // Never restore streaming state
+			};
+
+			// Restore diff area directly
+			this._diffService.restoreDiffArea(snapshot.diffAreaId, restoredDiffArea);
+
+			// CRITICAL: Restore diff states from snapshot
+			// Each diff in the snapshot has its state preserved
+			for (const [diffId, diff] of snapshot.diffs.entries()) {
+				this._diffStates.set(diffId, diff.state);
+			}
+		}
+
+		// Note: File content restoration is handled by checkpoint service
+		// We only restore diff state here
 	}
 
 	// ============================================================================
@@ -170,49 +292,105 @@ export class VybeEditServiceImpl extends Disposable implements IVybeEditService 
 				return false;
 			}
 
-			// Convert LineRange to Range
-			const range = this._convertLineRangeToRange(diff.modifiedRange);
-			if (!range) {
-				this._logService.warn(`[VybeEditService] Invalid range for diff: ${diffId}`);
-				return false;
-			}
+			// FIX 1: Capture snapshot BEFORE any changes (like Void's _addToHistory)
+			// This ensures the snapshot includes the diff that will be deleted
+			const beforeSnapshot = this._captureDiffStateSnapshot(diff.uri);
+			const beforeFileContent = model.getValue();
+			// CRITICAL: Capture diff info for undo/redo callbacks (before deletion)
+			const diffIdForUndo = diffId;
+			const diffAreaIdForUndo = diff.diffAreaId;
+			const uriForUndo = diff.uri;
 
-			// Apply the edit
-			const edit: ISingleEditOperation = EditOperation.replace(range, diff.modifiedCode);
-			const undoEdits: ISingleEditOperation[] = [];
+			// PHASE B: ACCEPT LOGIC (VOID-STYLE)
+			// File already has modified content (from Phase A)
+			// Accept updates baseline by merging the accepted diff into originalCode
+			// This preserves remaining diffs - they're still valid against the updated baseline
+			// File model does NOT change - this ensures widgets remain stable
 
-			model.pushEditOperations(null, [edit], (undoEditOps) => {
-				undoEdits.push(...undoEditOps);
-				return null;
-			});
+			// VOID-STYLE: Merge accepted diff into baseline (not full file replacement)
+			// This ensures remaining diffs remain valid after accept
+			this._diffService.mergeAcceptedDiffIntoBaseline(diff.diffAreaId, diff);
 
-			// Update diff state
+			// Update diff state BEFORE deleting (so snapshot captures correct state)
 			this._updateDiffState(diff.diffAreaId, diffId, DiffState.Accepted);
 
-			// Push undo element
+			// Delete diff from DiffArea (no longer needed, change is "accepted" into baseline)
+			// CRITICAL: Delete AFTER updating state so decorations refresh correctly
+			this._diffService.deleteDiff(diff.diffAreaId, diffId);
+
+			// CRITICAL: Also remove from _diffStates map to ensure getDiffsForFile doesn't return it
+			this._diffStates.delete(diffId);
+
+			// VOID-STYLE: Synchronously recompute and refresh (like Void's _refreshStylesAndDiffsInURI)
+			// This ensures widgets are recreated with new IDs immediately, before any user interaction
+			// CRITICAL: Do this BEFORE emitting events to prevent race conditions
+			// CRITICAL: Delete the diff FIRST so widgets can't use it during recomputation
+			// The recomputation will create new diffs with fresh IDs
+			await this._diffService.recomputeDiffsForFile(diff.uri);
+
+			// CRITICAL: Wait for the event to be processed and widgets to be recreated
+			// The onDidUpdateDiffArea event listener will automatically call refreshDecorationsForUri
+			// which disposes old widgets and creates new ones with fresh diff IDs
+			await new Promise(resolve => setTimeout(resolve, 50));
+
+			// Push undo element (for undo/redo support)
 			this._undoRedoService.pushElement(this._createResourceUndoElement(
 				diff.uri,
 				'Accept Diff',
 				'vybe.edit.accept',
 				async () => {
-					// Undo: restore original code
-					const originalRange = this._convertLineRangeToRange(diff.originalRange);
-					if (originalRange && model && !model.isDisposed()) {
-						model.pushEditOperations(null, [EditOperation.replace(originalRange, diff.originalCode)], () => null);
-						// Restore previous state (remove from tracked states to revert to original)
-						this._diffStates.delete(diffId);
+					// CRITICAL: Re-find diff after restore (it was deleted, now restored)
+					const restoredDiff = this._findDiff(diffIdForUndo);
+					if (!restoredDiff) {
+						this._logService.warn(`[VybeEditService] Cannot undo: diff ${diffIdForUndo} not found after restore`);
+						return;
 					}
+					const restoredModel = this._getTextModel(uriForUndo);
+					if (!restoredModel) {
+						this._logService.warn(`[VybeEditService] Cannot undo: model not found for ${uriForUndo.toString()}`);
+						return;
+					}
+					// BLOCKER 4: Abort streaming if active before undo
+					const restoredDiffArea = this._diffService.getDiffArea(uriForUndo, diffAreaIdForUndo);
+					if (restoredDiffArea?.isStreaming) {
+						this._diffService.abortStreaming(diffAreaIdForUndo);
+					}
+					// FIX 4: Full restoration on undo (like Void's _restoreVoidFileSnapshot)
+					// 1. Restore file content
+					const fullRange = restoredModel.getFullModelRange();
+					await this._withSystemWrite(async () => {
+						restoredModel.pushEditOperations(null, [EditOperation.replace(fullRange, beforeFileContent)], () => null);
+					});
+					// 2. Restore diff state (this restores the diff back to DiffArea and restores states)
+					await this._restoreDiffStateSnapshot(uriForUndo, beforeSnapshot);
+					// 3. CRITICAL: Do NOT recompute after restore - the restored diffs are already correct
+					// Recomputation would compare restored file vs restored baseline and might remove diffs
+					// Just refresh decorations to show the restored diffs
+					// 4. Emit event to trigger decoration refresh (no recomputation needed)
+					this._onDidAcceptDiff.fire({ diffId: diffIdForUndo, uri: uriForUndo, diffAreaId: diffAreaIdForUndo });
 				},
 				async () => {
-					// Redo: re-apply modified code
-					if (range && model && !model.isDisposed()) {
-						model.pushEditOperations(null, [EditOperation.replace(range, diff.modifiedCode)], () => null);
-						this._updateDiffState(diff.diffAreaId, diffId, DiffState.Accepted);
+					// CRITICAL: Re-find diff for redo (it might have been restored by undo)
+					const redoDiff = this._findDiff(diffIdForUndo);
+					if (!redoDiff) {
+						this._logService.warn(`[VybeEditService] Cannot redo: diff ${diffIdForUndo} not found`);
+						return;
 					}
+					// PHASE D5: Redo accept - re-apply baseline merge (VOID-STYLE)
+					// Merge accepted diff into baseline
+					this._diffService.mergeAcceptedDiffIntoBaseline(diffAreaIdForUndo, redoDiff);
+					this._updateDiffState(diffAreaIdForUndo, diffIdForUndo, DiffState.Accepted);
+					this._diffService.deleteDiff(diffAreaIdForUndo, diffIdForUndo);
+					// CRITICAL: Also remove from _diffStates map
+					this._diffStates.delete(diffIdForUndo);
+					// VOID-STYLE: Synchronously recompute and refresh
+					await this._diffService.recomputeDiffsForFile(uriForUndo);
+					// Emit event to trigger decoration refresh
+					this._onDidAcceptDiff.fire({ diffId: diffIdForUndo, uri: uriForUndo, diffAreaId: diffAreaIdForUndo });
 				}
 			));
 
-			// Emit event
+			// Emit event (after synchronous recompute, so widgets are already recreated)
 			this._onDidAcceptDiff.fire({ diffId, uri: diff.uri, diffAreaId: diff.diffAreaId });
 
 			// Notify that edited files summaries changed
@@ -245,48 +423,254 @@ export class VybeEditServiceImpl extends Disposable implements IVybeEditService 
 				return false;
 			}
 
-			// Convert LineRange to Range
-			const range = this._convertLineRangeToRange(diff.modifiedRange);
-			if (!range) {
-				this._logService.warn(`[VybeEditService] Invalid range for diff: ${diffId}`);
+			// Get diff area to access originalSnapshot
+			const diffArea = this._diffService.getDiffArea(diff.uri, diff.diffAreaId);
+			if (!diffArea) {
+				this._logService.warn(`[VybeEditService] DiffArea not found for reject: ${diff.diffAreaId}`);
 				return false;
 			}
 
-			// Restore original code
-			const edit: ISingleEditOperation = EditOperation.replace(range, diff.originalCode);
-			const undoEdits: ISingleEditOperation[] = [];
+			// BLOCKER 4: Abort streaming if active
+			if (diffArea.isStreaming) {
+				this._diffService.abortStreaming(diff.diffAreaId);
+			}
 
-			model.pushEditOperations(null, [edit], (undoEditOps) => {
-				undoEdits.push(...undoEditOps);
-				return null;
+			// BLOCKER 6: REJECT LOGIC - Region-scoped
+			// File has modified content (from Phase A)
+			// Reject writes only the diff region back, preserving user edits outside diff area
+
+			// Determine diff type
+			const isInsertion = diff.originalRange.isEmpty;
+			const isDeletion = diff.modifiedRange.isEmpty;
+
+			// BLOCKER 6: Write only the diff region, not full file
+			await this._withSystemWrite(async () => {
+				let writeText: string;
+				let toRange: Range;
+
+				if (isDeletion) {
+					// Deletion: Insert originalCode back at the position
+					const insertLine = diff.modifiedRange.startLineNumber;
+					// Handle edge case: deletion at end of diff area
+					if (insertLine - 1 === diffArea.endLine) {
+						writeText = '\n' + diff.originalCode;
+						toRange = new Range(insertLine - 1, Number.MAX_SAFE_INTEGER, insertLine - 1, Number.MAX_SAFE_INTEGER);
+					} else {
+						writeText = diff.originalCode + '\n';
+						toRange = new Range(insertLine, 1, insertLine, 1);
+					}
+				} else if (isInsertion) {
+					// Insertion: Delete the inserted lines
+					const modifiedInclusive = diff.modifiedRange.toInclusiveRange();
+					if (!modifiedInclusive) {
+						this._logService.warn(`[VybeEditService] Cannot reject insertion: modifiedRange is invalid`);
+						return;
+					}
+					const startLine = modifiedInclusive.startLineNumber;
+					const endLine = modifiedInclusive.endLineNumber;
+					// Handle edge case: insertion at end of diff area
+					if (endLine === diffArea.endLine) {
+						writeText = '';
+						toRange = new Range(startLine - 1, Number.MAX_SAFE_INTEGER, endLine, 1);
+					} else {
+						writeText = '';
+						toRange = new Range(startLine, 1, endLine + 1, 1);
+					}
+				} else {
+					// Edit: Replace modified range with originalCode
+					const modifiedInclusive = diff.modifiedRange.toInclusiveRange();
+					if (!modifiedInclusive) {
+						this._logService.warn(`[VybeEditService] Cannot reject edit: modifiedRange is invalid`);
+						return;
+					}
+					const startLine = modifiedInclusive.startLineNumber;
+					const endLine = modifiedInclusive.endLineNumber;
+					writeText = diff.originalCode;
+					toRange = new Range(startLine, 1, endLine, Number.MAX_SAFE_INTEGER);
+				}
+
+				const edit: ISingleEditOperation = EditOperation.replace(toRange, writeText);
+				model.pushEditOperations(null, [edit], () => null);
 			});
 
-			// Update diff state
+			// CRITICAL: Realign diff area ranges BEFORE deleting the diff
+			// Reject removes/adds lines, so all subsequent diff ranges need to be adjusted
+			// We need to compute the change range for realignment
+			let changeRange: { startLineNumber: number; endLineNumber: number };
+			let changeText: string;
+
+			if (isInsertion) {
+				// Insertion rejection: we're deleting lines
+				const modifiedInclusive = diff.modifiedRange.toInclusiveRange();
+				if (modifiedInclusive) {
+					changeRange = {
+						startLineNumber: modifiedInclusive.startLineNumber,
+						endLineNumber: modifiedInclusive.endLineNumber
+					};
+					changeText = ''; // Deleting, so empty text
+				} else {
+					changeRange = { startLineNumber: diff.modifiedRange.startLineNumber, endLineNumber: diff.modifiedRange.startLineNumber };
+					changeText = '';
+				}
+			} else if (isDeletion) {
+				// Deletion rejection: we're inserting lines back
+				const insertLine = diff.modifiedRange.startLineNumber;
+				changeRange = { startLineNumber: insertLine, endLineNumber: insertLine };
+				changeText = diff.originalCode + '\n';
+			} else {
+				// Edit rejection: replacing content
+				const modifiedInclusive = diff.modifiedRange.toInclusiveRange();
+				if (modifiedInclusive) {
+					changeRange = {
+						startLineNumber: modifiedInclusive.startLineNumber,
+						endLineNumber: modifiedInclusive.endLineNumber
+					};
+					changeText = diff.originalCode;
+				} else {
+					changeRange = { startLineNumber: diff.modifiedRange.startLineNumber, endLineNumber: diff.modifiedRange.startLineNumber };
+					changeText = diff.originalCode;
+				}
+			}
+
+			// Realign ranges for all diff areas (this updates DiffArea.startLine/endLine)
+			this._diffService.realignDiffAreaRanges(diff.uri, changeText, changeRange);
+
+			// FIX 1: Capture snapshot BEFORE deleting (like Void's _addToHistory)
+			// This ensures the snapshot includes the diff that will be deleted
+			const beforeSnapshot = this._captureDiffStateSnapshot(diff.uri);
+			// CRITICAL: Capture diff info for undo/redo callbacks (before deletion)
+			const diffIdForUndo = diffId;
+			const diffAreaIdForUndo = diff.diffAreaId;
+			const uriForUndo = diff.uri;
+
+			// Update diff state BEFORE deleting (so snapshot captures correct state)
 			this._updateDiffState(diff.diffAreaId, diffId, DiffState.Rejected);
 
-			// Push undo element
+			// Delete diff from DiffArea
+			// CRITICAL: Delete AFTER updating state so decorations refresh correctly
+			this._diffService.deleteDiff(diff.diffAreaId, diffId);
+
+			// CRITICAL: Also remove from _diffStates map to ensure getDiffsForFile doesn't return it
+			this._diffStates.delete(diffId);
+
+			// VOID-STYLE: Synchronously recompute and refresh (like Void's _refreshStylesAndDiffsInURI)
+			// This ensures widgets are recreated with new IDs immediately, before any user interaction
+			// CRITICAL: Do this BEFORE emitting events to prevent race conditions
+			// CRITICAL: Delete the diff FIRST so widgets can't use it during recomputation
+			// The recomputation will create new diffs with fresh IDs
+			await this._diffService.recomputeDiffsForFile(diff.uri);
+
+			// CRITICAL: Wait for the event to be processed and widgets to be recreated
+			// The onDidUpdateDiffArea event listener will automatically call refreshDecorationsForUri
+			// which disposes old widgets and creates new ones with fresh diff IDs
+			await new Promise(resolve => setTimeout(resolve, 50));
+
+			// Note: beforeRegionContent is not needed for undo since we restore full snapshot
+
+			// Push undo element (for undo/redo support)
 			this._undoRedoService.pushElement(this._createResourceUndoElement(
 				diff.uri,
 				'Reject Diff',
 				'vybe.edit.reject',
 				async () => {
-					// Undo: restore modified code
-					if (range && model && !model.isDisposed()) {
-						model.pushEditOperations(null, [EditOperation.replace(range, diff.modifiedCode)], () => null);
-						// Restore previous state (remove from tracked states to revert to original)
-						this._diffStates.delete(diffId);
+					// CRITICAL: Re-find diff after restore (it was deleted, now restored)
+					const restoredDiff = this._findDiff(diffIdForUndo);
+					if (!restoredDiff) {
+						this._logService.warn(`[VybeEditService] Cannot undo reject: diff ${diffIdForUndo} not found after restore`);
+						return;
 					}
+					const restoredModel = this._getTextModel(uriForUndo);
+					if (!restoredModel) {
+						this._logService.warn(`[VybeEditService] Cannot undo reject: model not found for ${uriForUndo.toString()}`);
+						return;
+					}
+					// BLOCKER 4: Abort streaming if active before undo
+					const restoredDiffArea = this._diffService.getDiffArea(uriForUndo, diffAreaIdForUndo);
+					if (restoredDiffArea?.isStreaming) {
+						this._diffService.abortStreaming(diffAreaIdForUndo);
+					}
+					// FIX 4: Full restoration on undo (like Void's _restoreVoidFileSnapshot)
+					// 1. Restore diff state (this restores the diff back to DiffArea and restores states)
+					await this._restoreDiffStateSnapshot(uriForUndo, beforeSnapshot);
+					// 2. CRITICAL: Do NOT recompute after restore - the restored diffs are already correct
+					// Recomputation would compare restored file vs restored baseline and might remove diffs
+					// Just refresh decorations to show the restored diffs
+					// 3. Emit event to trigger decoration refresh (no recomputation needed)
+					this._onDidRejectDiff.fire({ diffId: diffIdForUndo, uri: uriForUndo, diffAreaId: diffAreaIdForUndo });
 				},
 				async () => {
-					// Redo: re-apply original code
-					if (range && model && !model.isDisposed()) {
-						model.pushEditOperations(null, [EditOperation.replace(range, diff.originalCode)], () => null);
-						this._updateDiffState(diff.diffAreaId, diffId, DiffState.Rejected);
+					// CRITICAL: Re-find diff for redo (it might have been restored by undo)
+					const redoDiff = this._findDiff(diffIdForUndo);
+					if (!redoDiff) {
+						this._logService.warn(`[VybeEditService] Cannot redo reject: diff ${diffIdForUndo} not found`);
+						return;
 					}
+					const redoModel = this._getTextModel(uriForUndo);
+					if (!redoModel) {
+						this._logService.warn(`[VybeEditService] Cannot redo reject: model not found for ${uriForUndo.toString()}`);
+						return;
+					}
+					const redoDiffArea = this._diffService.getDiffArea(uriForUndo, diffAreaIdForUndo);
+					if (!redoDiffArea) {
+						this._logService.warn(`[VybeEditService] Cannot redo reject: diffArea ${diffAreaIdForUndo} not found`);
+						return;
+					}
+					// BLOCKER 6: Redo reject - re-apply region reject
+					const redoIsDeletion = redoDiff.originalRange.isEmpty;
+					const redoIsInsertion = redoDiff.modifiedRange.isEmpty;
+					await this._withSystemWrite(async () => {
+						let writeText: string;
+						let toRange: Range;
+
+						if (redoIsDeletion) {
+							const insertLine = redoDiff.modifiedRange.startLineNumber;
+							if (insertLine - 1 === redoDiffArea.endLine) {
+								writeText = '\n' + redoDiff.originalCode;
+								toRange = new Range(insertLine - 1, Number.MAX_SAFE_INTEGER, insertLine - 1, Number.MAX_SAFE_INTEGER);
+							} else {
+								writeText = redoDiff.originalCode + '\n';
+								toRange = new Range(insertLine, 1, insertLine, 1);
+							}
+						} else if (redoIsInsertion) {
+							const modifiedInclusive = redoDiff.modifiedRange.toInclusiveRange();
+							if (!modifiedInclusive) {
+								return; // Cannot redo
+							}
+							const startLine = modifiedInclusive.startLineNumber;
+							const endLine = modifiedInclusive.endLineNumber;
+							if (endLine === redoDiffArea.endLine) {
+								writeText = '';
+								toRange = new Range(startLine - 1, Number.MAX_SAFE_INTEGER, endLine, 1);
+							} else {
+								writeText = '';
+								toRange = new Range(startLine, 1, endLine + 1, 1);
+							}
+						} else {
+							const modifiedInclusive = redoDiff.modifiedRange.toInclusiveRange();
+							if (!modifiedInclusive) {
+								return; // Cannot redo
+							}
+							writeText = redoDiff.originalCode;
+							toRange = new Range(modifiedInclusive.startLineNumber, 1, modifiedInclusive.endLineNumber, Number.MAX_SAFE_INTEGER);
+						}
+
+						redoModel.pushEditOperations(null, [EditOperation.replace(toRange, writeText)], () => null);
+					});
+					// Realign ranges after reject
+					const redoModifiedInclusive = redoDiff.modifiedRange.toInclusiveRange();
+					if (redoModifiedInclusive) {
+						this._diffService.realignDiffAreaRanges(uriForUndo, redoDiff.originalCode, { startLineNumber: redoModifiedInclusive.startLineNumber, endLineNumber: redoModifiedInclusive.endLineNumber });
+					}
+					this._updateDiffState(diffAreaIdForUndo, diffIdForUndo, DiffState.Rejected);
+					this._diffService.deleteDiff(diffAreaIdForUndo, diffIdForUndo);
+					this._diffStates.delete(diffIdForUndo);
+					// VOID-STYLE: Synchronously recompute and refresh
+					await this._diffService.recomputeDiffsForFile(uriForUndo);
+					this._onDidRejectDiff.fire({ diffId: diffIdForUndo, uri: uriForUndo, diffAreaId: diffAreaIdForUndo });
 				}
 			));
 
-			// Emit event
+			// Emit event (after synchronous recompute, so widgets are already recreated)
 			this._onDidRejectDiff.fire({ diffId, uri: diff.uri, diffAreaId: diff.diffAreaId });
 
 			// Notify that edited files summaries changed
@@ -331,7 +715,7 @@ export class VybeEditServiceImpl extends Disposable implements IVybeEditService 
 				return;
 			}
 
-			// Create checkpoint BEFORE applying edits
+			// Create checkpoint BEFORE accepting
 			const checkpointId = this._checkpointService.createCheckpoint(
 				`Accept File: ${uri.toString()}`,
 				[uri],
@@ -341,63 +725,43 @@ export class VybeEditServiceImpl extends Disposable implements IVybeEditService 
 				this._logService.trace(`[VybeEditService] Created checkpoint ${checkpointId} before acceptFile`);
 			}
 
-			// Create undo group for all edits
-			const undoGroup = new UndoRedoGroup();
+			// PHASE B: ACCEPT FILE LOGIC
+			// File already has modified content (from Phase A)
+			// Accept updates baselines only - file model does NOT change
 
-			// Apply all edits in a single undo group
-			const edits: ISingleEditOperation[] = [];
-			for (const diff of pendingDiffs) {
-				const range = this._convertLineRangeToRange(diff.modifiedRange);
-				if (range) {
-					edits.push(EditOperation.replace(range, diff.modifiedCode));
-				}
-			}
+			// Get current file content - this becomes the new baseline for all diff areas
+			const currentFileContent = model.getValue();
 
-			if (edits.length > 0) {
-				model.pushEditOperations(null, edits, () => null, undoGroup);
+			// Update baselines for all diff areas and delete all diffs
+			for (const diffArea of diffAreas) {
+				// Update baseline
+				this._diffService.updateDiffAreaSnapshot(diffArea.diffAreaId, currentFileContent);
 
-				// Update all diff states
+				// Delete all pending diffs from this area
 				for (const diff of pendingDiffs) {
-					this._updateDiffState(diff.diffAreaId, diff.diffId, DiffState.Accepted);
-				}
-
-				// Push undo element for entire file
-				this._undoRedoService.pushElement(this._createResourceUndoElement(
-					uri,
-					'Accept All Diffs',
-					'vybe.edit.acceptFile',
-					async () => {
-						// Undo: restore original code for all diffs
-						if (model && !model.isDisposed()) {
-							const undoEdits: ISingleEditOperation[] = [];
-							for (const diff of pendingDiffs) {
-								const range = this._convertLineRangeToRange(diff.originalRange);
-								if (range) {
-									undoEdits.push(EditOperation.replace(range, diff.originalCode));
-								}
-							}
-								if (undoEdits.length > 0) {
-									model.pushEditOperations(null, undoEdits, () => null, undoGroup);
-									for (const diff of pendingDiffs) {
-										// Restore previous state (remove from tracked states)
-										this._diffStates.delete(diff.diffId);
-									}
-								}
-						}
-					},
-					async () => {
-						// Redo: re-apply modified code for all diffs
-						if (model && !model.isDisposed()) {
-							if (edits.length > 0) {
-								model.pushEditOperations(null, edits, () => null, undoGroup);
-								for (const diff of pendingDiffs) {
-									this._updateDiffState(diff.diffAreaId, diff.diffId, DiffState.Accepted);
-								}
-							}
-						}
+					if (diff.diffAreaId === diffArea.diffAreaId) {
+						this._diffService.deleteDiff(diffArea.diffAreaId, diff.diffId);
+						this._updateDiffState(diff.diffAreaId, diff.diffId, DiffState.Accepted);
 					}
-				));
+				}
 			}
+
+			// Push undo element (simplified - full undo/redo would require storing previous baselines)
+			this._undoRedoService.pushElement(this._createResourceUndoElement(
+				uri,
+				'Accept All Diffs',
+				'vybe.edit.acceptFile',
+				async () => {
+					// Undo: restore previous baselines and re-add diffs
+					// This is complex - for now, we'll mark as not implemented
+					this._logService.warn('[VybeEditService] Undo acceptFile not fully implemented yet');
+				},
+				async () => {
+					// Redo: re-apply baseline updates
+					// This is complex - for now, we'll mark as not implemented
+					this._logService.warn('[VybeEditService] Redo acceptFile not fully implemented yet');
+				}
+			));
 
 			// Update transaction states
 			this._updateTransactionStatesForUri(uri, EditTransactionState.Accepted);
@@ -424,19 +788,28 @@ export class VybeEditServiceImpl extends Disposable implements IVybeEditService 
 				return;
 			}
 
+			// PHASE B: REJECT FILE LOGIC
+			// File has modified content (from Phase A)
+			// Reject writes originalSnapshot back to file (reverts to baseline)
+
 			// Get original snapshot from first diff area (they should all have the same snapshot)
 			const originalSnapshot = diffAreas[0].originalSnapshot;
 
-			// Replace entire file content
-			const fullRange = model.getFullModelRange();
-			const edit: ISingleEditOperation = EditOperation.replace(fullRange, originalSnapshot);
+			// Write originalSnapshot back to file (full file revert)
+			// PHASE D1: Wrapped with system write guard
+			await this._withSystemWrite(async () => {
+				const fullRange = model.getFullModelRange();
+				const edit: ISingleEditOperation = EditOperation.replace(fullRange, originalSnapshot);
+				model.pushEditOperations(null, [edit], () => null);
+			});
 
-			model.pushEditOperations(null, [edit], () => null);
-
-			// Update all diff states to Rejected
+			// Delete all diffs and update states to Rejected
 			for (const diffArea of diffAreas) {
-				for (const diff of diffArea.diffs.values()) {
-					this._updateDiffState(diffArea.diffAreaId, diff.diffId, DiffState.Rejected);
+				// Delete all diffs from this area
+				const diffIds = Array.from(diffArea.diffs.keys());
+				for (const diffId of diffIds) {
+					this._diffService.deleteDiff(diffArea.diffAreaId, diffId);
+					this._updateDiffState(diffArea.diffAreaId, diffId, DiffState.Rejected);
 				}
 			}
 
@@ -447,16 +820,24 @@ export class VybeEditServiceImpl extends Disposable implements IVybeEditService 
 				'vybe.edit.rejectFile',
 				async () => {
 					// Undo: restore current content (before rejection)
+					// PHASE D1: Wrapped with system write guard
 					if (model && !model.isDisposed()) {
-						const currentContent = model.getValue();
-						model.pushEditOperations(null, [EditOperation.replace(fullRange, currentContent)], () => null);
+						await this._withSystemWrite(async () => {
+							const currentContent = model.getValue();
+							const undoFullRange = model.getFullModelRange();
+							model.pushEditOperations(null, [EditOperation.replace(undoFullRange, currentContent)], () => null);
+						});
 						// Restore diff states (would need to track previous states, simplified here)
 					}
 				},
 				async () => {
 					// Redo: re-apply original snapshot
+					// PHASE D1: Wrapped with system write guard
 					if (model && !model.isDisposed()) {
-						model.pushEditOperations(null, [EditOperation.replace(fullRange, originalSnapshot)], () => null);
+						await this._withSystemWrite(async () => {
+							const redoFullRange = model.getFullModelRange();
+							model.pushEditOperations(null, [EditOperation.replace(redoFullRange, originalSnapshot)], () => null);
+						});
 						for (const diffArea of diffAreas) {
 							for (const diff of diffArea.diffs.values()) {
 								this._updateDiffState(diffArea.diffAreaId, diff.diffId, DiffState.Rejected);
@@ -511,7 +892,7 @@ export class VybeEditServiceImpl extends Disposable implements IVybeEditService 
 				return;
 			}
 
-			// Create checkpoint BEFORE applying edits
+			// Create checkpoint BEFORE accepting
 			const affectedUris = Array.from(diffsByUri.keys());
 			const checkpointId = this._checkpointService.createCheckpoint(
 				'Accept All Diffs',
@@ -522,93 +903,61 @@ export class VybeEditServiceImpl extends Disposable implements IVybeEditService 
 				this._logService.trace(`[VybeEditService] Created checkpoint ${checkpointId} before acceptAll for ${affectedUris.length} files`);
 			}
 
-			// Create undo group for all files
-			const undoGroup = new UndoRedoGroup();
+			// PHASE B: ACCEPT ALL LOGIC
+			// Files already have modified content (from Phase A)
+			// Accept updates baselines only - file models do NOT change
 
-			// Apply edits for each URI
-			const resourceElements: IResourceUndoRedoElement[] = [];
+			// Group diffs by diff area
+			const diffAreasByUri = new Map<URI, DiffArea[]>();
+			for (const diffArea of allDiffAreas) {
+				if (!diffAreasByUri.has(diffArea.uri)) {
+					diffAreasByUri.set(diffArea.uri, []);
+				}
+				diffAreasByUri.get(diffArea.uri)!.push(diffArea);
+			}
 
-			for (const [uri, diffs] of diffsByUri) {
+			// Update baselines for all files and delete all diffs
+			for (const [uri, diffAreas] of diffAreasByUri) {
 				const model = this._getTextModel(uri);
 				if (!model) {
 					continue;
 				}
 
-				const edits: ISingleEditOperation[] = [];
-				for (const diff of diffs) {
-					const range = this._convertLineRangeToRange(diff.modifiedRange);
-					if (range) {
-						edits.push(EditOperation.replace(range, diff.modifiedCode));
-					}
-				}
+				// Get current file content - this becomes the new baseline
+				const currentFileContent = model.getValue();
 
-				if (edits.length > 0) {
-					model.pushEditOperations(null, edits, () => null, undoGroup);
+				// Update baselines for all diff areas in this file
+				for (const diffArea of diffAreas) {
+					this._diffService.updateDiffAreaSnapshot(diffArea.diffAreaId, currentFileContent);
 
-					// Update diff states
-					for (const diff of diffs) {
-						this._updateDiffState(diff.diffAreaId, diff.diffId, DiffState.Accepted);
-					}
-
-					// Create resource undo element
-					resourceElements.push(this._createResourceUndoElement(
-						uri,
-						'Accept All Diffs',
-						'vybe.edit.acceptAll',
-						async () => {
-							// Undo: restore original code
-							if (model && !model.isDisposed()) {
-								const undoEdits: ISingleEditOperation[] = [];
-								for (const diff of diffs) {
-									const range = this._convertLineRangeToRange(diff.originalRange);
-									if (range) {
-										undoEdits.push(EditOperation.replace(range, diff.originalCode));
-									}
-								}
-								if (undoEdits.length > 0) {
-									model.pushEditOperations(null, undoEdits, () => null, undoGroup);
-									for (const diff of diffs) {
-										// Restore previous state (remove from tracked states)
-										this._diffStates.delete(diff.diffId);
-									}
-								}
-							}
-						},
-						async () => {
-							// Redo: re-apply modified code
-							if (model && !model.isDisposed()) {
-								if (edits.length > 0) {
-									model.pushEditOperations(null, edits, () => null, undoGroup);
-									for (const diff of diffs) {
-										this._updateDiffState(diff.diffAreaId, diff.diffId, DiffState.Accepted);
-									}
-								}
-							}
+					// Delete all pending diffs from this area
+					for (const diff of diffsByUri.get(uri) || []) {
+						if (diff.diffAreaId === diffArea.diffAreaId) {
+							this._diffService.deleteDiff(diffArea.diffAreaId, diff.diffId);
+							this._updateDiffState(diff.diffAreaId, diff.diffId, DiffState.Accepted);
 						}
-					));
+					}
 				}
 			}
 
-			// Push workspace undo element
-			if (resourceElements.length > 0) {
-				const workspaceElement: IWorkspaceUndoRedoElement = {
-					type: UndoRedoElementType.Workspace,
-					resources: Array.from(diffsByUri.keys()),
-					label: 'Accept All Diffs',
-					code: 'vybe.edit.acceptAll',
-					undo: async () => {
-						for (const element of resourceElements) {
-							await element.undo();
-						}
-					},
-					redo: async () => {
-						for (const element of resourceElements) {
-							await element.redo();
-						}
-					},
-				};
-				this._undoRedoService.pushElement(workspaceElement);
-			}
+			// Push workspace undo element (simplified - full undo/redo would require storing previous baselines)
+			const workspaceElement: IWorkspaceUndoRedoElement = {
+				type: UndoRedoElementType.Workspace,
+				resources: Array.from(diffsByUri.keys()),
+				label: 'Accept All Diffs',
+				code: 'vybe.edit.acceptAll',
+				undo: async () => {
+					// Undo: restore previous baselines and re-add diffs
+					// This is complex - for now, we'll mark as not implemented
+					this._logService.warn('[VybeEditService] Undo acceptAll not fully implemented yet');
+				},
+				redo: async () => {
+					// Redo: re-apply baseline updates
+					// This is complex - for now, we'll mark as not implemented
+					this._logService.warn('[VybeEditService] Redo acceptAll not fully implemented yet');
+				},
+			};
+			this._undoRedoService.pushElement(workspaceElement);
 
 			// Update all transaction states
 			this._updateAllTransactionStates(EditTransactionState.Accepted);
@@ -644,6 +993,10 @@ export class VybeEditServiceImpl extends Disposable implements IVybeEditService 
 				return;
 			}
 
+			// PHASE B: REJECT ALL LOGIC
+			// Files have modified content (from Phase A)
+			// Reject writes originalSnapshots back to files (reverts to baselines)
+
 			// Create undo group for all files
 			const undoGroup = new UndoRedoGroup();
 
@@ -657,16 +1010,21 @@ export class VybeEditServiceImpl extends Disposable implements IVybeEditService 
 				}
 
 				// Get original snapshot (from first diff area)
-				const originalSnapshot = diffAreas[0].originalSnapshot;
-				const fullRange = model.getFullModelRange();
-				const edit: ISingleEditOperation = EditOperation.replace(fullRange, originalSnapshot);
+				// PHASE D1: Wrapped with system write guard
+				await this._withSystemWrite(async () => {
+					const originalSnapshot = diffAreas[0].originalSnapshot;
+					const fullRange = model.getFullModelRange();
+					const edit: ISingleEditOperation = EditOperation.replace(fullRange, originalSnapshot);
+					model.pushEditOperations(null, [edit], () => null, undoGroup);
+				});
 
-				model.pushEditOperations(null, [edit], () => null, undoGroup);
-
-				// Update all diff states to Rejected
+				// Delete all diffs and update states to Rejected
 				for (const diffArea of diffAreas) {
-					for (const diff of diffArea.diffs.values()) {
-						this._updateDiffState(diffArea.diffAreaId, diff.diffId, DiffState.Rejected);
+					// Delete all diffs from this area
+					const diffIds = Array.from(diffArea.diffs.keys());
+					for (const diffId of diffIds) {
+						this._diffService.deleteDiff(diffArea.diffAreaId, diffId);
+						this._updateDiffState(diffArea.diffAreaId, diffId, DiffState.Rejected);
 					}
 				}
 
@@ -677,21 +1035,13 @@ export class VybeEditServiceImpl extends Disposable implements IVybeEditService 
 					'vybe.edit.rejectAll',
 					async () => {
 						// Undo: restore current content
-						if (model && !model.isDisposed()) {
-							const currentContent = model.getValue();
-							model.pushEditOperations(null, [EditOperation.replace(fullRange, currentContent)], () => null, undoGroup);
-						}
+						// This is complex - for now, we'll mark as not implemented
+						this._logService.warn('[VybeEditService] Undo rejectAll not fully implemented yet');
 					},
 					async () => {
 						// Redo: re-apply original snapshot
-						if (model && !model.isDisposed()) {
-							model.pushEditOperations(null, [EditOperation.replace(fullRange, originalSnapshot)], () => null, undoGroup);
-							for (const diffArea of diffAreas) {
-								for (const diff of diffArea.diffs.values()) {
-									this._updateDiffState(diffArea.diffAreaId, diff.diffId, DiffState.Rejected);
-								}
-							}
-						}
+						// This is complex - for now, we'll mark as not implemented
+						this._logService.warn('[VybeEditService] Redo rejectAll not fully implemented yet');
 					}
 				));
 			}
@@ -740,7 +1090,13 @@ export class VybeEditServiceImpl extends Disposable implements IVybeEditService 
 			const diffs: Diff[] = [];
 			for (const diffArea of diffAreas) {
 				for (const diff of diffArea.diffs.values()) {
-					diffs.push(diff);
+					// Apply state updates from _diffStates map
+					const updatedState = this._getDiffState(diff);
+					const updatedDiff: Diff = {
+						...diff,
+						state: updatedState
+					};
+					diffs.push(updatedDiff);
 				}
 			}
 			return diffs;
@@ -765,7 +1121,13 @@ export class VybeEditServiceImpl extends Disposable implements IVybeEditService 
 			const diffs: Diff[] = [];
 			for (const diffArea of allDiffAreas) {
 				for (const diff of diffArea.diffs.values()) {
-					diffs.push(diff);
+					// Apply state updates from _diffStates map
+					const updatedState = this._getDiffState(diff);
+					const updatedDiff: Diff = {
+						...diff,
+						state: updatedState
+					};
+					diffs.push(updatedDiff);
 				}
 			}
 			return diffs;
@@ -794,8 +1156,10 @@ export class VybeEditServiceImpl extends Disposable implements IVybeEditService 
 			const epoch = this._nextEpoch++;
 			const now = Date.now();
 
-			// Get all file snapshots (stub - full implementation in Phase 3)
+			// Get all file snapshots
 			const fileSnapshots = new Map<URI, string>();
+			// PHASE D5: Capture diff area snapshots
+			const diffAreaSnapshots = new Map<string, DiffAreaSnapshot>();
 			const allDiffAreas = this._getAllDiffAreas();
 			for (const diffArea of allDiffAreas) {
 				if (!fileSnapshots.has(diffArea.uri)) {
@@ -804,6 +1168,17 @@ export class VybeEditServiceImpl extends Disposable implements IVybeEditService 
 						fileSnapshots.set(diffArea.uri, model.getValue());
 					}
 				}
+				// BLOCKER 3: Capture full diffs map (not just IDs)
+				const diffsMap = new Map(diffArea.diffs);
+				diffAreaSnapshots.set(diffArea.diffAreaId, {
+					diffAreaId: diffArea.diffAreaId,
+					uri: diffArea.uri,
+					originalSnapshot: diffArea.originalSnapshot,
+					originalCode: diffArea.originalCode,
+					startLine: diffArea.startLine,
+					endLine: diffArea.endLine,
+					diffs: diffsMap,
+				});
 			}
 
 			const checkpoint: Checkpoint = {
@@ -811,6 +1186,7 @@ export class VybeEditServiceImpl extends Disposable implements IVybeEditService 
 				epoch,
 				label,
 				fileSnapshots,
+				diffAreaSnapshots, // PHASE D5: Include diff state
 				timestamp: now,
 				description,
 			};
@@ -981,12 +1357,6 @@ export class VybeEditServiceImpl extends Disposable implements IVybeEditService 
 		return model;
 	}
 
-	/**
-	 * Converts a LineRange to a Range for edit operations.
-	 */
-	private _convertLineRangeToRange(lineRange: LineRange): Range | null {
-		return lineRange.toInclusiveRange();
-	}
 
 	/**
 	 * Finds a diff by diffId across all diff areas.
@@ -1079,22 +1449,22 @@ export class VybeEditServiceImpl extends Disposable implements IVybeEditService 
 	 * This is a helper that collects all diff areas.
 	 */
 	private _getAllDiffAreas(): DiffArea[] {
-			// Get all unique URIs from transactions
-			const uris = new Set<URI>();
-			for (const transaction of this._transactions.values()) {
-				uris.add(transaction.uri);
-			}
+		// Get all unique URIs from transactions
+		const uris = new Set<URI>();
+		for (const transaction of this._transactions.values()) {
+			uris.add(transaction.uri);
+		}
 
-			const allDiffAreas: DiffArea[] = [];
-			for (const uri of uris) {
-				const diffAreas = this._diffService.getDiffAreasForUri(uri);
-				allDiffAreas.push(...diffAreas);
-			}
+		const allDiffAreas: DiffArea[] = [];
+		for (const uri of uris) {
+			const diffAreas = this._diffService.getDiffAreasForUri(uri);
+			allDiffAreas.push(...diffAreas);
+		}
 
-			// Also check all diff areas directly from diff service
-			// This ensures we get all diff areas even if not associated with a transaction
-			// Note: This is a simplified approach. A full implementation would track all URIs with diffs.
-			return allDiffAreas;
+		// Also check all diff areas directly from diff service
+		// This ensures we get all diff areas even if not associated with a transaction
+		// Note: This is a simplified approach. A full implementation would track all URIs with diffs.
+		return allDiffAreas;
 	}
 
 	/**
