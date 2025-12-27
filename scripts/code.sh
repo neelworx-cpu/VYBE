@@ -44,6 +44,12 @@ function code() {
 	export ELECTRON_ENABLE_STACK_DUMPING=1
 	export ELECTRON_ENABLE_LOGGING=1
 
+	# VYBE MCP: Pass through VYBE_MCP_COMMAND if set
+	# This allows the IDE to spawn the MCP process
+	if [ -n "$VYBE_MCP_COMMAND" ]; then
+		export VYBE_MCP_COMMAND="$VYBE_MCP_COMMAND"
+	fi
+
 	DISABLE_TEST_EXTENSION="--disable-extension=vscode.vscode-api-tests"
 	if [[ "$@" == *"--extensionTestsPath"* ]]; then
 		DISABLE_TEST_EXTENSION=""
