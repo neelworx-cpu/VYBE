@@ -375,5 +375,56 @@ export function registerVybeMcpTools(toolHost: VybeStdioToolHost): void {
 			return forwardToolToRenderer('vybe.reject_file', params);
 		}
 	});
+
+	// Tool: vybe.write_file
+	toolHost.registerTool({
+		name: 'vybe.write_file',
+		description: 'Write content to a file. Creates transaction, seeds diffs, requires approval, and saves to disk.',
+		inputSchema: {
+			type: 'object',
+			properties: {
+				uri: {
+					type: 'string',
+					description: 'File URI to write to'
+				},
+				content: {
+					type: 'string',
+					description: 'New file content'
+				},
+				overwrite: {
+					type: 'boolean',
+					description: 'Whether to overwrite if file exists (default: true)',
+					default: true
+				}
+			},
+			required: ['uri', 'content']
+		} as IJSONSchema,
+		handler: async (params: unknown, token: CancellationToken) => {
+			return forwardToolToRenderer('vybe.write_file', params);
+		}
+	});
+
+	// Tool: vybe.apply_patch
+	toolHost.registerTool({
+		name: 'vybe.apply_patch',
+		description: 'Apply a unified diff patch to a file. Validates patch, creates transaction, seeds diffs, requires approval, and saves to disk.',
+		inputSchema: {
+			type: 'object',
+			properties: {
+				uri: {
+					type: 'string',
+					description: 'File URI to apply patch to'
+				},
+				patch: {
+					type: 'string',
+					description: 'Unified diff format patch string'
+				}
+			},
+			required: ['uri', 'patch']
+		} as IJSONSchema,
+		handler: async (params: unknown, token: CancellationToken) => {
+			return forwardToolToRenderer('vybe.apply_patch', params);
+		}
+	});
 }
 

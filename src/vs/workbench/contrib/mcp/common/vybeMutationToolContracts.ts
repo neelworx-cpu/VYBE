@@ -40,7 +40,13 @@ export enum VybeMutationToolErrorCode {
 	DIFF_NOT_FOUND = 'DIFF_NOT_FOUND',
 	DIFF_ALREADY_ACCEPTED = 'DIFF_ALREADY_ACCEPTED',
 	DIFF_ALREADY_REJECTED = 'DIFF_ALREADY_REJECTED',
-	NO_DIFFS_FOUND = 'NO_DIFFS_FOUND'
+	NO_DIFFS_FOUND = 'NO_DIFFS_FOUND',
+	// Phase 3B specific error codes
+	PATCH_PARSE_FAILED = 'PATCH_PARSE_FAILED',
+	PATCH_APPLY_FAILED = 'PATCH_APPLY_FAILED',
+	PATCH_VALIDATION_FAILED = 'PATCH_VALIDATION_FAILED',
+	SAVE_FAILED = 'SAVE_FAILED',
+	FILE_EXISTS = 'FILE_EXISTS'
 }
 
 // Re-export VybeToolError for convenience
@@ -182,5 +188,65 @@ export interface VybeRejectFileOutput {
 	uri: string;
 	/** Number of diffs that were rejected */
 	diffCount: number;
+}
+
+// ============================================================================
+// TOOL 6: vybe.write_file
+// ============================================================================
+
+/**
+ * Input for vybe.write_file
+ */
+export interface VybeWriteFileInput {
+	/** File URI to write to */
+	uri: string;
+	/** New file content */
+	content: string;
+	/** Whether to overwrite if file exists (default: true) */
+	overwrite?: boolean;
+}
+
+/**
+ * Output for vybe.write_file
+ */
+export interface VybeWriteFileOutput {
+	/** Whether the operation succeeded */
+	success: boolean;
+	/** The file URI that was written */
+	uri: string;
+	/** Number of diffs that were created */
+	diffCount: number;
+	/** Whether the file was successfully saved to disk (false if save failed but editor state was mutated) */
+	saved: boolean;
+}
+
+// ============================================================================
+// TOOL 7: vybe.apply_patch
+// ============================================================================
+
+/**
+ * Input for vybe.apply_patch
+ */
+export interface VybeApplyPatchInput {
+	/** File URI to apply patch to */
+	uri: string;
+	/** Unified diff format patch string */
+	patch: string;
+}
+
+/**
+ * Output for vybe.apply_patch
+ */
+export interface VybeApplyPatchOutput {
+	/** Whether the operation succeeded */
+	success: boolean;
+	/** The file URI that was patched */
+	uri: string;
+	/** Number of diffs that were created */
+	diffCount: number;
+	/** Number of patch hunks that were applied */
+	appliedHunks: number;
+	/** Whether the file was successfully saved to disk (false if save failed but editor state was mutated) */
+	saved: boolean;
 }
 

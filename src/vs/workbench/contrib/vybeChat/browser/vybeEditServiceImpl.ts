@@ -23,6 +23,8 @@ import { ILogService } from '../../../../platform/log/common/log.js';
 import { IVybeEditService, EditTransaction } from '../common/vybeEditService.js';
 import { IVybeDiffService } from '../common/vybeDiffService.js';
 import { IVybeCheckpointService } from '../common/vybeCheckpointService.js';
+import { ITextFileService } from '../../../../workbench/services/textfile/common/textfiles.js';
+import { SaveReason } from '../../../../workbench/common/editor.js';
 import { Diff, DiffArea, Checkpoint, DiffState, EditTransactionState, VybeEditedFileSummary } from '../common/vybeEditTypes.js';
 
 /**
@@ -89,6 +91,7 @@ export class VybeEditServiceImpl extends Disposable implements IVybeEditService 
 		@IModelService private readonly _modelService: IModelService,
 		@IUndoRedoService private readonly _undoRedoService: IUndoRedoService,
 		@IVybeCheckpointService private readonly _checkpointService: IVybeCheckpointService,
+		@ITextFileService private readonly _textFileService: ITextFileService,
 		@ILogService private readonly _logService: ILogService,
 	) {
 		super();
@@ -344,7 +347,7 @@ export class VybeEditServiceImpl extends Disposable implements IVybeEditService 
 	// File-Level Operations
 	// ============================================================================
 
-	async acceptFile(uri: URI): Promise<void> {
+	async acceptFile(uri: URI, autoSave: boolean = false): Promise<void> {
 		try {
 			const diffAreas = this._diffService.getDiffAreasForUri(uri);
 			if (diffAreas.length === 0) {
@@ -446,6 +449,20 @@ export class VybeEditServiceImpl extends Disposable implements IVybeEditService 
 			// Emit events for each diff area
 			for (const diffArea of diffAreas) {
 				this._onDidAcceptFile.fire({ uri, diffAreaId: diffArea.diffAreaId });
+			}
+
+			// Auto-save if requested (Phase 3B)
+			if (autoSave) {
+				try {
+					// Check if model is dirty before saving
+					if (this._textFileService.isDirty(uri)) {
+						await this._textFileService.save(uri, { reason: SaveReason.EXPLICIT });
+						this._logService.trace(`[VybeEditService] Auto-saved file after acceptFile: ${uri.toString()}`);
+					}
+				} catch (saveError) {
+					// Log save failure but don't throw - model state is preserved
+					this._logService.warn(`[VybeEditService] Failed to auto-save file after acceptFile: ${uri.toString()}`, saveError);
+				}
 			}
 		} catch (error) {
 			this._logService.error('[VybeEditService] Error accepting file', error);

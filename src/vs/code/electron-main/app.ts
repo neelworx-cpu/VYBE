@@ -543,6 +543,29 @@ export class CodeApplication extends Disposable {
 		// VYBE MCP: Tool response handler is registered in vybeMcpToolBridge
 		// No need to register here - the bridge uses ipcMain directly for dynamic request/response matching
 
+		// VYBE MCP: Patch utilities (Node.js-only, called from renderer via IPC)
+		validatedIpcMain.handle('vscode:vybeValidatePatch', async (event, originalContent: string, patch: string) => {
+			try {
+				const { validatePatch } = await import('../../workbench/contrib/mcp/node/vybePatchUtils.js');
+				return validatePatch(originalContent, patch);
+			} catch (error) {
+				return {
+					valid: false,
+					error: error instanceof Error ? error.message : String(error),
+					hunkCount: 0
+				};
+			}
+		});
+
+		validatedIpcMain.handle('vscode:vybeApplyPatch', async (event, originalContent: string, patch: string) => {
+			try {
+				const { applyPatchInMemory } = await import('../../workbench/contrib/mcp/node/vybePatchUtils.js');
+				return applyPatchInMemory(originalContent, patch);
+			} catch (error) {
+				return null;
+			}
+		});
+
 		validatedIpcMain.handle('vscode:notifyZoomLevel', async (event, zoomLevel: number | undefined) => {
 			const window = this.windowsMainService?.getWindowByWebContents(event.sender);
 			if (window) {

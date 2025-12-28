@@ -38,11 +38,16 @@ import {
 	handleVybeAcceptDiff,
 	handleVybeRejectDiff,
 	handleVybeAcceptFile,
-	handleVybeRejectFile
+	handleVybeRejectFile,
+	handleVybeWriteFile,
+	handleVybeApplyPatch
 } from '../browser/tools/vybeMutationToolHandlers.js';
+import { ITextFileService } from '../../../services/textfile/common/textfiles.js';
 import { IVybeMcpToolApprovalService } from './vybeMcpToolApprovalService.js';
 import { isNative } from '../../../../base/common/platform.js';
 import { ipcRenderer } from '../../../../base/parts/sandbox/electron-browser/globals.js';
+import { IModelService } from '../../../../editor/common/services/model.js';
+import { ILanguageService } from '../../../../editor/common/languages/language.js';
 
 class VybeLocalMcpServer {
 	private router: VybeMcpRouter | undefined;
@@ -86,6 +91,9 @@ export class VybeMcpToolContribution extends Disposable implements IWorkbenchCon
 		@IVybeDiffService private readonly diffService: IVybeDiffService,
 		@IVybeEditService private readonly editService: IVybeEditService,
 		@IVybeMcpToolApprovalService private readonly approvalService: IVybeMcpToolApprovalService,
+		@ITextFileService private readonly textFileService: ITextFileService,
+		@IModelService private readonly editorModelService: IModelService,
+		@ILanguageService private readonly languageService: ILanguageService,
 	) {
 		super();
 
@@ -520,6 +528,36 @@ export class VybeMcpToolContribution extends Disposable implements IWorkbenchCon
 							this.editService,
 							this.approvalService,
 							this.workspaceService,
+							request.params as any,
+							token
+						);
+						break;
+
+					case 'vybe.write_file':
+						result = await handleVybeWriteFile(
+							this.fileService,
+							this.textFileService,
+							this.editService,
+							this.diffService,
+							this.approvalService,
+							this.workspaceService,
+							this.editorModelService,
+							this.languageService,
+							request.params as any,
+							token
+						);
+						break;
+
+					case 'vybe.apply_patch':
+						result = await handleVybeApplyPatch(
+							this.fileService,
+							this.textFileService,
+							this.editService,
+							this.diffService,
+							this.approvalService,
+							this.workspaceService,
+							this.editorModelService,
+							this.languageService,
 							request.params as any,
 							token
 						);

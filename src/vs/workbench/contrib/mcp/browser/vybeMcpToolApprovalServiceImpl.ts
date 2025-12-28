@@ -11,7 +11,9 @@
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { localize } from '../../../../nls.js';
 import Severity from '../../../../base/common/severity.js';
+import { URI } from '../../../../base/common/uri.js';
 import { IDialogService } from '../../../../platform/dialogs/common/dialogs.js';
+import { IFileService } from '../../../../platform/files/common/files.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { IVybeMcpToolApprovalService, ApprovalRequest, ApprovalResult } from '../common/vybeMcpToolApprovalService.js';
 
@@ -24,6 +26,7 @@ export class VybeMcpToolApprovalServiceImpl extends Disposable implements IVybeM
 
 	constructor(
 		@IDialogService private readonly _dialogService: IDialogService,
+		@IFileService private readonly _fileService: IFileService,
 		@ILogService private readonly _logService: ILogService
 	) {
 		super();
@@ -33,7 +36,7 @@ export class VybeMcpToolApprovalServiceImpl extends Disposable implements IVybeM
 		try {
 			// Build dialog message
 			const message = this._buildMessage(request);
-			const detail = this._buildDetail(request);
+			const detail = await this._buildDetail(request);
 
 			// Show confirmation dialog
 			const result = await this._dialogService.confirm({
@@ -82,18 +85,39 @@ export class VybeMcpToolApprovalServiceImpl extends Disposable implements IVybeM
 	/**
 	 * Builds the detail text for the approval dialog
 	 */
-	private _buildDetail(request: ApprovalRequest): string {
+	private async _buildDetail(request: ApprovalRequest): Promise<string> {
 		const parts: string[] = [];
 
 		// Tool name
 		parts.push(localize('approvalDetailTool', 'Tool: {0}', request.toolName));
 
-		// File(s)
+		// File(s) with existence check
 		if (request.fileUri) {
 			parts.push(localize('approvalDetailFile', 'File: {0}', request.fileUri));
+			// Check if file exists for overwrite warning
+			try {
+				const uri = URI.parse(request.fileUri);
+				const exists = await this._fileService.exists(uri);
+				if (exists) {
+					parts.push(localize('approvalDetailOverwrite', '⚠️ This will overwrite existing file'));
+				}
+			} catch (error) {
+				// Ignore errors checking file existence
+				this._logService.trace(`[VybeMcpToolApprovalService] Could not check file existence: ${error}`);
+			}
 		} else if (request.fileUris && request.fileUris.length > 0) {
 			if (request.fileUris.length === 1) {
 				parts.push(localize('approvalDetailFile', 'File: {0}', request.fileUris[0]));
+				// Check if file exists
+				try {
+					const uri = URI.parse(request.fileUris[0]);
+					const exists = await this._fileService.exists(uri);
+					if (exists) {
+						parts.push(localize('approvalDetailOverwrite', '⚠️ This will overwrite existing file'));
+					}
+				} catch (error) {
+					// Ignore errors
+				}
 			} else {
 				parts.push(localize('approvalDetailFiles', 'Files: {0}', request.fileUris.length));
 				request.fileUris.forEach((uri, index) => {
@@ -133,7 +157,9 @@ export class VybeMcpToolApprovalServiceImpl extends Disposable implements IVybeM
 			'vybe.accept_file': localize('toolAcceptFile', 'Accept all diffs in file'),
 			'vybe.reject_file': localize('toolRejectFile', 'Reject all diffs in file'),
 			'vybe.accept_all': localize('toolAcceptAll', 'Accept all diffs'),
-			'vybe.reject_all': localize('toolRejectAll', 'Reject all diffs')
+			'vybe.reject_all': localize('toolRejectAll', 'Reject all diffs'),
+			'vybe.write_file': localize('toolWriteFile', 'Write file'),
+			'vybe.apply_patch': localize('toolApplyPatch', 'Apply patch')
 		};
 
 		return displayNames[toolName] || toolName;
