@@ -36,6 +36,13 @@ export interface DiffComputationOptions {
 	 * @default false
 	 */
 	computeMoves?: boolean;
+
+	/**
+	 * Optional diffAreaId to use instead of generating a new one.
+	 * Used internally to link diffs to existing transactions.
+	 * @internal
+	 */
+	diffAreaId?: string;
 }
 
 /**

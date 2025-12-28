@@ -33,6 +33,14 @@ import {
 	handleVybeComputeDiff,
 	handleVybeGetDiffAreas
 } from '../browser/tools/vybeReadOnlyToolHandlers.js';
+import {
+	handleVybeCreateEditTransaction,
+	handleVybeAcceptDiff,
+	handleVybeRejectDiff,
+	handleVybeAcceptFile,
+	handleVybeRejectFile
+} from '../browser/tools/vybeMutationToolHandlers.js';
+import { IVybeMcpToolApprovalService } from './vybeMcpToolApprovalService.js';
 import { isNative } from '../../../../base/common/platform.js';
 import { ipcRenderer } from '../../../../base/parts/sandbox/electron-browser/globals.js';
 
@@ -77,6 +85,7 @@ export class VybeMcpToolContribution extends Disposable implements IWorkbenchCon
 		@IWorkspaceContextService private readonly workspaceService: IWorkspaceContextService,
 		@IVybeDiffService private readonly diffService: IVybeDiffService,
 		@IVybeEditService private readonly editService: IVybeEditService,
+		@IVybeMcpToolApprovalService private readonly approvalService: IVybeMcpToolApprovalService,
 	) {
 		super();
 
@@ -461,6 +470,55 @@ export class VybeMcpToolContribution extends Disposable implements IWorkbenchCon
 					case 'vybe.get_diff_areas':
 						result = await handleVybeGetDiffAreas(
 							this.editService,
+							this.workspaceService,
+							request.params as any,
+							token
+						);
+						break;
+
+					case 'vybe.create_edit_transaction':
+						result = await handleVybeCreateEditTransaction(
+							this.editService,
+							this.workspaceService,
+							request.params as any,
+							token
+						);
+						break;
+
+					case 'vybe.accept_diff':
+						result = await handleVybeAcceptDiff(
+							this.editService,
+							this.approvalService,
+							this.workspaceService,
+							request.params as any,
+							token
+						);
+						break;
+
+					case 'vybe.reject_diff':
+						result = await handleVybeRejectDiff(
+							this.editService,
+							this.approvalService,
+							this.workspaceService,
+							request.params as any,
+							token
+						);
+						break;
+
+					case 'vybe.accept_file':
+						result = await handleVybeAcceptFile(
+							this.editService,
+							this.approvalService,
+							this.workspaceService,
+							request.params as any,
+							token
+						);
+						break;
+
+					case 'vybe.reject_file':
+						result = await handleVybeRejectFile(
+							this.editService,
+							this.approvalService,
 							this.workspaceService,
 							request.params as any,
 							token

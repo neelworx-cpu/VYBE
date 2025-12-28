@@ -146,6 +146,47 @@ export class VybeEditServiceImpl extends Disposable implements IVybeEditService 
 		return this._transactions.get(transactionId);
 	}
 
+	/**
+	 * INTERNAL/TEST-ONLY: Seeds diffs into an existing transaction.
+	 * This method computes diffs using the transaction's diffAreaId and stores them
+	 * in the diff service, making them available for accept/reject operations.
+	 *
+	 * This is a headless mechanism for testing Phase 3A without requiring UI widgets.
+	 *
+	 * @param transactionId Transaction identifier
+	 * @param originalContent Original content (baseline) - must match what was passed to createEditTransaction
+	 * @param modifiedContent Modified content to diff against original
+	 * @returns Promise resolving to true if diffs were created, false otherwise
+	 */
+	async _seedDiffsForTransaction(transactionId: string, originalContent: string, modifiedContent: string): Promise<boolean> {
+		try {
+			const transaction = this._transactions.get(transactionId);
+			if (!transaction) {
+				this._logService.warn(`[VybeEditService] Transaction not found: ${transactionId}`);
+				return false;
+			}
+
+			// Compute diffs using the transaction's diffAreaId
+			const result = await this._diffService.computeDiffs(
+				transaction.uri,
+				originalContent,
+				modifiedContent,
+				{ diffAreaId: transaction.diffAreaId }
+			);
+
+			if (result.diffs.length === 0) {
+				this._logService.trace(`[VybeEditService] No diffs computed for transaction: ${transactionId}`);
+				return false;
+			}
+
+			this._logService.trace(`[VybeEditService] Seeded ${result.diffs.length} diffs for transaction: ${transactionId}`);
+			return true;
+		} catch (error) {
+			this._logService.error('[VybeEditService] Error seeding diffs for transaction', error);
+			return false;
+		}
+	}
+
 	// ============================================================================
 	// Single Diff Operations
 	// ============================================================================
@@ -376,13 +417,13 @@ export class VybeEditServiceImpl extends Disposable implements IVybeEditService 
 									undoEdits.push(EditOperation.replace(range, diff.originalCode));
 								}
 							}
-								if (undoEdits.length > 0) {
-									model.pushEditOperations(null, undoEdits, () => null, undoGroup);
-									for (const diff of pendingDiffs) {
-										// Restore previous state (remove from tracked states)
-										this._diffStates.delete(diff.diffId);
-									}
+							if (undoEdits.length > 0) {
+								model.pushEditOperations(null, undoEdits, () => null, undoGroup);
+								for (const diff of pendingDiffs) {
+									// Restore previous state (remove from tracked states)
+									this._diffStates.delete(diff.diffId);
 								}
+							}
 						}
 					},
 					async () => {
@@ -1079,22 +1120,22 @@ export class VybeEditServiceImpl extends Disposable implements IVybeEditService 
 	 * This is a helper that collects all diff areas.
 	 */
 	private _getAllDiffAreas(): DiffArea[] {
-			// Get all unique URIs from transactions
-			const uris = new Set<URI>();
-			for (const transaction of this._transactions.values()) {
-				uris.add(transaction.uri);
-			}
+		// Get all unique URIs from transactions
+		const uris = new Set<URI>();
+		for (const transaction of this._transactions.values()) {
+			uris.add(transaction.uri);
+		}
 
-			const allDiffAreas: DiffArea[] = [];
-			for (const uri of uris) {
-				const diffAreas = this._diffService.getDiffAreasForUri(uri);
-				allDiffAreas.push(...diffAreas);
-			}
+		const allDiffAreas: DiffArea[] = [];
+		for (const uri of uris) {
+			const diffAreas = this._diffService.getDiffAreasForUri(uri);
+			allDiffAreas.push(...diffAreas);
+		}
 
-			// Also check all diff areas directly from diff service
-			// This ensures we get all diff areas even if not associated with a transaction
-			// Note: This is a simplified approach. A full implementation would track all URIs with diffs.
-			return allDiffAreas;
+		// Also check all diff areas directly from diff service
+		// This ensures we get all diff areas even if not associated with a transaction
+		// Note: This is a simplified approach. A full implementation would track all URIs with diffs.
+		return allDiffAreas;
 	}
 
 	/**

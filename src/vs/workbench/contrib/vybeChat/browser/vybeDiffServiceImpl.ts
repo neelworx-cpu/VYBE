@@ -60,7 +60,7 @@ export class VybeDiffServiceImpl extends Disposable implements IVybeDiffService 
 		uri: URI,
 		originalContent: string,
 		modifiedContent: string,
-		options?: DiffComputationOptions
+		options?: DiffComputationOptions & { diffAreaId?: string }
 	): Promise<{
 		diffs: Diff[];
 		diffAreas: DiffArea[];
@@ -115,7 +115,8 @@ export class VybeDiffServiceImpl extends Disposable implements IVybeDiffService 
 					originalModel,
 					modifiedModel,
 					documentDiff.changes,
-					true // store in memory
+					true, // store in memory
+					options?.diffAreaId // Use provided diffAreaId if available
 				);
 
 				// Emit event for each diff area created
@@ -364,7 +365,8 @@ export class VybeDiffServiceImpl extends Disposable implements IVybeDiffService 
 		originalModel: ITextModel,
 		modifiedModel: ITextModel,
 		changes: readonly DetailedLineRangeMapping[],
-		storeInMemory: boolean = true
+		storeInMemory: boolean = true,
+		providedDiffAreaId?: string
 	): {
 		diffs: Diff[];
 		diffAreas: DiffArea[];
@@ -373,8 +375,8 @@ export class VybeDiffServiceImpl extends Disposable implements IVybeDiffService 
 			return { diffs: [], diffAreas: [] };
 		}
 
-		// Generate stable IDs
-		const diffAreaId = generateUuid();
+		// Use provided diffAreaId if available, otherwise generate new one
+		const diffAreaId = providedDiffAreaId || generateUuid();
 		const diffs: Diff[] = [];
 		const now = Date.now();
 

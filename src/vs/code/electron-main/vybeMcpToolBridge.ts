@@ -271,5 +271,109 @@ export function registerVybeMcpTools(toolHost: VybeStdioToolHost): void {
 			return forwardToolToRenderer('vybe.get_diff_areas', params);
 		}
 	});
+
+	// Tool: vybe.create_edit_transaction
+	toolHost.registerTool({
+		name: 'vybe.create_edit_transaction',
+		description: 'Create a new edit transaction for a file. No approval required.',
+		inputSchema: {
+			type: 'object',
+			properties: {
+				uri: {
+					type: 'string',
+					description: 'File URI for the transaction'
+				},
+				originalContent: {
+					type: 'string',
+					description: 'Original file content (baseline snapshot)'
+				},
+				streaming: {
+					type: 'boolean',
+					description: 'Whether this transaction is for streaming content',
+					default: false
+				}
+			},
+			required: ['uri', 'originalContent']
+		} as IJSONSchema,
+		handler: async (params: unknown, token: CancellationToken) => {
+			return forwardToolToRenderer('vybe.create_edit_transaction', params);
+		}
+	});
+
+	// Tool: vybe.accept_diff
+	toolHost.registerTool({
+		name: 'vybe.accept_diff',
+		description: 'Accept a single diff, applying the change to the file. Requires approval.',
+		inputSchema: {
+			type: 'object',
+			properties: {
+				diffId: {
+					type: 'string',
+					description: 'Unique identifier of the diff to accept'
+				}
+			},
+			required: ['diffId']
+		} as IJSONSchema,
+		handler: async (params: unknown, token: CancellationToken) => {
+			return forwardToolToRenderer('vybe.accept_diff', params);
+		}
+	});
+
+	// Tool: vybe.reject_diff
+	toolHost.registerTool({
+		name: 'vybe.reject_diff',
+		description: 'Reject a single diff, reverting the change. Requires approval.',
+		inputSchema: {
+			type: 'object',
+			properties: {
+				diffId: {
+					type: 'string',
+					description: 'Unique identifier of the diff to reject'
+				}
+			},
+			required: ['diffId']
+		} as IJSONSchema,
+		handler: async (params: unknown, token: CancellationToken) => {
+			return forwardToolToRenderer('vybe.reject_diff', params);
+		}
+	});
+
+	// Tool: vybe.accept_file
+	toolHost.registerTool({
+		name: 'vybe.accept_file',
+		description: 'Accept all diffs in a file. Requires approval.',
+		inputSchema: {
+			type: 'object',
+			properties: {
+				uri: {
+					type: 'string',
+					description: 'File URI to accept all diffs for'
+				}
+			},
+			required: ['uri']
+		} as IJSONSchema,
+		handler: async (params: unknown, token: CancellationToken) => {
+			return forwardToolToRenderer('vybe.accept_file', params);
+		}
+	});
+
+	// Tool: vybe.reject_file
+	toolHost.registerTool({
+		name: 'vybe.reject_file',
+		description: 'Reject all diffs in a file, reverting all changes. Requires approval.',
+		inputSchema: {
+			type: 'object',
+			properties: {
+				uri: {
+					type: 'string',
+					description: 'File URI to reject all diffs for'
+				}
+			},
+			required: ['uri']
+		} as IJSONSchema,
+		handler: async (params: unknown, token: CancellationToken) => {
+			return forwardToolToRenderer('vybe.reject_file', params);
+		}
+	});
 }
 
