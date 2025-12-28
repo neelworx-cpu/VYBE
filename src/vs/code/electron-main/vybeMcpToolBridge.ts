@@ -47,6 +47,39 @@ function ensureResponseHandlerRegistered(): void {
 }
 
 /**
+ * Helper to forward tool calls to renderer via IPC
+ */
+function forwardToolToRenderer(toolName: string, params: unknown): Promise<unknown> {
+	ensureResponseHandlerRegistered();
+
+	return new Promise((resolve, reject) => {
+		const requestId = `tool_${Date.now()}_${Math.random()}`;
+
+		pendingToolRequests.set(requestId, { resolve, reject });
+
+		const windows = BrowserWindow.getAllWindows();
+		if (windows.length > 0) {
+			windows[0].webContents.send('vscode:vybeMcpToolRequest', {
+				requestId,
+				toolName,
+				params
+			});
+		} else {
+			pendingToolRequests.delete(requestId);
+			reject(new Error('No renderer window available'));
+			return;
+		}
+
+		setTimeout(() => {
+			if (pendingToolRequests.has(requestId)) {
+				pendingToolRequests.delete(requestId);
+				reject(new Error('Tool execution timeout'));
+			}
+		}, 60000);
+	});
+}
+
+/**
  * Register tool handlers that forward to renderer via IPC
  */
 export function registerVybeMcpTools(toolHost: VybeStdioToolHost): void {
@@ -80,38 +113,7 @@ export function registerVybeMcpTools(toolHost: VybeStdioToolHost): void {
 			required: ['messages']
 		} as IJSONSchema,
 		handler: async (params: unknown, token: CancellationToken) => {
-			// Forward to renderer via IPC
-			ensureResponseHandlerRegistered();
-
-			return new Promise((resolve, reject) => {
-				// Create a unique request ID
-				const requestId = `tool_${Date.now()}_${Math.random()}`;
-
-				// Store pending request
-				pendingToolRequests.set(requestId, { resolve, reject });
-
-				// Send request to renderer
-				const windows = BrowserWindow.getAllWindows();
-				if (windows.length > 0) {
-					windows[0].webContents.send('vscode:vybeMcpToolRequest', {
-						requestId,
-						toolName: 'vybe.send_llm_message',
-						params
-					});
-				} else {
-					pendingToolRequests.delete(requestId);
-					reject(new Error('No renderer window available'));
-					return;
-				}
-
-				// Timeout after 60 seconds
-				setTimeout(() => {
-					if (pendingToolRequests.has(requestId)) {
-						pendingToolRequests.delete(requestId);
-						reject(new Error('Tool execution timeout'));
-					}
-				}, 60000);
-			});
+			return forwardToolToRenderer('vybe.send_llm_message', params);
 		}
 	});
 
@@ -129,33 +131,7 @@ export function registerVybeMcpTools(toolHost: VybeStdioToolHost): void {
 			}
 		} as IJSONSchema,
 		handler: async (params: unknown, token: CancellationToken) => {
-			ensureResponseHandlerRegistered();
-
-			return new Promise((resolve, reject) => {
-				const requestId = `tool_${Date.now()}_${Math.random()}`;
-
-				pendingToolRequests.set(requestId, { resolve, reject });
-
-				const windows = BrowserWindow.getAllWindows();
-				if (windows.length > 0) {
-					windows[0].webContents.send('vscode:vybeMcpToolRequest', {
-						requestId,
-						toolName: 'vybe.list_models',
-						params
-					});
-				} else {
-					pendingToolRequests.delete(requestId);
-					reject(new Error('No renderer window available'));
-					return;
-				}
-
-				setTimeout(() => {
-					if (pendingToolRequests.has(requestId)) {
-						pendingToolRequests.delete(requestId);
-						reject(new Error('Tool execution timeout'));
-					}
-				}, 60000);
-			});
+			return forwardToolToRenderer('vybe.list_models', params);
 		}
 	});
 
@@ -174,33 +150,125 @@ export function registerVybeMcpTools(toolHost: VybeStdioToolHost): void {
 			required: ['requestId']
 		} as IJSONSchema,
 		handler: async (params: unknown, token: CancellationToken) => {
-			ensureResponseHandlerRegistered();
+			return forwardToolToRenderer('vybe.abort_llm_request', params);
+		}
+	});
 
-			return new Promise((resolve, reject) => {
-				const requestId = `tool_${Date.now()}_${Math.random()}`;
-
-				pendingToolRequests.set(requestId, { resolve, reject });
-
-				const windows = BrowserWindow.getAllWindows();
-				if (windows.length > 0) {
-					windows[0].webContents.send('vscode:vybeMcpToolRequest', {
-						requestId,
-						toolName: 'vybe.abort_llm_request',
-						params
-					});
-				} else {
-					pendingToolRequests.delete(requestId);
-					reject(new Error('No renderer window available'));
-					return;
+	// Tool: vybe.read_file
+	toolHost.registerTool({
+		name: 'vybe.read_file',
+		description: 'Read file content from workspace. Read-only operation.',
+		inputSchema: {
+			type: 'object',
+			properties: {
+				uri: {
+					type: 'string',
+					description: 'File URI to read'
 				}
+			},
+			required: ['uri']
+		} as IJSONSchema,
+		handler: async (params: unknown, token: CancellationToken) => {
+			return forwardToolToRenderer('vybe.read_file', params);
+		}
+	});
 
-				setTimeout(() => {
-					if (pendingToolRequests.has(requestId)) {
-						pendingToolRequests.delete(requestId);
-						reject(new Error('Tool execution timeout'));
-					}
-				}, 60000);
-			});
+	// Tool: vybe.list_files
+	toolHost.registerTool({
+		name: 'vybe.list_files',
+		description: 'List files and directories in a workspace directory. Read-only operation.',
+		inputSchema: {
+			type: 'object',
+			properties: {
+				uri: {
+					type: 'string',
+					description: 'Directory URI to list'
+				},
+				recursive: {
+					type: 'boolean',
+					description: 'Whether to recurse into subdirectories',
+					default: false
+				}
+			},
+			required: ['uri']
+		} as IJSONSchema,
+		handler: async (params: unknown, token: CancellationToken) => {
+			return forwardToolToRenderer('vybe.list_files', params);
+		}
+	});
+
+	// Tool: vybe.get_file_info
+	toolHost.registerTool({
+		name: 'vybe.get_file_info',
+		description: 'Get file metadata (size, mtime, type). Read-only operation.',
+		inputSchema: {
+			type: 'object',
+			properties: {
+				uri: {
+					type: 'string',
+					description: 'File URI to get info for'
+				}
+			},
+			required: ['uri']
+		} as IJSONSchema,
+		handler: async (params: unknown, token: CancellationToken) => {
+			return forwardToolToRenderer('vybe.get_file_info', params);
+		}
+	});
+
+	// Tool: vybe.compute_diff
+	toolHost.registerTool({
+		name: 'vybe.compute_diff',
+		description: 'Compute diff between two content strings. Pure computation, no side effects.',
+		inputSchema: {
+			type: 'object',
+			properties: {
+				original: {
+					type: 'string',
+					description: 'Original content'
+				},
+				modified: {
+					type: 'string',
+					description: 'Modified content'
+				},
+				languageId: {
+					type: 'string',
+					description: 'Optional language ID for syntax-aware diff'
+				},
+				ignoreTrimWhitespace: {
+					type: 'boolean',
+					description: 'Whether to ignore whitespace changes',
+					default: false
+				},
+				maxComputationTimeMs: {
+					type: 'number',
+					description: 'Maximum computation time in milliseconds',
+					default: 3000
+				}
+			},
+			required: ['original', 'modified']
+		} as IJSONSchema,
+		handler: async (params: unknown, token: CancellationToken) => {
+			return forwardToolToRenderer('vybe.compute_diff', params);
+		}
+	});
+
+	// Tool: vybe.get_diff_areas
+	toolHost.registerTool({
+		name: 'vybe.get_diff_areas',
+		description: 'Get existing diff areas for a file. Read-only operation.',
+		inputSchema: {
+			type: 'object',
+			properties: {
+				uri: {
+					type: 'string',
+					description: 'File URI to get diff areas for'
+				}
+			},
+			required: ['uri']
+		} as IJSONSchema,
+		handler: async (params: unknown, token: CancellationToken) => {
+			return forwardToolToRenderer('vybe.get_diff_areas', params);
 		}
 	});
 }

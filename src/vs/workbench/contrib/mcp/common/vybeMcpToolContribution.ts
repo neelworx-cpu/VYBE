@@ -22,6 +22,17 @@ import { IVybeLLMMessageService } from '../../../contrib/vybeLLM/common/vybeLLMM
 import { IVybeLLMModelService } from '../../../contrib/vybeLLM/common/vybeLLMModelService.js';
 import { IStorageService } from '../../../../platform/storage/common/storage.js';
 import { handleVybeSendLLMMessage, handleVybeListModels, handleVybeAbortLLMRequest } from '../../../contrib/vybeLLM/browser/tools/vybeLLMMCPTool.js';
+import { IFileService } from '../../../../platform/files/common/files.js';
+import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
+import { IVybeDiffService } from '../../../contrib/vybeChat/common/vybeDiffService.js';
+import { IVybeEditService } from '../../../contrib/vybeChat/common/vybeEditService.js';
+import {
+	handleVybeReadFile,
+	handleVybeListFiles,
+	handleVybeGetFileInfo,
+	handleVybeComputeDiff,
+	handleVybeGetDiffAreas
+} from '../browser/tools/vybeReadOnlyToolHandlers.js';
 import { isNative } from '../../../../base/common/platform.js';
 import { ipcRenderer } from '../../../../base/parts/sandbox/electron-browser/globals.js';
 
@@ -62,6 +73,10 @@ export class VybeMcpToolContribution extends Disposable implements IWorkbenchCon
 		@IVybeLLMMessageService private readonly llmService: IVybeLLMMessageService,
 		@IVybeLLMModelService private readonly modelService: IVybeLLMModelService,
 		@IStorageService private readonly storageService: IStorageService,
+		@IFileService private readonly fileService: IFileService,
+		@IWorkspaceContextService private readonly workspaceService: IWorkspaceContextService,
+		@IVybeDiffService private readonly diffService: IVybeDiffService,
+		@IVybeEditService private readonly editService: IVybeEditService,
 	) {
 		super();
 
@@ -403,6 +418,50 @@ export class VybeMcpToolContribution extends Disposable implements IWorkbenchCon
 					case 'vybe.abort_llm_request':
 						result = await handleVybeAbortLLMRequest(
 							this.llmService,
+							request.params as any,
+							token
+						);
+						break;
+
+					case 'vybe.read_file':
+						result = await handleVybeReadFile(
+							this.fileService,
+							this.workspaceService,
+							request.params as any,
+							token
+						);
+						break;
+
+					case 'vybe.list_files':
+						result = await handleVybeListFiles(
+							this.fileService,
+							this.workspaceService,
+							request.params as any,
+							token
+						);
+						break;
+
+					case 'vybe.get_file_info':
+						result = await handleVybeGetFileInfo(
+							this.fileService,
+							this.workspaceService,
+							request.params as any,
+							token
+						);
+						break;
+
+					case 'vybe.compute_diff':
+						result = await handleVybeComputeDiff(
+							this.diffService,
+							request.params as any,
+							token
+						);
+						break;
+
+					case 'vybe.get_diff_areas':
+						result = await handleVybeGetDiffAreas(
+							this.editService,
+							this.workspaceService,
 							request.params as any,
 							token
 						);
