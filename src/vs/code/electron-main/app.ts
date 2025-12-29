@@ -98,6 +98,7 @@ import { IUserDataProfilesMainService } from '../../platform/userDataProfile/ele
 import { IExtensionsProfileScannerService } from '../../platform/extensionManagement/common/extensionsProfileScannerService.js';
 import { IExtensionsScannerService } from '../../platform/extensionManagement/common/extensionsScannerService.js';
 import { ExtensionsScannerService } from '../../platform/extensionManagement/node/extensionsScannerService.js';
+import { VybeMcpMainService } from './vybeMcpMainService.js';
 import { UserDataProfilesHandler } from '../../platform/userDataProfile/electron-main/userDataProfilesHandler.js';
 import { ProfileStorageChangesListenerChannel } from '../../platform/userDataProfile/electron-main/userDataProfileStorageIpc.js';
 import { Promises, RunOnceScheduler, runWhenGlobalIdle } from '../../base/common/async.js';
@@ -118,6 +119,7 @@ import { AuxiliaryWindowsMainService } from '../../platform/auxiliaryWindow/elec
 import { normalizeNFC } from '../../base/common/normalization.js';
 import { ICSSDevelopmentService, CSSDevelopmentService } from '../../platform/cssDev/node/cssDevService.js';
 import { INativeMcpDiscoveryHelperService, NativeMcpDiscoveryHelperChannelName } from '../../platform/mcp/common/nativeMcpDiscoveryHelper.js';
+import { VybeLLMMessageChannel } from '../../workbench/contrib/vybeLLM/electron-main/vybeLLMMessageChannel.js';
 import { NativeMcpDiscoveryHelperService } from '../../platform/mcp/node/nativeMcpDiscoveryHelperService.js';
 import { IWebContentExtractorService } from '../../platform/webContentExtractor/common/webContentExtractor.js';
 import { NativeWebContentExtractorService } from '../../platform/webContentExtractor/electron-main/webContentExtractorService.js';
@@ -137,6 +139,7 @@ export class CodeApplication extends Disposable {
 	private windowsMainService: IWindowsMainService | undefined;
 	private auxiliaryWindowsMainService: IAuxiliaryWindowsMainService | undefined;
 	private nativeHostMainService: INativeHostMainService | undefined;
+	private vybeMcpService: VybeMcpMainService | null = null;
 
 	constructor(
 		private readonly mainProcessNodeIpcServer: NodeIPCServer,
@@ -512,6 +515,56 @@ export class CodeApplication extends Disposable {
 		validatedIpcMain.on('vscode:openDevTools', event => event.sender.openDevTools());
 
 		validatedIpcMain.on('vscode:reloadWindow', event => event.sender.reload());
+
+		// VYBE MCP: Get environment variable from main process
+		validatedIpcMain.handle('vscode:getVybeMcpCommand', async (event) => {
+			return process.env.VYBE_MCP_COMMAND || undefined;
+		});
+
+		// VYBE MCP: Spawn MCP process in main process
+		validatedIpcMain.handle('vscode:spawnVybeMcp', async (event, options: { mcpCommand: string; cwd?: string }) => {
+			try {
+				// Instantiate service directly (not using service collection)
+				this.vybeMcpService = new VybeMcpMainService(
+					this.loggerService,
+					this.environmentMainService
+				);
+				const result = await this.vybeMcpService.spawnMcp({
+					mcpCommand: options.mcpCommand,
+					cwd: options.cwd
+				});
+				return result;
+			} catch (error) {
+				const errorMessage = error instanceof Error ? error.message : String(error);
+				return { success: false, error: errorMessage };
+			}
+		});
+
+		// VYBE MCP: Tool response handler is registered in vybeMcpToolBridge
+		// No need to register here - the bridge uses ipcMain directly for dynamic request/response matching
+
+		// VYBE MCP: Patch utilities (Node.js-only, called from renderer via IPC)
+		validatedIpcMain.handle('vscode:vybeValidatePatch', async (event, originalContent: string, patch: string) => {
+			try {
+				const { validatePatch } = await import('../../workbench/contrib/mcp/node/vybePatchUtils.js');
+				return validatePatch(originalContent, patch);
+			} catch (error) {
+				return {
+					valid: false,
+					error: error instanceof Error ? error.message : String(error),
+					hunkCount: 0
+				};
+			}
+		});
+
+		validatedIpcMain.handle('vscode:vybeApplyPatch', async (event, originalContent: string, patch: string) => {
+			try {
+				const { applyPatchInMemory } = await import('../../workbench/contrib/mcp/node/vybePatchUtils.js');
+				return applyPatchInMemory(originalContent, patch);
+			} catch (error) {
+				return null;
+			}
+		});
 
 		validatedIpcMain.handle('vscode:notifyZoomLevel', async (event, zoomLevel: number | undefined) => {
 			const window = this.windowsMainService?.getWindowByWebContents(event.sender);
@@ -1027,6 +1080,8 @@ export class CodeApplication extends Disposable {
 		// Native Host
 		services.set(INativeHostMainService, new SyncDescriptor(NativeHostMainService, undefined, false /* proxied to other processes */));
 
+		// VYBE MCP (no service identifier needed - instantiated directly in IPC handler)
+
 		// Web Contents Extractor
 		services.set(IWebContentExtractorService, new SyncDescriptor(NativeWebContentExtractorService, undefined, false /* proxied to other processes */));
 
@@ -1239,6 +1294,10 @@ export class CodeApplication extends Disposable {
 		// Utility Process Worker
 		const utilityProcessWorkerChannel = ProxyChannel.fromService(accessor.get(IUtilityProcessWorkerMainService), disposables);
 		mainProcessElectronServer.registerChannel(ipcUtilityProcessWorkerChannelName, utilityProcessWorkerChannel);
+
+		// VYBE LLM Message Channel
+		const vybeLLMMessageChannel = new VybeLLMMessageChannel();
+		mainProcessElectronServer.registerChannel('vybe-channel-llmMessage', vybeLLMMessageChannel);
 	}
 
 	private async openFirstWindow(accessor: ServicesAccessor, initialProtocolUrls: IInitialProtocolUrls | undefined): Promise<ICodeWindow[]> {

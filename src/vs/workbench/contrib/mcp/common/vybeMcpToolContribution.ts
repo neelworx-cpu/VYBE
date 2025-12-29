@@ -18,6 +18,36 @@ import { GetContextForMcpRequest, ListIndexStatusRequest, RefreshIndexRequest, S
 import { IJSONSchema } from '../../../../base/common/jsonSchema.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { CONFIG_ENABLE_LOCAL_INDEXING } from '../../../services/indexing/common/indexingConfiguration.js';
+import { IVybeLLMMessageService } from '../../../contrib/vybeLLM/common/vybeLLMMessageService.js';
+import { IVybeLLMModelService } from '../../../contrib/vybeLLM/common/vybeLLMModelService.js';
+import { IStorageService } from '../../../../platform/storage/common/storage.js';
+import { handleVybeSendLLMMessage, handleVybeListModels, handleVybeAbortLLMRequest } from '../../../contrib/vybeLLM/browser/tools/vybeLLMMCPTool.js';
+import { IFileService } from '../../../../platform/files/common/files.js';
+import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
+import { IVybeDiffService } from '../../../contrib/vybeChat/common/vybeDiffService.js';
+import { IVybeEditService } from '../../../contrib/vybeChat/common/vybeEditService.js';
+import {
+	handleVybeReadFile,
+	handleVybeListFiles,
+	handleVybeGetFileInfo,
+	handleVybeComputeDiff,
+	handleVybeGetDiffAreas
+} from '../browser/tools/vybeReadOnlyToolHandlers.js';
+import {
+	handleVybeCreateEditTransaction,
+	handleVybeAcceptDiff,
+	handleVybeRejectDiff,
+	handleVybeAcceptFile,
+	handleVybeRejectFile,
+	handleVybeWriteFile,
+	handleVybeApplyPatch
+} from '../browser/tools/vybeMutationToolHandlers.js';
+import { ITextFileService } from '../../../services/textfile/common/textfiles.js';
+import { IVybeMcpToolApprovalService } from './vybeMcpToolApprovalService.js';
+import { isNative } from '../../../../base/common/platform.js';
+import { ipcRenderer } from '../../../../base/parts/sandbox/electron-browser/globals.js';
+import { IModelService } from '../../../../editor/common/services/model.js';
+import { ILanguageService } from '../../../../editor/common/languages/language.js';
 
 class VybeLocalMcpServer {
 	private router: VybeMcpRouter | undefined;
@@ -53,8 +83,23 @@ export class VybeMcpToolContribution extends Disposable implements IWorkbenchCon
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
 		@IProductService private readonly productService: IProductService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
+		@IVybeLLMMessageService private readonly llmService: IVybeLLMMessageService,
+		@IVybeLLMModelService private readonly modelService: IVybeLLMModelService,
+		@IStorageService private readonly storageService: IStorageService,
+		@IFileService private readonly fileService: IFileService,
+		@IWorkspaceContextService private readonly workspaceService: IWorkspaceContextService,
+		@IVybeDiffService private readonly diffService: IVybeDiffService,
+		@IVybeEditService private readonly editService: IVybeEditService,
+		@IVybeMcpToolApprovalService private readonly approvalService: IVybeMcpToolApprovalService,
+		@ITextFileService private readonly textFileService: ITextFileService,
+		@IModelService private readonly editorModelService: IModelService,
+		@ILanguageService private readonly languageService: ILanguageService,
 	) {
 		super();
+
+		// Initialize stdio tool host and launcher (Phase 1)
+		// Use void to fire and forget (async initialization)
+		void this.initializeStdioToolHost();
 
 		const previous = this._register(new DisposableStore());
 
@@ -119,6 +164,37 @@ export class VybeMcpToolContribution extends Disposable implements IWorkbenchCon
 						return router.handleRefreshIndex(params as RefreshIndexRequest, token);
 					}
 				},
+				{
+					id: 'vybe.send_llm_message',
+					displayName: 'VYBE: Send LLM Message',
+					description: 'Send LLM message via IDE\'s LLM transport (Ollama, LM Studio). IDE resolves provider/model defaults.',
+					icon: Codicon.commentDiscussion,
+					handler: async (params, token) => {
+						return handleVybeSendLLMMessage(
+							this.llmService,
+							this.storageService,
+							params as {
+								messages: Array<{ role: string; content: string }>;
+								options?: { temperature?: number; maxTokens?: number };
+								stream?: boolean;
+							},
+							token
+						);
+					}
+				},
+				{
+					id: 'vybe.list_models',
+					displayName: 'VYBE: List Models',
+					description: 'List available models from IDE\'s LLM providers (Ollama, LM Studio).',
+					icon: Codicon.database,
+					handler: async (params, token) => {
+						return handleVybeListModels(
+							this.modelService,
+							params as { providerName?: 'ollama' | 'vLLM' | 'lmStudio' },
+							token
+						);
+					}
+				},
 			];
 
 			const toolSet = this.toolsService.createToolSet(
@@ -171,6 +247,339 @@ export class VybeMcpToolContribution extends Disposable implements IWorkbenchCon
 
 			this.toolsService.flushToolUpdates();
 		}));
+	}
+
+	/**
+	 * Initialize stdio tool host and MCP launcher (Phase 1)
+	 * Only runs in Electron (not web), and only if MCP path is configured
+	 */
+	private async initializeStdioToolHost(): Promise<void> {
+		// Only initialize in native/Electron environment (not web)
+		// Process spawning must happen in main process, not browser
+		// TODO: Move process spawning to main process via IPC channel
+		try {
+			// Check if we're in native environment (Electron, not web)
+			if (!isNative) {
+				// Web environment - skip stdio tool host initialization
+				console.log('[VYBE MCP] Skipping stdio tool host: not in native environment');
+				return;
+			}
+
+			// Get environment variable from main process via IPC
+			// Main process has access to process.env, renderer does not
+			let mcpCommand: string | undefined;
+
+			try {
+				// Use ipcRenderer.invoke to call the validatedIpcMain.handle handler
+				if (isNative && ipcRenderer) {
+					const result = await ipcRenderer.invoke('vscode:getVybeMcpCommand') as string | undefined;
+					mcpCommand = result;
+				}
+			} catch (error) {
+				console.warn('[VYBE MCP] Failed to get MCP command from main process:', error);
+			}
+
+			// Fallback: try renderer process.env (might work in some Electron setups)
+			if (!mcpCommand && typeof process !== 'undefined' && process.env) {
+				mcpCommand = process.env.VYBE_MCP_COMMAND;
+			}
+
+			// Debug logging
+			console.log('[VYBE MCP] Checking for VYBE_MCP_COMMAND:', mcpCommand ? `FOUND: ${mcpCommand}` : 'NOT FOUND');
+
+			// Skip if no MCP command configured
+			if (!mcpCommand) {
+				// Don't initialize if MCP command is not explicitly configured
+				// This prevents errors when MCP is not set up
+				console.log('[VYBE MCP] Skipping stdio tool host: VYBE_MCP_COMMAND not set');
+				console.log('[VYBE MCP] Note: Set VYBE_MCP_COMMAND environment variable before starting the IDE');
+				return;
+			}
+
+			console.log('[VYBE MCP] Initializing stdio tool host with command:', mcpCommand);
+
+			// NOTE: Process spawning MUST happen in main process, not renderer.
+			// The renderer process cannot access Node.js require() or child_process.
+			// For Phase 1, we skip initialization and document this limitation.
+			// TODO: Move process spawning to main process via IPC channel.
+			// The main process should:
+			// 1. Spawn MCP subprocess
+			// 2. Create stdio tool host in main process
+			// 3. Expose tool calls via IPC channel to renderer
+			// 4. Renderer calls tools via IPC, main process executes them
+
+			// Request main process to spawn MCP process
+			// Main process will handle spawning and return success/failure
+			try {
+				const result = await ipcRenderer.invoke('vscode:spawnVybeMcp', {
+					mcpCommand
+					// cwd is optional and not needed for Phase 1
+				}) as { success: boolean; error?: string };
+
+				if (result.success) {
+					console.log('[VYBE MCP] MCP process spawned successfully by main process');
+
+					// Set up IPC listener for tool execution requests from main process
+					this.setupToolExecutionListener();
+				} else {
+					console.error('[VYBE MCP] Failed to spawn MCP process:', result.error);
+				}
+			} catch (error) {
+				console.error('[VYBE MCP] Failed to request MCP spawn from main process:', error);
+			}
+
+			/* DISABLED: Process spawning from renderer (not possible)
+			try {
+				// This code cannot work - require() is not available in renderer
+				if (typeof require !== 'function') {
+					throw new Error('require() not available in this context');
+				}
+				const module = require('../node/vybeMcpLauncher.js');
+				const { VybeMcpLauncher } = module;
+
+				// Create logger for stdio tool host
+				// Use logs directory from environment service
+				const logsPath = this.environmentService.logsHome;
+				const loggerUri = URI.joinPath(logsPath, 'mcp-stdio.log');
+				const logger = this.loggerService.createLogger(loggerUri, { name: 'VYBE MCP Stdio' });
+
+				// Create tool handler bridge
+				const bridge = new VybeToolHandlerBridge(
+					this.llmService,
+					this.modelService,
+					this.storageService
+				);
+
+				// Create launcher options (matching VybeMcpLauncherOptions interface)
+				// Type is inferred from the constructor - no explicit type needed
+				// Get environment variables - try multiple sources
+				const currentEnv: Record<string, string> = {};
+				if (typeof process !== 'undefined' && process.env) {
+					Object.assign(currentEnv, process.env);
+				}
+				if (typeof globalThis !== 'undefined' && (globalThis as any).process?.env) {
+					Object.assign(currentEnv, (globalThis as any).process.env);
+				}
+
+				const launcherOptions = {
+					mcpExecutablePath: mcpCommand,
+					cwd: currentEnv.VYBE_MCP_CWD,
+					env: {
+						...currentEnv,
+						VYBE_IDE_STDIO: '1' // Signal to MCP that it should connect via stdio
+					},
+					logger
+				};
+
+				const launcher = new VybeMcpLauncher(launcherOptions);
+				this._register(launcher);
+
+				// Launch MCP process and register tools
+				launcher.launch().then((toolHost: VybeStdioToolHost) => {
+					// Register tools from bridge
+					const toolDefinitions = bridge.createToolDefinitions();
+					for (const tool of toolDefinitions) {
+						toolHost.registerTool(tool);
+						logger.info(`Registered stdio tool: ${tool.name}`);
+					}
+					logger.info('VYBE stdio tool host initialized');
+				}).catch((error: unknown) => {
+					// Log error but don't throw - this is optional functionality
+					logger.error(`Failed to initialize stdio tool host: ${error instanceof Error ? error.message : String(error)}`);
+					console.error('[VYBE MCP] Failed to launch MCP process:', error);
+				});
+			} catch (importError) {
+				console.error('[VYBE MCP] Failed to load VybeMcpLauncher:', importError);
+			}
+			*/
+		} catch (error) {
+			// Log initialization errors for debugging
+			console.error('[VYBE MCP] Error during stdio tool host initialization:', error);
+		}
+	}
+
+	/**
+	 * Set up IPC listener for tool execution requests from main process
+	 */
+	private setupToolExecutionListener(): void {
+		if (!isNative || !ipcRenderer) {
+			return;
+		}
+
+		// Listen for tool execution requests from main process
+		ipcRenderer.on('vscode:vybeMcpToolRequest', async (event, ...args: unknown[]) => {
+			const request = args[0] as { requestId: string; toolName: string; params: unknown };
+			try {
+				let result: unknown;
+				// Use CancellationToken.None for Phase 1 (no cancellation support yet)
+				const token = CancellationToken.None;
+
+				switch (request.toolName) {
+					case 'vybe.send_llm_message':
+						result = await handleVybeSendLLMMessage(
+							this.llmService,
+							this.storageService,
+							request.params as any,
+							token
+						);
+						break;
+
+					case 'vybe.list_models':
+						result = await handleVybeListModels(
+							this.modelService,
+							request.params as any,
+							token
+						);
+						break;
+
+					case 'vybe.abort_llm_request':
+						result = await handleVybeAbortLLMRequest(
+							this.llmService,
+							request.params as any,
+							token
+						);
+						break;
+
+					case 'vybe.read_file':
+						result = await handleVybeReadFile(
+							this.fileService,
+							this.workspaceService,
+							request.params as any,
+							token
+						);
+						break;
+
+					case 'vybe.list_files':
+						result = await handleVybeListFiles(
+							this.fileService,
+							this.workspaceService,
+							request.params as any,
+							token
+						);
+						break;
+
+					case 'vybe.get_file_info':
+						result = await handleVybeGetFileInfo(
+							this.fileService,
+							this.workspaceService,
+							request.params as any,
+							token
+						);
+						break;
+
+					case 'vybe.compute_diff':
+						result = await handleVybeComputeDiff(
+							this.diffService,
+							request.params as any,
+							token
+						);
+						break;
+
+					case 'vybe.get_diff_areas':
+						result = await handleVybeGetDiffAreas(
+							this.editService,
+							this.workspaceService,
+							request.params as any,
+							token
+						);
+						break;
+
+					case 'vybe.create_edit_transaction':
+						result = await handleVybeCreateEditTransaction(
+							this.editService,
+							this.workspaceService,
+							request.params as any,
+							token
+						);
+						break;
+
+					case 'vybe.accept_diff':
+						result = await handleVybeAcceptDiff(
+							this.editService,
+							this.approvalService,
+							this.workspaceService,
+							request.params as any,
+							token
+						);
+						break;
+
+					case 'vybe.reject_diff':
+						result = await handleVybeRejectDiff(
+							this.editService,
+							this.approvalService,
+							this.workspaceService,
+							request.params as any,
+							token
+						);
+						break;
+
+					case 'vybe.accept_file':
+						result = await handleVybeAcceptFile(
+							this.editService,
+							this.approvalService,
+							this.workspaceService,
+							request.params as any,
+							token
+						);
+						break;
+
+					case 'vybe.reject_file':
+						result = await handleVybeRejectFile(
+							this.editService,
+							this.approvalService,
+							this.workspaceService,
+							request.params as any,
+							token
+						);
+						break;
+
+					case 'vybe.write_file':
+						result = await handleVybeWriteFile(
+							this.fileService,
+							this.textFileService,
+							this.editService,
+							this.diffService,
+							this.approvalService,
+							this.workspaceService,
+							this.editorModelService,
+							this.languageService,
+							request.params as any,
+							token
+						);
+						break;
+
+					case 'vybe.apply_patch':
+						result = await handleVybeApplyPatch(
+							this.fileService,
+							this.textFileService,
+							this.editService,
+							this.diffService,
+							this.approvalService,
+							this.workspaceService,
+							this.editorModelService,
+							this.languageService,
+							request.params as any,
+							token
+						);
+						break;
+
+					default:
+						throw new Error(`Unknown tool: ${request.toolName}`);
+				}
+
+				// Send response back to main process
+				ipcRenderer.send('vscode:vybeMcpToolResponse', request.requestId, {
+					success: true,
+					result
+				});
+			} catch (error) {
+				// Send error response
+				ipcRenderer.send('vscode:vybeMcpToolResponse', request.requestId, {
+					success: false,
+					error: error instanceof Error ? error.message : String(error)
+				});
+			}
+		});
 	}
 }
 

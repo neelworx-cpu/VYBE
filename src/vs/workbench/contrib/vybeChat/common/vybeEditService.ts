@@ -89,8 +89,9 @@ export interface IVybeEditService {
 	 * Accept all diffs in a file.
 	 * Creates a checkpoint before accepting.
 	 * @param uri File URI to accept all diffs for
+	 * @param autoSave Whether to automatically save the file to disk after accepting (default: false)
 	 */
-	acceptFile(uri: URI): Promise<void>;
+	acceptFile(uri: URI, autoSave?: boolean): Promise<void>;
 
 	/**
 	 * Reject all diffs in a file, reverting all changes.

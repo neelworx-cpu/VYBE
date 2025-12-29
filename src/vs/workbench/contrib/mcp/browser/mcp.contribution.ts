@@ -45,6 +45,7 @@ import { McpServersViewsContribution } from './mcpServersView.js';
 import { MCPContextsInitialisation, McpWorkbenchService } from './mcpWorkbenchService.js';
 import { VybeMcpToolContribution } from '../common/vybeMcpToolContribution.js';
 import { VybeLocalIndexDevSmokeTest } from './vybeLocalIndexDevSmokeTest.js';
+import './contribution/vybeMcpToolApprovalService.contribution.js';
 
 registerSingleton(IMcpRegistry, McpRegistry, InstantiationType.Delayed);
 registerSingleton(IMcpService, McpService, InstantiationType.Delayed);
