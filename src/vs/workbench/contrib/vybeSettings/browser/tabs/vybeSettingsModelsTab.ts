@@ -4,8 +4,15 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as DOM from '../../../../../base/browser/dom.js';
-import { createSection } from '../vybeSettingsComponents.js';
+import { createSection, createButton } from '../vybeSettingsComponents.js';
 import { addDisposableListener, EventType } from '../../../../../base/browser/dom.js';
+import { IStorageService, StorageScope, StorageTarget } from '../../../../../platform/storage/common/storage.js';
+import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
+import { DisposableStore } from '../../../../../base/common/lifecycle.js';
+import { IVybeLLMModelService } from '../../../vybeLLM/common/vybeLLMModelService.js';
+import { defaultVybeLLMProviderSettings, VybeLLMProviderSettings } from '../../../vybeLLM/common/vybeLLMMessageTypes.js';
+
+const VYBE_LLM_SETTINGS_STORAGE_KEY = 'vybe.llm.providers';
 
 interface ModelItem {
 	name: string;
@@ -377,8 +384,345 @@ function createApiKeySection(parent: HTMLElement, config: ApiKeySection): HTMLEl
 	return section;
 }
 
-export function renderModelsTab(parent: HTMLElement): void {
-	// Models section
+export function renderModelsTab(
+	parent: HTMLElement,
+	storageService: IStorageService,
+	instantiationService: IInstantiationService,
+	disposables: DisposableStore
+): void {
+	// Local LLM Providers section
+	const providersSection = createSection(parent, 'Local LLM Providers');
+	const providersSectionList = providersSection.querySelector('.cursor-settings-section-list') as HTMLElement;
+	const providersSubSection = DOM.append(providersSectionList, DOM.$('.cursor-settings-sub-section'));
+
+	// Get current settings
+	const getProviderSettings = (): VybeLLMProviderSettings => {
+		const stored = storageService.get(VYBE_LLM_SETTINGS_STORAGE_KEY, StorageScope.APPLICATION);
+		if (stored) {
+			try {
+				const parsed = JSON.parse(stored) as Partial<VybeLLMProviderSettings>;
+				return {
+					ollama: parsed.ollama || defaultVybeLLMProviderSettings.ollama,
+					vLLM: parsed.vLLM || defaultVybeLLMProviderSettings.vLLM,
+					lmStudio: parsed.lmStudio || defaultVybeLLMProviderSettings.lmStudio,
+				};
+			} catch {
+				return defaultVybeLLMProviderSettings;
+			}
+		}
+		return defaultVybeLLMProviderSettings;
+	};
+
+	const saveProviderSettings = (settings: VybeLLMProviderSettings): void => {
+		storageService.store(VYBE_LLM_SETTINGS_STORAGE_KEY, JSON.stringify(settings), StorageScope.APPLICATION, StorageTarget.USER);
+	};
+
+	// Create endpoint input cells for each provider
+	const createEndpointCell = (providerName: 'ollama' | 'vLLM' | 'lmStudio', label: string, description: string, hasDivider: boolean = false): HTMLElement => {
+		const currentSettings = getProviderSettings();
+		const currentValue = currentSettings[providerName].endpoint;
+
+		let subSectionList = providersSubSection.querySelector('.cursor-settings-sub-section-list') as HTMLElement | null;
+		if (!subSectionList) {
+			subSectionList = DOM.append(providersSubSection, DOM.$('.cursor-settings-sub-section-list'));
+			subSectionList.style.cssText = `
+				display: flex;
+				flex-direction: column;
+				background-color: var(--vscode-activityBar-background);
+				border-radius: 8px;
+				gap: 0;
+			`;
+		}
+
+		const cell = DOM.append(subSectionList, DOM.$('.cursor-settings-cell.cursor-settings-cell-align-top'));
+		cell.style.cssText = `
+			display: flex;
+			align-items: center;
+			gap: 20px;
+			padding: 12px;
+			position: relative;
+		`;
+
+		if (hasDivider) {
+			const divider = DOM.append(cell, DOM.$('.cursor-settings-cell-divider'));
+			divider.style.cssText = `
+				position: absolute;
+				top: 0;
+				left: 12px;
+				right: 12px;
+				height: 1px;
+				background-color: rgba(20, 20, 20, 0.07);
+			`;
+		}
+
+		const leadingItems = DOM.append(cell, DOM.$('.cursor-settings-cell-leading-items'));
+		leadingItems.style.cssText = 'display: flex; flex-direction: column; gap: 1px; flex: 1;';
+
+		const labelContainer = DOM.append(leadingItems, DOM.$('p.cursor-settings-cell-label'));
+		labelContainer.textContent = label;
+		labelContainer.style.cssText = `
+			margin: 0;
+			font-size: 12px;
+			font-weight: 400;
+			color: var(--vscode-foreground);
+			line-height: 16px;
+		`;
+
+		const descriptionEl = DOM.append(leadingItems, DOM.$('div.cursor-settings-cell-description'));
+		descriptionEl.textContent = description;
+		descriptionEl.style.cssText = `
+			font-size: 12px;
+			color: rgba(20, 20, 20, 0.55);
+			line-height: 16px;
+		`;
+
+		const trailingItems = DOM.append(cell, DOM.$('.cursor-settings-cell-trailing-items'));
+		trailingItems.style.cssText = 'flex-shrink: 0; display: flex; align-items: center; justify-content: flex-end; gap: 8px;';
+
+		const inputContainer = DOM.append(trailingItems, DOM.$('div'));
+		inputContainer.style.cssText = 'display: flex; gap: 8px; align-items: center;';
+
+		const input = DOM.append(inputContainer, DOM.$('input'));
+		(input as HTMLInputElement).type = 'text';
+		(input as HTMLInputElement).value = currentValue;
+		(input as HTMLInputElement).placeholder = `e.g. ${currentValue}`;
+		(input as HTMLInputElement).spellcheck = false;
+		input.style.cssText = `
+			width: 250px;
+			background-color: var(--vscode-input-background);
+			border-radius: 2px;
+			border: 1px solid var(--vscode-settings-dropdownBorder);
+			outline: none;
+			padding: 2px 6px;
+			font-size: 12px;
+			color: var(--vscode-input-foreground);
+			line-height: 1.4;
+			box-sizing: border-box;
+		`;
+
+		const testButton = createButton('Test', 'tertiary');
+		testButton.title = 'Test connection';
+		inputContainer.appendChild(testButton);
+
+		// Save on input change (debounced)
+		let saveTimeout: ReturnType<typeof setTimeout> | null = null;
+		disposables.add(addDisposableListener(input, EventType.INPUT, () => {
+			if (saveTimeout) {
+				clearTimeout(saveTimeout);
+			}
+			saveTimeout = setTimeout(() => {
+				const newSettings = getProviderSettings();
+				newSettings[providerName].endpoint = (input as HTMLInputElement).value.trim() || defaultVybeLLMProviderSettings[providerName].endpoint;
+				saveProviderSettings(newSettings);
+			}, 500);
+		}));
+
+		// Test button handler
+		disposables.add(addDisposableListener(testButton, EventType.CLICK, async () => {
+			const endpoint = (input as HTMLInputElement).value.trim() || defaultVybeLLMProviderSettings[providerName].endpoint;
+			testButton.textContent = 'Testing...';
+			testButton.style.opacity = '0.6';
+			testButton.style.pointerEvents = 'none';
+
+			try {
+				// Get model service and test connection
+				const modelService = instantiationService.invokeFunction((accessor) => {
+					try {
+						return accessor.get(IVybeLLMModelService);
+					} catch {
+						return null;
+					}
+				});
+
+				if (modelService) {
+					// Save endpoint first
+					const newSettings = getProviderSettings();
+					newSettings[providerName].endpoint = endpoint;
+					saveProviderSettings(newSettings);
+
+					// Refresh models to test connection
+					await modelService.refreshModels();
+					const models = await modelService.getModelsByProvider(providerName);
+
+					testButton.textContent = `✓ ${models.length} models`;
+					testButton.style.color = 'rgb(85, 165, 131)';
+					setTimeout(() => {
+						testButton.textContent = 'Test';
+						testButton.style.color = '';
+					}, 2000);
+				} else {
+					throw new Error('Model service not available');
+				}
+			} catch (error) {
+				testButton.textContent = '✗ Failed';
+				testButton.style.color = 'rgb(200, 50, 50)';
+				setTimeout(() => {
+					testButton.textContent = 'Test';
+					testButton.style.color = '';
+				}, 2000);
+			} finally {
+				testButton.style.opacity = '1';
+				testButton.style.pointerEvents = 'auto';
+			}
+		}));
+
+		return cell;
+	};
+
+	// Create provider endpoint cells
+	createEndpointCell('ollama', 'Ollama Endpoint', 'Local endpoint for Ollama (default: http://127.0.0.1:11434)', false);
+	createEndpointCell('vLLM', 'vLLM Endpoint', 'Local endpoint for vLLM (default: http://localhost:8000)', true);
+	createEndpointCell('lmStudio', 'LM Studio Endpoint', 'Local endpoint for LM Studio (default: http://localhost:1234)', true);
+
+	// Local Models section
+	const localModelsSection = createSection(parent, 'Local Models');
+	const localModelsSectionList = localModelsSection.querySelector('.cursor-settings-section-list') as HTMLElement;
+	const localModelsSubSection = DOM.append(localModelsSectionList, DOM.$('.cursor-settings-sub-section'));
+
+	// Create sub-section-list for local models
+	const localModelsSubSectionList = DOM.append(localModelsSubSection, DOM.$('.cursor-settings-sub-section-list'));
+	localModelsSubSectionList.style.cssText = `
+		display: flex;
+		flex-direction: column;
+		background-color: var(--vscode-activityBar-background);
+		border-radius: 8px;
+		gap: 0;
+	`;
+
+	// Refresh button and status
+	const refreshContainer = DOM.append(localModelsSubSectionList, DOM.$('div'));
+	refreshContainer.style.cssText = 'display: flex; align-items: center; justify-content: space-between; padding: 12px;';
+
+	const statusText = DOM.append(refreshContainer, DOM.$('span'));
+	statusText.style.cssText = `
+		font-size: 12px;
+		color: rgba(20, 20, 20, 0.55);
+	`;
+
+	const refreshButton = createButton('Refresh', 'tertiary');
+	refreshButton.style.marginLeft = 'auto';
+	refreshContainer.appendChild(refreshButton);
+
+	const modelsList = DOM.append(localModelsSubSectionList, DOM.$('div'));
+	modelsList.style.cssText = 'display: flex; flex-direction: column; gap: 0;';
+
+	const renderLocalModels = async (): Promise<void> => {
+		statusText.textContent = 'Loading models...';
+		DOM.clearNode(modelsList);
+
+		try {
+			const modelService: IVybeLLMModelService | null = instantiationService.invokeFunction((accessor) => {
+				try {
+					return accessor.get(IVybeLLMModelService);
+				} catch {
+					return null;
+				}
+			});
+
+			if (modelService) {
+				await modelService.refreshModels();
+				const allModels = await modelService.getAllModels();
+
+				if (allModels.length === 0) {
+					const emptyCell = DOM.append(modelsList, DOM.$('.cursor-settings-cell'));
+					emptyCell.style.cssText = `
+						display: flex;
+						align-items: center;
+						justify-content: center;
+						padding: 24px;
+						color: rgba(20, 20, 20, 0.55);
+						font-size: 12px;
+					`;
+					emptyCell.textContent = 'No local models found. Configure providers above and click Refresh.';
+					statusText.textContent = 'No models found';
+				} else {
+					// Group by provider
+					const modelsByProvider = new Map<string, typeof allModels>();
+					for (const model of allModels) {
+						if (!modelsByProvider.has(model.providerLabel)) {
+							modelsByProvider.set(model.providerLabel, []);
+						}
+						modelsByProvider.get(model.providerLabel)!.push(model);
+					}
+
+					let isFirst = true;
+					for (const [providerLabel, models] of modelsByProvider) {
+						if (!isFirst) {
+							const divider = DOM.append(modelsList, DOM.$('.cursor-settings-cell-divider'));
+							divider.style.cssText = `
+								height: 1px;
+								background-color: rgba(20, 20, 20, 0.07);
+								margin: 0 12px;
+							`;
+						}
+
+						// Provider header
+						const providerHeader = DOM.append(modelsList, DOM.$('.cursor-settings-cell'));
+						providerHeader.style.cssText = `
+							display: flex;
+							align-items: center;
+							padding: 8px 12px;
+							background-color: rgba(20, 20, 20, 0.03);
+						`;
+						const providerLabelEl = DOM.append(providerHeader, DOM.$('span'));
+						providerLabelEl.textContent = providerLabel;
+						providerLabelEl.style.cssText = `
+							font-size: 11px;
+							font-weight: 600;
+							color: rgba(20, 20, 20, 0.55);
+							text-transform: uppercase;
+							letter-spacing: 0.5px;
+						`;
+
+						// Models
+						for (const model of models) {
+							const modelCell = DOM.append(modelsList, DOM.$('.cursor-settings-cell'));
+							modelCell.style.cssText = `
+								display: flex;
+								align-items: center;
+								gap: 12px;
+								padding: 8px 12px;
+							`;
+
+							const modelLabel = DOM.append(modelCell, DOM.$('span'));
+							modelLabel.textContent = model.label;
+							modelLabel.style.cssText = `
+								font-size: 12px;
+								color: var(--vscode-foreground);
+								flex: 1;
+							`;
+
+							if (model.hasThinking) {
+								const brainIcon = DOM.append(modelCell, DOM.$('span.codicon.codicon-symbol-namespace'));
+								brainIcon.style.cssText = `
+									font-size: 10px;
+									opacity: 0.6;
+								`;
+							}
+						}
+
+						isFirst = false;
+					}
+
+					statusText.textContent = `${allModels.length} model${allModels.length !== 1 ? 's' : ''} from ${modelsByProvider.size} provider${modelsByProvider.size !== 1 ? 's' : ''}`;
+				}
+			} else {
+				statusText.textContent = 'Model service not available';
+			}
+		} catch (error) {
+			statusText.textContent = `Error: ${error instanceof Error ? error.message : String(error)}`;
+		}
+	};
+
+	// Initial load
+	renderLocalModels();
+
+	// Refresh button handler
+	disposables.add(addDisposableListener(refreshButton, EventType.CLICK, () => {
+		renderLocalModels();
+	}));
+
+	// Models section (existing cloud models)
 	const modelsSection = createSection(parent, null);
 	const modelsSectionList = modelsSection.querySelector('.cursor-settings-section-list') as HTMLElement;
 	const modelsSubSection = DOM.append(modelsSectionList, DOM.$('.cursor-settings-sub-section'));
@@ -446,10 +790,10 @@ export function renderModelsTab(parent: HTMLElement): void {
 	const trailingInner = DOM.append(searchTrailing, DOM.$('div'));
 	trailingInner.style.cssText = 'display: flex;';
 
-	const refreshContainer = DOM.append(trailingInner, DOM.$('div'));
-	refreshContainer.style.cssText = 'display: flex; align-items: center; gap: 8px; margin-left: 8px;';
+	const cloudRefreshContainer = DOM.append(trailingInner, DOM.$('div'));
+	cloudRefreshContainer.style.cssText = 'display: flex; align-items: center; gap: 8px; margin-left: 8px;';
 
-	const refreshIcon = DOM.append(refreshContainer, DOM.$('div.codicon.codicon-refresh.settings-menu-hoverable.light'));
+	const refreshIcon = DOM.append(cloudRefreshContainer, DOM.$('div.codicon.codicon-refresh.settings-menu-hoverable.light'));
 	refreshIcon.title = 'Refresh model list';
 	refreshIcon.style.cssText = `
 		padding: 6px;

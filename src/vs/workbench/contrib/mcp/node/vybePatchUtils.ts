@@ -152,3 +152,4 @@ export function applyPatchInMemory(originalContent: string, patch: string): stri
 	}
 }
 
+

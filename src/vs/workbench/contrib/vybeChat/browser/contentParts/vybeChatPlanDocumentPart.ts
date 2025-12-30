@@ -8,6 +8,7 @@ import { $, addDisposableListener } from '../../../../../base/browser/dom.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { IMarkdownRendererService } from '../../../../../platform/markdown/browser/markdownRenderer.js';
 import { ModelDropdown, ModelDropdownState } from '../components/composer/modelDropdown.js';
+import { IVybeLLMModelService } from '../../../vybeLLM/common/vybeLLMModelService.js';
 import { MarkdownString } from '../../../../../base/common/htmlContent.js';
 import { VybeChatCodeBlockPart } from './vybeChatCodeBlockPart.js';
 import * as dom from '../../../../../base/browser/dom.js';
@@ -413,16 +414,31 @@ export class VybeChatPlanDocumentPart extends VybeChatContentPart {
 		button.appendChild(content);
 
 		// Create model dropdown
-		this.modelDropdown = this._register(new ModelDropdown(button));
+		// Get model service from instantiation service if available
+		let modelService: IVybeLLMModelService | undefined;
+		try {
+			// Use invokeFunction to access the service via accessor pattern
+			modelService = this.instantiationService.invokeFunction((accessor) => {
+				try {
+					return accessor.get(IVybeLLMModelService);
+				} catch {
+					return undefined;
+				}
+			});
+		} catch {
+			// Service not available - continue without it
+			modelService = undefined;
+		}
+		this.modelDropdown = this._register(new ModelDropdown(button, modelService));
 		this._register(this.modelDropdown.onStateChange((newState: ModelDropdownState) => {
 			this.modelState = newState;
 			modelLabel.textContent = newState.isAutoEnabled ? 'Auto' : this.getModelLabel(newState.selectedModelId);
 		}));
 
-		this._register(dom.addDisposableListener(button, 'click', (e) => {
+		this._register(dom.addDisposableListener(button, 'click', async (e) => {
 			e.stopPropagation();
 			// Open downward, right-aligned (right edge of dropdown aligns with right edge of button)
-			this.modelDropdown?.show(this.modelState, true, true);
+			await this.modelDropdown?.show(this.modelState, true, true);
 		}));
 
 		return button;
