@@ -8,6 +8,7 @@ import { Emitter, Event } from '../../../../../../base/common/event.js';
 import { $, append, addDisposableListener, getWindow } from '../../../../../../base/browser/dom.js';
 import { AgentModeDropdown, type AgentMode } from './agentModeDropdown.js';
 import { ModelDropdown, type ModelDropdownState } from './modelDropdown.js';
+import { IVybeLLMModelService } from '../../../../vybeLLM/common/vybeLLMModelService.js';
 
 // Re-export types for external use
 export type { AgentMode, ModelDropdownState };
@@ -63,6 +64,7 @@ export class MessageComposer extends Disposable {
 	// Dropdowns
 	private agentModeDropdown: AgentModeDropdown | null = null;
 	private currentAgentMode: AgentMode = 'agent';
+	private currentAgentLevel: 'L1' | 'L2' | 'L3' = 'L2';
 	private modelDropdown: ModelDropdown | null = null;
 	private modelState: ModelDropdownState = {
 		isAutoEnabled: true,
@@ -751,6 +753,10 @@ export class MessageComposer extends Disposable {
 
 		this._register(
 			addDisposableListener(this.autoDropdownElement, 'click', (e) => {
+				// Don't show if this click was from selecting a model (marked by dropdown)
+				if ((e as any).__modelClickHandled) {
+					return;
+				}
 				e.stopPropagation();
 				this.showModelDropdown();
 			})
@@ -1516,10 +1522,16 @@ export class MessageComposer extends Disposable {
 				this.updatePlaceholder(mode);
 				this.notifyAgentModeChange();
 			}));
+
+			// Listen for level selection
+			this._register(this.agentModeDropdown.onLevelSelect(level => {
+				this.currentAgentLevel = level;
+				this.notifyAgentModeChange();
+			}));
 		}
 
 		// Show the dropdown (pass direction flag)
-		this.agentModeDropdown.show(this.currentAgentMode, this.openDropdownsDownward);
+		this.agentModeDropdown.show(this.currentAgentMode, this.currentAgentLevel, this.openDropdownsDownward);
 	}
 
 	private showModelDropdown(): void {
@@ -1529,7 +1541,22 @@ export class MessageComposer extends Disposable {
 
 		// Create dropdown if it doesn't exist
 		if (!this.modelDropdown) {
-			this.modelDropdown = this._register(new ModelDropdown(this.autoDropdownElement));
+			// Get model service if available (optional)
+			let modelService: IVybeLLMModelService | undefined;
+			if (this._instantiationService) {
+				try {
+					modelService = this._instantiationService.invokeFunction((accessor) => {
+						try {
+							return accessor.get(IVybeLLMModelService);
+						} catch {
+							return undefined;
+						}
+					});
+				} catch {
+					// Service not available - continue without it
+				}
+			}
+			this.modelDropdown = this._register(new ModelDropdown(this.autoDropdownElement, modelService));
 
 			// Listen for state changes
 			this._register(this.modelDropdown.onStateChange(state => {
@@ -1539,8 +1566,10 @@ export class MessageComposer extends Disposable {
 			}));
 		}
 
-		// Show the dropdown (pass direction flag)
-		this.modelDropdown.show(this.modelState, this.openDropdownsDownward);
+		// Show the dropdown (pass direction flag) - now async
+		this.modelDropdown.show(this.modelState, this.openDropdownsDownward).catch(err => {
+			console.error('Failed to show model dropdown:', err);
+		});
 	}
 
 	private updateModelLabel(): void {
@@ -1553,16 +1582,33 @@ export class MessageComposer extends Disposable {
 			this.autoLabelElement.textContent = 'Auto';
 		} else {
 			// Find the selected model and show its label
-			const models = [
-				{ id: 'composer-1', label: 'Composer 1' },
-				{ id: 'opus-4.5', label: 'Opus 4.5' },
-				{ id: 'sonnet-4.5', label: 'Sonnet 4.5' },
-				{ id: 'gpt-5.1-codex-high', label: 'GPT-5.1 Codex High' },
-				{ id: 'gpt-5.1', label: 'GPT-5.1' },
-				{ id: 'gemini-3-pro', label: 'Gemini 3 Pro' }
-			];
+			// Get models from dropdown (includes both cloud and local models)
+			let models: any[] = [];
+			if (this.modelDropdown) {
+				models = (this.modelDropdown as any).getAllModels() || [];
+			}
+
 			const selectedModel = models.find(m => m.id === this.modelState.selectedModelId);
-			this.autoLabelElement.textContent = selectedModel ? selectedModel.label : this.modelState.selectedModelId;
+
+			// If not found, try to extract a clean name from the ID
+			if (!selectedModel) {
+				const modelId = this.modelState.selectedModelId;
+				if (modelId.includes(':')) {
+					// Format: "provider:modelName" or "provider:modelName:tag"
+					const parts = modelId.split(':');
+					if (parts.length >= 2) {
+						// Show just the base model name (second part, strip tag if present)
+						const modelName = parts[1];
+						this.autoLabelElement.textContent = modelName;
+					} else {
+						this.autoLabelElement.textContent = modelId;
+					}
+				} else {
+					this.autoLabelElement.textContent = modelId;
+				}
+			} else {
+				this.autoLabelElement.textContent = selectedModel.label;
+			}
 		}
 
 		// Update MAX badge visibility
@@ -1613,6 +1659,10 @@ export class MessageComposer extends Disposable {
 
 	public getAgentMode(): AgentMode {
 		return this.currentAgentMode;
+	}
+
+	public getAgentLevel(): 'L1' | 'L2' | 'L3' {
+		return this.currentAgentLevel;
 	}
 
 	public getModelState(): ModelDropdownState {

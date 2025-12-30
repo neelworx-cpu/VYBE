@@ -8,6 +8,7 @@ import { Disposable } from '../../../../../../base/common/lifecycle.js';
 import { Emitter } from '../../../../../../base/common/event.js';
 
 export type AgentMode = 'agent' | 'plan' | 'ask';
+export type AgentLevel = 'L1' | 'L2' | 'L3';
 
 export interface AgentModeItem {
 	id: AgentMode;
@@ -16,12 +17,22 @@ export interface AgentModeItem {
 	shortcut?: string;
 }
 
+export interface AgentLevelItem {
+	id: AgentLevel;
+	label: string;
+	description: string;
+}
+
 export class AgentModeDropdown extends Disposable {
 	private readonly _onModeSelect = this._register(new Emitter<AgentMode>());
 	readonly onModeSelect = this._onModeSelect.event;
 
+	private readonly _onLevelSelect = this._register(new Emitter<AgentLevel>());
+	readonly onLevelSelect = this._onLevelSelect.event;
+
 	private dropdownContainer: HTMLElement | null = null;
 	private selectedMode: AgentMode = 'agent';
+	private selectedLevel: AgentLevel = 'L2';
 	private currentHoveredItem: HTMLElement | null = null;
 
 	private readonly modes: AgentModeItem[] = [
@@ -30,17 +41,24 @@ export class AgentModeDropdown extends Disposable {
 		{ id: 'ask', label: 'Ask', icon: 'codicon-comment' }
 	];
 
+	private readonly levels: AgentLevelItem[] = [
+		{ id: 'L1', label: 'L1', description: 'Safe, read-only' },
+		{ id: 'L2', label: 'L2', description: 'Moderate capabilities' },
+		{ id: 'L3', label: 'L3', description: 'Full capabilities' }
+	];
+
 	constructor(private anchorElement: HTMLElement) {
 		super();
 	}
 
-	show(currentMode: AgentMode, openDownward: boolean = false): void {
+	show(currentMode: AgentMode, currentLevel: AgentLevel = 'L2', openDownward: boolean = false): void {
 		// Toggle behavior: if already open, close it
 		if (this.dropdownContainer) {
 			this.hide();
 			return;
 		}
 		this.selectedMode = currentMode;
+		this.selectedLevel = currentLevel;
 		this.createDropdown(openDownward);
 	}
 
@@ -241,8 +259,77 @@ export class AgentModeDropdown extends Disposable {
 			text-overflow: ellipsis;
 			overflow: hidden;
 			display: block;
-			width: 100%;
 		`;
+
+		// For Agent mode, add inline L1/L2/L3 buttons
+		if (mode.id === 'agent') {
+			const levelButtonsContainer = append(labelContainer, $('.agent-level-buttons'));
+			levelButtonsContainer.style.cssText = `
+				display: flex;
+				align-items: center;
+				gap: 4px;
+				margin-left: 6px;
+				flex-shrink: 0;
+			`;
+
+			this.levels.forEach(level => {
+				const isLevelSelected = level.id === this.selectedLevel;
+				const levelButton = append(levelButtonsContainer, $('span.agent-level-button'));
+				levelButton.textContent = level.id;
+				levelButton.style.cssText = `
+					font-size: 11px;
+					line-height: 14px;
+					padding: 1px 4px;
+					border-radius: 3px;
+					cursor: pointer;
+					user-select: none;
+					color: ${isLevelSelected ? '#3ecf8e' : (isDarkTheme ? 'rgba(228, 228, 228, 0.7)' : 'rgba(51, 51, 51, 0.7)')};
+					font-weight: ${isLevelSelected ? '600' : '400'};
+					transition: color 0.15s ease;
+				`;
+				levelButton.setAttribute('data-level', level.id);
+
+				// Hover effect
+				this._register(addDisposableListener(levelButton, 'mouseenter', () => {
+					if (!isLevelSelected) {
+						levelButton.style.color = isDarkTheme ? 'rgba(228, 228, 228, 0.9)' : 'rgba(51, 51, 51, 0.9)';
+					}
+				}));
+
+				this._register(addDisposableListener(levelButton, 'mouseleave', () => {
+					if (!isLevelSelected) {
+						levelButton.style.color = isDarkTheme ? 'rgba(228, 228, 228, 0.7)' : 'rgba(51, 51, 51, 0.7)';
+					}
+				}));
+
+				// Click handler - fire level select but don't close dropdown
+				this._register(addDisposableListener(levelButton, 'click', (e) => {
+					e.stopPropagation(); // Prevent mode selection
+
+					// Update selected level
+					const previousLevel = this.selectedLevel;
+					this.selectedLevel = level.id;
+
+					// Update colors in place
+					if (previousLevel !== level.id) {
+						const currentIsDarkTheme = this.isDarkTheme();
+						// Update previous button
+						const prevButton = levelButtonsContainer.querySelector(`[data-level="${previousLevel}"]`) as HTMLElement;
+						if (prevButton) {
+							prevButton.style.color = currentIsDarkTheme ? 'rgba(228, 228, 228, 0.7)' : 'rgba(51, 51, 51, 0.7)';
+							prevButton.style.fontWeight = '400';
+						}
+
+						// Update current button
+						levelButton.style.color = '#3ecf8e';
+						levelButton.style.fontWeight = '600';
+					}
+
+					// Fire event
+					this._onLevelSelect.fire(level.id);
+				}));
+			});
+		}
 
 		// Shortcut (if exists)
 		if (mode.shortcut) {
@@ -305,8 +392,12 @@ export class AgentModeDropdown extends Disposable {
 
 		// Note: No mouseleave handler - background stays on last hovered item
 
-		// Click handler
+		// Click handler - but don't close if clicking on level buttons
 		this._register(addDisposableListener(item, 'click', (e) => {
+			// If clicking on a level button, don't handle mode selection
+			if ((e.target as HTMLElement).closest('.agent-level-button')) {
+				return;
+			}
 			e.stopPropagation();
 			this._onModeSelect.fire(mode.id);
 			this.hide();

@@ -53,7 +53,7 @@ export class VybeSettingsEditor extends EditorPane {
 		@ITelemetryService telemetryService: ITelemetryService,
 		@IThemeService themeService: IThemeService,
 		@IStorageService storageService: IStorageService,
-		@IInstantiationService _instantiationService: IInstantiationService,
+		@IInstantiationService private readonly instantiationService: IInstantiationService,
 		@IContextKeyService _contextKeyService: IContextKeyService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
 		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
@@ -437,7 +437,7 @@ export class VybeSettingsEditor extends EditorPane {
 					renderTabTab(this.tabContentEl);
 					break;
 				case 'models':
-					renderModelsTab(this.tabContentEl);
+					renderModelsTab(this.tabContentEl, this.storageService, this.instantiationService, this.tabDisposables);
 					break;
 				case 'cloud-agents':
 					renderCloudAgentsTab(this.tabContentEl);

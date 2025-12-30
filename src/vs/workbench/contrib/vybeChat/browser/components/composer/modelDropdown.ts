@@ -6,6 +6,7 @@
 import { $, append, addDisposableListener, clearNode } from '../../../../../../base/browser/dom.js';
 import { Disposable } from '../../../../../../base/common/lifecycle.js';
 import { Emitter } from '../../../../../../base/common/event.js';
+import { IVybeLLMModelService } from '../../../../vybeLLM/common/vybeLLMModelService.js';
 
 export interface ModelItem {
 	id: string;
@@ -27,6 +28,7 @@ export class ModelDropdown extends Disposable {
 	private contentArea: HTMLElement | null = null;
 	private searchInput: HTMLInputElement | null = null;
 	private currentHoveredItem: HTMLElement | null = null;
+	private isHiding: boolean = false; // Flag to prevent immediate re-opening after hide
 
 	private state: ModelDropdownState = {
 		isAutoEnabled: true,
@@ -34,7 +36,8 @@ export class ModelDropdown extends Disposable {
 		selectedModelId: 'composer-1'
 	};
 
-	private readonly models: ModelItem[] = [
+	// Cloud models (hardcoded for now - can be moved to a service later)
+	private readonly cloudModels: ModelItem[] = [
 		{ id: 'composer-1', label: 'Composer 1' },
 		{ id: 'opus-4.5', label: 'Opus 4.5', hasThinking: true },
 		{ id: 'sonnet-4.5', label: 'Sonnet 4.5', hasThinking: true },
@@ -43,24 +46,98 @@ export class ModelDropdown extends Disposable {
 		{ id: 'gemini-3-pro', label: 'Gemini 3 Pro', hasThinking: true }
 	];
 
-	constructor(private anchorElement: HTMLElement) {
+	private localModels: ModelItem[] = [];
+	private isLoadingModels = false;
+
+	constructor(
+		private anchorElement: HTMLElement,
+		private readonly modelService?: IVybeLLMModelService
+	) {
 		super();
+
+		// Load local models if service is available
+		if (this.modelService) {
+			this._register(this.modelService.onDidModelsChange(() => {
+				if (this.dropdownContainer) {
+					this.loadLocalModels().then(() => {
+						this.renderContent();
+					});
+				}
+			}));
+		}
 	}
 
-	show(currentState: ModelDropdownState, openDownward: boolean = false, alignRight: boolean = false): void {
+	private async loadLocalModels(): Promise<void> {
+		if (!this.modelService || this.isLoadingModels) {
+			if (!this.modelService) {
+				console.warn('[ModelDropdown] Model service not available, local models will not be shown');
+			}
+			return;
+		}
+
+		this.isLoadingModels = true;
+		try {
+			console.log('[ModelDropdown] Loading local models...');
+			const vybeModels = await this.modelService.getAllModels();
+			console.log(`[ModelDropdown] Loaded ${vybeModels.length} local models:`, vybeModels.map(m => m.label));
+			this.localModels = vybeModels.map((model) => ({
+				id: model.id,
+				label: `${model.label} (${model.providerLabel})`,
+				hasThinking: model.hasThinking,
+			}));
+		} catch (error) {
+			console.error('[ModelDropdown] Failed to load local models:', error);
+			// Failed to load - keep existing models
+			this.localModels = [];
+		} finally {
+			this.isLoadingModels = false;
+		}
+	}
+
+	private getAllModels(): ModelItem[] {
+		// Combine cloud and local models
+		return [...this.cloudModels, ...this.localModels];
+	}
+
+	async show(currentState: ModelDropdownState, openDownward: boolean = false, alignRight: boolean = false): Promise<void> {
+		// Don't show if we're in the middle of hiding (prevents immediate re-opening)
+		if (this.isHiding) {
+			return;
+		}
 		// Toggle behavior: if already open, close it
 		if (this.dropdownContainer) {
 			this.hide();
 			return;
 		}
+		// Update state before showing
 		this.state = { ...currentState };
+
+		// Load local models before showing dropdown
+		await this.loadLocalModels();
+
 		this.createDropdown(openDownward, alignRight);
 	}
 
 	hide(): void {
 		if (this.dropdownContainer) {
+			// Set flag to prevent immediate re-opening
+			this.isHiding = true;
+
+			// Force remove from DOM and clear all references (matching history dropdown pattern)
+			if (this.dropdownContainer.parentNode) {
+				this.dropdownContainer.parentNode.removeChild(this.dropdownContainer);
+			}
+			// Also try remove() as fallback
 			this.dropdownContainer.remove();
+			// Clear all style properties to ensure it's completely gone
+			this.dropdownContainer.style.display = 'none';
+			this.dropdownContainer.style.visibility = 'hidden';
 			this.dropdownContainer = null;
+
+			// Clear flag after a short delay to allow click events to settle
+			setTimeout(() => {
+				this.isHiding = false;
+			}, 100);
 		}
 	}
 
@@ -184,7 +261,14 @@ export class ModelDropdown extends Disposable {
 		this.renderContent();
 
 		// Click outside to close
+		let isHandlingModelClick = false;
 		const clickHandler = (e: MouseEvent) => {
+			// If we just handled a model click, ignore this event (it's the same click bubbling)
+			if (isHandlingModelClick) {
+				isHandlingModelClick = false;
+				return;
+			}
+
 			if (this.dropdownContainer && !this.dropdownContainer.contains(e.target as Node) && !this.anchorElement.contains(e.target as Node)) {
 				this.hide();
 				document.removeEventListener('click', clickHandler, true);
@@ -265,9 +349,34 @@ export class ModelDropdown extends Disposable {
 			const modelsSection = append(scrollableContainer, $('.model-list-section'));
 			modelsSection.style.cssText = 'display: flex; flex-direction: column; gap: 2px;';
 
-			this.models.forEach(model => {
-				this.renderModelItem(modelsSection, model, hoverBg);
-			});
+			// Show loading state if models are being loaded
+			if (this.isLoadingModels) {
+				const loadingItem = append(modelsSection, $('.model-loading-item'));
+				loadingItem.textContent = 'Loading models...';
+				loadingItem.style.cssText = `
+					padding: 6px;
+					color: ${isDarkTheme ? 'rgba(228, 228, 228, 0.6)' : 'rgba(51, 51, 51, 0.6)'};
+					font-size: 12px;
+					text-align: center;
+				`;
+			}
+
+			// Render all models (cloud + local)
+			const allModels = this.getAllModels();
+			if (allModels.length === 0 && !this.isLoadingModels) {
+				const emptyItem = append(modelsSection, $('.model-empty-item'));
+				emptyItem.textContent = 'No models available';
+				emptyItem.style.cssText = `
+					padding: 6px;
+					color: ${isDarkTheme ? 'rgba(228, 228, 228, 0.6)' : 'rgba(51, 51, 51, 0.6)'};
+					font-size: 12px;
+					text-align: center;
+				`;
+			} else {
+				allModels.forEach(model => {
+					this.renderModelItem(modelsSection, model, hoverBg);
+				});
+			}
 		}
 	}
 
@@ -568,8 +677,14 @@ export class ModelDropdown extends Disposable {
 		// Click handler
 		this._register(addDisposableListener(item, 'click', (e) => {
 			e.stopPropagation();
+			e.preventDefault();
+			// Mark that we're handling a model click to prevent anchor click handler from firing
+			(e as any).__modelClickHandled = true;
+			// Update state: when a model is manually selected, auto mode should be disabled
+			this.state.isAutoEnabled = false;
 			this.state.selectedModelId = model.id;
 			this._onStateChange.fire(this.state);
+			// Hide dropdown immediately - the state change will update the label
 			this.hide();
 		}));
 	}

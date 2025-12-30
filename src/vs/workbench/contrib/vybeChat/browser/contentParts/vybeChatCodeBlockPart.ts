@@ -341,41 +341,33 @@ export class VybeChatCodeBlockPart extends VybeChatContentPart {
 			return;
 		}
 
-		const wasStreaming = this.isStreaming;
 		this.currentContent = newContent as IVybeChatCodeBlockContent;
 		this.targetCode = newContent.code;
 		this.isStreaming = newContent.isStreaming ?? false;
 
-		// If not streaming, show complete code immediately
-		if (!this.isStreaming) {
-			if (this.streamingIntervalId) {
-				clearTimeout(this.streamingIntervalId);
-				this.streamingIntervalId = null;
-			}
+		// Update editor model immediately (whether streaming or not)
+		if (this.editor) {
+			const model = this.editor.getModel();
+			if (model) {
+				// Always update the model with current code (real-time streaming)
+				model.setValue(this.currentContent.code);
 
-			// Update editor model
-			if (this.editor) {
-				const model = this.editor.getModel();
-				if (model) {
-					model.setValue(this.currentContent.code);
-
-					// Update exact height to prevent vertical scroll
-					const lineCount = model.getLineCount();
-					const height = lineCount * 18 + 12;
-					if (this.editorContainer) {
-						this.editorContainer.style.height = `${height}px`;
-						this.editorContainer.style.minHeight = `${height}px`;
-						this.editorContainer.style.maxHeight = `${height}px`;
-						this.editor.layout({ width: this.editorContainer.clientWidth, height });
-					}
+				// Update exact height to prevent vertical scroll
+				const lineCount = model.getLineCount();
+				const height = lineCount * 18 + 12;
+				if (this.editorContainer) {
+					this.editorContainer.style.height = `${height}px`;
+					this.editorContainer.style.minHeight = `${height}px`;
+					this.editorContainer.style.maxHeight = `${height}px`;
+					this.editor.layout({ width: this.editorContainer.clientWidth, height });
 				}
 			}
-		} else if (!wasStreaming && this.isStreaming) {
-			// Start streaming
-			const model = this.editor?.getModel();
-			if (model && this.editorContainer) {
-				this.startStreamingAnimation(model, this.editorContainer);
-			}
+		}
+
+		// Clear any streaming animation - we're updating directly now
+		if (this.streamingIntervalId) {
+			clearTimeout(this.streamingIntervalId);
+			this.streamingIntervalId = null;
 		}
 	}
 

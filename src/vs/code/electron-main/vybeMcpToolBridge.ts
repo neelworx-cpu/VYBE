@@ -70,12 +70,14 @@ function forwardToolToRenderer(toolName: string, params: unknown): Promise<unkno
 			return;
 		}
 
+		// LLM calls can take longer - use 5 minutes for send_llm_message, 60s for others
+		const timeoutMs = toolName === 'vybe.send_llm_message' ? 300000 : 60000;
 		setTimeout(() => {
 			if (pendingToolRequests.has(requestId)) {
 				pendingToolRequests.delete(requestId);
-				reject(new Error('Tool execution timeout'));
+				reject(new Error(`Tool execution timeout (${timeoutMs / 1000}s)`));
 			}
-		}, 60000);
+		}, timeoutMs);
 	});
 }
 

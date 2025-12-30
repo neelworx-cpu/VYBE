@@ -55,10 +55,12 @@ export class VybeStdioToolHost extends Disposable implements IMcpMessageTranspor
 	private readonly _state = observableValue<McpConnectionState>('vybeStdioToolHostState', { state: McpConnectionState.Kind.Stopped });
 	private readonly _onDidReceiveMessageEmitter = new Emitter<MCP.JSONRPCMessage>();
 	private readonly _onDidLogEmitter = new Emitter<{ level: LogLevel; message: string }>();
+	private readonly _onDidReceiveCommandResultEmitter = new Emitter<{ taskId: string; result: any }>();
 
 	public readonly state: IObservable<McpConnectionState> = this._state;
 	public readonly onDidReceiveMessage: Event<MCP.JSONRPCMessage> = this._onDidReceiveMessageEmitter.event;
 	public readonly onDidLog: Event<{ level: LogLevel; message: string }> = this._onDidLogEmitter.event;
+	public readonly onDidReceiveCommandResult: Event<{ taskId: string; result: any }> = this._onDidReceiveCommandResultEmitter.event;
 
 	private readonly tools = new Map<string, VybeToolDefinition>();
 	private pendingRequests = new Map<MCP.RequestId, { resolve: (result: MCP.Result) => void; reject: (error: MCP.Error) => void }>();
@@ -172,6 +174,33 @@ export class VybeStdioToolHost extends Disposable implements IMcpMessageTranspor
 	 */
 	private processBuffer(): void {
 		console.log(`[VYBE ToolHost] processBuffer called, buffer length: ${this.buffer.length}`);
+
+		// Check for command_result messages (non-MCP protocol) before processing MCP messages
+		// Command results are plain JSON lines with "type": "command_result"
+		const lines = this.buffer.split('\n');
+		for (let i = 0; i < lines.length - 1; i++) { // -1 to keep last (potentially incomplete) line
+			const line = lines[i].trim();
+			if (line.startsWith('{') && line.endsWith('}')) {
+				try {
+					const parsed = JSON.parse(line);
+					if (parsed.type === 'command_result' && parsed.task_id) {
+						// Found a command result - emit it and remove from buffer
+						console.log(`[VYBE ToolHost] Found command_result for task ${parsed.task_id}`);
+						this._onDidReceiveCommandResultEmitter.fire({
+							taskId: parsed.task_id,
+							result: parsed.result
+						});
+						// Remove this line from buffer (including the newline)
+						const lineIndex = this.buffer.indexOf(line);
+						if (lineIndex !== -1) {
+							this.buffer = this.buffer.substring(0, lineIndex) + this.buffer.substring(lineIndex + line.length + 1);
+						}
+					}
+				} catch {
+					// Not valid JSON, continue
+				}
+			}
+		}
 
 		// Skip any non-MCP protocol messages (logs, etc.) by finding the first "Content-Length:" header
 		const firstContentLength = this.buffer.indexOf('Content-Length:');

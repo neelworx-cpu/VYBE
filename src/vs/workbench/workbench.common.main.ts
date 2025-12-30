@@ -203,6 +203,9 @@ import './contrib/notebook/browser/notebook.contribution.js';
 // Speech
 import './contrib/speech/browser/speech.contribution.js';
 
+// VYBE LLM - Local LLM provider integration
+import './contrib/vybeLLM/browser/contribution/vybeLLM.contribution.js';
+
 // Chat - Keep services but views will be hidden (VYBE uses its own chat implementation)
 import './contrib/chat/browser/chat.contribution.js';
 import './contrib/inlineChat/browser/inlineChat.contribution.js';

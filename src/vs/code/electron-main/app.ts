@@ -543,6 +543,19 @@ export class CodeApplication extends Disposable {
 		// VYBE MCP: Tool response handler is registered in vybeMcpToolBridge
 		// No need to register here - the bridge uses ipcMain directly for dynamic request/response matching
 
+		// VYBE MCP: Send command to MCP process (Phase 4.1)
+		validatedIpcMain.handle('vscode:sendVybeMcpCommand', async (event, { command, params, taskId }: { command: string; params: any; taskId: string }) => {
+			try {
+				if (!this.vybeMcpService) {
+					throw new Error('MCP service is not initialized');
+				}
+				const result = await this.vybeMcpService.sendCommand(command, params, taskId);
+				return result;
+			} catch (error) {
+				throw error;
+			}
+		});
+
 		// VYBE MCP: Patch utilities (Node.js-only, called from renderer via IPC)
 		validatedIpcMain.handle('vscode:vybeValidatePatch', async (event, originalContent: string, patch: string) => {
 			try {

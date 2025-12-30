@@ -165,6 +165,104 @@ export class VybeMcpMainService extends Disposable {
 		return this.toolHost;
 	}
 
+	/**
+	 * Send a command to the MCP process via stdin and wait for result
+	 * Command protocol: JSON messages with "type": "command" (separate from MCP protocol)
+	 */
+	async sendCommand(command: string, params: any, taskId: string): Promise<{ taskId: string; result: any }> {
+		if (!this.mcpProcess || !this.isRunning) {
+			throw new Error('MCP process is not running');
+		}
+
+		// Create command message (not MCP protocol - no Content-Length header)
+		const commandMessage = {
+			type: 'command',
+			command,
+			params,
+			task_id: taskId
+		};
+
+		const commandJson = JSON.stringify(commandMessage) + '\n';
+
+		// Log the command being sent (for debugging)
+		const logger = this.loggerService.createLogger(
+			URI.joinPath(this.environmentMainService.logsHome, 'mcp-command.log'),
+			{ name: 'VYBE MCP Command' }
+		);
+		logger.info(`Sending command: ${command} (task_id: ${taskId})`);
+		logger.info(`Command JSON: ${commandJson.substring(0, 200)}...`);
+
+		// Write command to MCP's stdin
+		return new Promise((resolve, reject) => {
+			if (!this.mcpProcess || !this.toolHost) {
+				reject(new Error('MCP process is not running'));
+				return;
+			}
+
+			let resultTimeout: ReturnType<typeof setTimeout> | null = null;
+			let eventDisposable: { dispose: () => void } | null = null;
+
+			// Listen for command_result via tool host event (more reliable than reading stdout directly)
+			const commandResultHandler = (event: { taskId: string; result: any }) => {
+				if (event.taskId === taskId) {
+					// Found our result
+					if (eventDisposable) {
+						eventDisposable.dispose();
+						eventDisposable = null;
+					}
+					if (resultTimeout) {
+						clearTimeout(resultTimeout);
+						resultTimeout = null;
+					}
+					resolve({
+						taskId: event.taskId,
+						result: event.result
+					});
+				}
+			};
+
+			// Subscribe to command result event (returns disposable)
+			eventDisposable = this.toolHost.onDidReceiveCommandResult(commandResultHandler);
+
+			// Timeout after 5 minutes (tasks can take a while)
+			resultTimeout = setTimeout(() => {
+				if (eventDisposable) {
+					eventDisposable.dispose();
+					eventDisposable = null;
+				}
+				reject(new Error('Command execution timeout after 5 minutes'));
+			}, 5 * 60 * 1000);
+
+			// Write command to stdin
+			try {
+				if (this.mcpProcess.stdin && !this.mcpProcess.stdin.destroyed) {
+					this.mcpProcess.stdin.write(commandJson, 'utf8');
+					logger.info(`Command written to MCP stdin: ${command} (task_id: ${taskId})`);
+				} else {
+					if (eventDisposable) {
+						eventDisposable.dispose();
+						eventDisposable = null;
+					}
+					if (resultTimeout) {
+						clearTimeout(resultTimeout);
+						resultTimeout = null;
+					}
+					reject(new Error('MCP process stdin is not available'));
+				}
+			} catch (error) {
+				if (eventDisposable) {
+					eventDisposable.dispose();
+					eventDisposable = null;
+				}
+				if (resultTimeout) {
+					clearTimeout(resultTimeout);
+					resultTimeout = null;
+				}
+				reject(error);
+			}
+		});
+	}
+
 	public override dispose(): void {
 		if (this.toolHost) {
 			this.toolHost.dispose();
