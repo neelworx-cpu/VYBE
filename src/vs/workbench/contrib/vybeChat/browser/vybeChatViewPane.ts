@@ -46,6 +46,7 @@ import { DragAndDropObserver } from '../../../../base/browser/dom.js';
 import { FileKind } from '../../../../platform/files/common/files.js';
 import { getIconClasses } from '../../../../editor/common/services/getIconClasses.js';
 import { basename, dirname, relativePath } from '../../../../base/common/resources.js';
+import { IVybeChatMcpExecutionService } from '../common/vybeChatMcpExecutionService.js';
 
 /**
  * VYBE Chat View Pane
@@ -86,6 +87,7 @@ export class VybeChatViewPane extends ViewPane {
 		@IFileService private readonly _fileService: IFileService,
 		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
 		@INotificationService private readonly _notificationService: INotificationService,
+		@IVybeChatMcpExecutionService private readonly _mcpExecutionService: IVybeChatMcpExecutionService,
 	) {
 		super(
 			{
@@ -201,7 +203,7 @@ export class VybeChatViewPane extends ViewPane {
 
 
 		// Render composer at the bottom
-		this.composer = this._register(this.instantiationService.createInstance(MessageComposer, container, this._speechService));
+		this.composer = this._register(this.instantiationService.createInstance(MessageComposer, container, this._speechService, false, false));
 
 		// VYBE-PATCH-START: test-helpers
 		// Expose composer globally for testing
@@ -384,11 +386,172 @@ export class VybeChatViewPane extends ViewPane {
 
 		// Convert context pills to AI service format
 		await this.convertContextPillsToVariableEntries(contextPills);
-		// Variable entries will be used when AI service integration is implemented
 
-		// TODO: Send message to AI service and start streaming
-		// Include variableEntries in the request
-		// For now, message stays in streaming state until stop button is clicked
+		// Phase 4.1: Use MCP execution service instead of direct LLM call
+		// Get workspace folder for repoId
+		const workspaceFolder = this.workspaceContextService.getWorkspace().folders[0];
+		if (!workspaceFolder) {
+			this._notificationService.error('No workspace folder found. Please open a workspace.');
+			return;
+		}
+
+		// Extract file paths from context pills
+		const files: string[] = [];
+		for (const pill of contextPills) {
+			if (pill.type === 'file' && pill.path) {
+				// Convert absolute path to relative path from workspace
+				try {
+					const fileUri = URI.parse(pill.path);
+					const workspaceUri = workspaceFolder.uri;
+					// Get relative path: if file is within workspace, get relative path
+					if (workspaceUri.scheme === fileUri.scheme && workspaceUri.authority === fileUri.authority) {
+						const relPath = relativePath(workspaceUri, fileUri);
+						if (relPath) {
+							files.push(relPath);
+						}
+					}
+				} catch (error) {
+					// Skip invalid URIs
+				}
+			}
+		}
+
+		// Track content parts for result display
+		const contentParts: any[] = [{
+			kind: 'markdown',
+			content: '',
+			isStreaming: false
+		}];
+
+		// Initial render with loading state
+		contentParts[0] = {
+			kind: 'markdown',
+			content: 'Executing task via MCP...',
+			isStreaming: false
+		};
+		messagePage.updateContentParts(contentParts);
+
+		try {
+			// Get selected mode and level from composer (defaults if not available)
+			const selectedMode = this.composer?.getAgentMode() || 'agent';
+			const selectedLevel = this.composer?.getAgentLevel() || 'L2';
+
+			// Call MCP execution service (Phase 4.1: blocking, final result only)
+			const result = await this._mcpExecutionService.solveTask({
+				goal: message,
+				repoId: workspaceFolder.uri.toString(),
+				files: files.length > 0 ? files : undefined,
+				mode: selectedMode,
+				agentLevel: selectedLevel
+			});
+
+			// Build content parts array: summary, plan, artifacts
+			const newContentParts: any[] = [];
+
+			// 1. Summary as markdown (always present, normalizer ensures this)
+			newContentParts.push({
+				kind: 'markdown',
+				content: result.summary || 'Task completed',
+				isStreaming: false
+			});
+
+			// 2. Plan rendering (mode-dependent)
+			if (result.plan && result.plan.length > 0) {
+				// Generate plan markdown content
+				const planMarkdown = result.plan.map((step, index) => {
+					const statusEmoji = step.status === 'completed' ? '✅' : step.status === 'failed' ? '❌' : '⏳';
+					const desc = step.description ? `\n${step.description}` : '';
+					return `${statusEmoji} **${step.title}**${desc}`;
+				}).join('\n\n');
+
+				// Only use planDocument in plan mode
+				if (selectedMode === 'plan') {
+					const planTitle = `Plan: ${result.goal}`;
+					const planSummary = `${result.plan.length} step${result.plan.length > 1 ? 's' : ''} planned`;
+
+					newContentParts.push({
+						kind: 'planDocument',
+						id: `plan-${result.taskId}`,
+						filename: `task-${result.taskId}.plan.md`,
+						title: planTitle,
+						summary: planSummary,
+						content: `# ${planTitle}\n\n${planMarkdown}`,
+						isExpanded: false,
+						isStreaming: false
+					});
+				} else {
+					// In agent/ask mode, render plan as regular markdown
+					newContentParts.push({
+						kind: 'markdown',
+						content: `## Plan\n\n${planMarkdown}`,
+						isStreaming: false
+					});
+				}
+			}
+
+			// 3. Artifacts as basic list (markdown for now)
+			if (result.artifacts && result.artifacts.length > 0) {
+				const artifactsMarkdown = `## Artifacts\n\n${result.artifacts.map((artifact, index) => {
+					const typeLabel = artifact.type === 'diff' ? '🔀 Diff' :
+					                 artifact.type === 'file' ? '📄 File' :
+					                 artifact.type === 'command' ? '💻 Command' :
+					                 '📝 Note';
+					const pathInfo = artifact.path ? `\n**Path:** \`${artifact.path}\`` : '';
+					const metadataInfo = artifact.metadata && Object.keys(artifact.metadata).length > 0
+						? `\n**Metadata:** ${JSON.stringify(artifact.metadata, null, 2)}`
+						: '';
+					return `${typeLabel} **${artifact.type}**${pathInfo}${metadataInfo}`;
+				}).join('\n\n')}`;
+
+				newContentParts.push({
+					kind: 'markdown',
+					content: artifactsMarkdown,
+					isStreaming: false
+				});
+			}
+
+			// Update content parts (always has at least summary)
+			messagePage.updateContentParts(newContentParts);
+
+			// Stop streaming state
+			messagePage.setStreaming(false);
+			this.currentStreamingMessageId = null;
+			if (this.composer) {
+				this.composer.switchToSendButton();
+			}
+			// Trigger scroll update
+			if (options.onContentUpdate) {
+				options.onContentUpdate();
+			}
+		} catch (error) {
+			// Show error in markdown part
+			const errorMessage = error instanceof Error ? error.message : String(error);
+			contentParts[0] = {
+				kind: 'markdown',
+				content: `**Error:** ${errorMessage}`,
+				isStreaming: false
+			};
+			messagePage.updateContentParts(contentParts);
+
+			// Stop streaming state
+			messagePage.setStreaming(false);
+			this.currentStreamingMessageId = null;
+			if (this.composer) {
+				this.composer.switchToSendButton();
+			}
+			// Show notification
+			this._notificationService.error(`MCP Execution Error: ${errorMessage}`);
+		}
+
+		// Update onStop (Phase 4.1: no cancellation yet)
+		const originalOnStop = options.onStop;
+		options.onStop = () => {
+			// Phase 4.1: Cancellation not implemented yet
+			// Call original onStop
+			if (originalOnStop) {
+				originalOnStop();
+			}
+		};
 	}
 
 	/**
