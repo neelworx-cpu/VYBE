@@ -87,7 +87,7 @@ export class VybeLLMModelService extends Disposable implements IVybeLLMModelServ
 		const allModels: VybeModel[] = [];
 
 		// Fetch from each provider in parallel
-		const providers: VybeLLMProviderName[] = ['ollama', 'vLLM', 'lmStudio'];
+		const providers: VybeLLMProviderName[] = ['ollama', 'lmStudio'];
 		const fetchPromises = providers.map(async (provider) => {
 			try {
 				this.logService.debug(`[VybeLLMModelService] Fetching models from ${provider}...`);
@@ -96,9 +96,9 @@ export class VybeLLMModelService extends Disposable implements IVybeLLMModelServ
 				const vybeModels = models.map(model => this.convertToVybeModel(model, provider));
 				allModels.push(...vybeModels);
 			} catch (error) {
-				// Log error for debugging
+				// Log error at debug level (less noisy - provider might not be running)
 				const errorMessage = error instanceof Error ? error.message : String(error);
-				this.logService.warn(`[VybeLLMModelService] Failed to fetch models from ${provider}: ${errorMessage}`);
+				this.logService.debug(`[VybeLLMModelService] Failed to fetch models from ${provider}: ${errorMessage}`);
 				// Provider offline or error - skip silently
 				// Models from this provider just won't appear
 			}
@@ -129,8 +129,8 @@ export class VybeLLMModelService extends Disposable implements IVybeLLMModelServ
 				isLocal: true,
 			};
 		} else {
-			// OpenAI-compatible model (vLLM or LM Studio)
-			const providerLabel = provider === 'vLLM' ? 'vLLM' : 'LM Studio';
+			// OpenAI-compatible model (LM Studio)
+			const providerLabel = 'LM Studio';
 			return {
 				id: `${provider.toLowerCase()}:${model.id}`,
 				label: model.id,

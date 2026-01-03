@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { app, protocol, session, Session, systemPreferences, WebFrameMain } from 'electron';
+import { app, BrowserWindow, protocol, session, Session, systemPreferences, WebFrameMain } from 'electron';
 import { addUNCHostToAllowlist, disableUNCAccessRestrictions } from '../../base/node/unc.js';
 import { validatedIpcMain } from '../../base/parts/ipc/electron-main/ipcMain.js';
 import { hostname, release } from 'os';
@@ -553,6 +553,15 @@ export class CodeApplication extends Disposable {
 				return result;
 			} catch (error) {
 				throw error;
+			}
+		});
+
+		// VYBE MCP: Forward agent events from renderer to all renderers (for LLM streaming events)
+		validatedIpcMain.on('vscode:vybeAgentEvent', (event, payload: { taskId: string; event: any }) => {
+			// Forward to all renderer windows
+			const windows = BrowserWindow.getAllWindows();
+			for (const window of windows) {
+				window.webContents.send('vscode:vybeAgentEvent', payload);
 			}
 		});
 

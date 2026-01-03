@@ -21,7 +21,7 @@ import { VybeChatReadingFilesPart, IVybeChatReadingFilesContent } from '../../co
 import { VybeChatSearchedPart, IVybeChatSearchedContent } from '../../contentParts/vybeChatSearchedPart.js';
 import { VybeChatExploredPart, IVybeChatExploredContent, ExploredAction } from '../../contentParts/vybeChatExploredPart.js';
 import { VybeChatPlanDocumentPart } from '../../contentParts/vybeChatPlanDocumentPart.js';
-import type { IVybeChatPlanDocumentContent, IVybeChatListedContent, IVybeChatDirectoryContent } from '../../contentParts/vybeChatContentPart.js';
+import type { IVybeChatPlanDocumentContent, IVybeChatListedContent, IVybeChatDirectoryContent, IVybeChatMarkdownContent, IVybeChatCodeBlockContent, VybeChatContentPartKind } from '../../contentParts/vybeChatContentPart.js';
 import { IMarkdownRendererService } from '../../../../../../platform/markdown/browser/markdownRenderer.js';
 import { IModelService } from '../../../../../../editor/common/services/model.js';
 import { ILanguageService } from '../../../../../../editor/common/languages/language.js';
@@ -474,10 +474,30 @@ export class MessagePage extends Disposable {
 	/**
 	 * Add a single content part (for streaming updates).
 	 * Items appear individually, then group into Explored when 3+ research actions complete.
+	 * Returns the created part for further updates.
 	 */
-	public addContentPart(contentData: IVybeChatContentData): void {
+	public addContentPart(contentData: IVybeChatContentData): IVybeChatContentPart | null {
 		if (!this.aiResponseArea || !this.markdownRendererService) {
-			return;
+			return null;
+		}
+
+		// Check if part already exists (for streaming updates)
+		const existingIndex = this.contentPartsData.findIndex(d => {
+			// For thinking/markdown/codeBlock, only one of each kind should exist during streaming
+			if (d.kind === contentData.kind && (d.kind === 'thinking' || d.kind === 'markdown' || d.kind === 'codeBlock')) {
+				return true;
+			}
+			return false;
+		});
+
+		if (existingIndex >= 0) {
+			// Update existing part
+			const existingPart = this.contentParts[existingIndex];
+			if (existingPart && existingPart.updateContent) {
+				existingPart.updateContent(contentData);
+				this.contentPartsData[existingIndex] = contentData;
+				return existingPart;
+			}
 		}
 
 		// Add to data tracking
@@ -496,7 +516,11 @@ export class MessagePage extends Disposable {
 					this.checkAndGroupResearchActions();
 				}, 0);
 			}
+
+			return part;
 		}
+
+		return null;
 	}
 
 	/**
@@ -762,6 +786,480 @@ export class MessagePage extends Disposable {
 		default:
 			return null;
 		}
+	}
+
+	/**
+	 * Get or create a content part by kind (for streaming updates).
+	 * Returns the existing part if found, or creates a new one.
+	 */
+	public getOrCreateContentPart(kind: VybeChatContentPartKind, initialData?: Partial<IVybeChatContentData>): IVybeChatContentPart | null {
+		// Find existing part of this kind
+		for (let i = 0; i < this.contentParts.length; i++) {
+			if (this.contentParts[i].kind === kind) {
+				return this.contentParts[i];
+			}
+		}
+
+		// Create new part if not found
+		if (initialData) {
+			const contentData = { ...initialData, kind } as IVybeChatContentData;
+			return this.addContentPart(contentData);
+		}
+
+		return null;
+	}
+
+	// Track accumulated content for streaming updates
+	private accumulatedThinking: string = '';
+	private accumulatedMarkdown: string = '';
+	private accumulatedCodeBlocks: Map<string, { code: string; language: string }> = new Map(); // key: language, value: {code, language}
+
+	// Phase 7: New state for normalized streaming events
+	private activeCodeBlocks: Map<string, VybeChatCodeBlockPart> = new Map(); // Track code blocks by block_id
+	private toolCallElements: Map<string, HTMLElement> = new Map(); // Track tool call UI elements by tool_id
+	private phaseIndicator: HTMLElement | null = null; // Current phase status element
+
+	/**
+	 * Append chunk to thinking part (creates if doesn't exist).
+	 */
+	public appendThinkingChunk(chunk: string): void {
+		this.accumulatedThinking += chunk;
+
+		// Find or create thinking part
+		let existingPart = this.contentParts.find(p => p.kind === 'thinking') as VybeChatThinkingPart | undefined;
+
+		if (!existingPart) {
+			// Create new thinking part
+			const contentData: any = {
+				kind: 'thinking',
+				value: this.accumulatedThinking,
+				isStreaming: true
+			};
+			existingPart = this.addContentPart(contentData) as VybeChatThinkingPart | undefined;
+		}
+
+		if (existingPart && existingPart.updateContent) {
+			existingPart.updateContent({
+				kind: 'thinking',
+				value: this.accumulatedThinking,
+				isStreaming: true
+			});
+			// Update data tracking
+			const index = this.contentPartsData.findIndex(d => d.kind === 'thinking');
+			if (index >= 0) {
+				this.contentPartsData[index] = { kind: 'thinking', value: this.accumulatedThinking, isStreaming: true } as any;
+			}
+		}
+	}
+
+	/**
+	 * Append chunk to markdown part (creates if doesn't exist).
+	 */
+	public appendMarkdownChunk(chunk: string): void {
+		this.accumulatedMarkdown += chunk;
+
+		// Find or create markdown part
+		let existingPart = this.contentParts.find(p => p.kind === 'markdown') as VybeChatMarkdownPart | undefined;
+
+		if (!existingPart) {
+			// Create new markdown part
+			const contentData: IVybeChatMarkdownContent = {
+				kind: 'markdown',
+				content: this.accumulatedMarkdown,
+				isStreaming: true
+			};
+			existingPart = this.addContentPart(contentData) as VybeChatMarkdownPart | undefined;
+		}
+
+		if (existingPart && existingPart.updateContent) {
+			existingPart.updateContent({
+				kind: 'markdown',
+				content: this.accumulatedMarkdown,
+				isStreaming: true
+			});
+			// Update data tracking
+			const index = this.contentPartsData.findIndex(d => d.kind === 'markdown');
+			if (index >= 0) {
+				this.contentPartsData[index] = { kind: 'markdown', content: this.accumulatedMarkdown, isStreaming: true };
+			}
+		}
+	}
+
+	/**
+	 * Append chunk to codeblock part (creates if doesn't exist).
+	 * Multiple code blocks can exist (one per language).
+	 */
+	public appendCodeBlockChunk(chunk: string, language: string = 'plaintext', isFinal: boolean = false): void {
+		const key = language;
+
+		// Get or create code block for this language
+		if (!this.accumulatedCodeBlocks.has(key)) {
+			this.accumulatedCodeBlocks.set(key, { code: '', language });
+		}
+		const codeBlock = this.accumulatedCodeBlocks.get(key)!;
+		codeBlock.code += chunk;
+
+		// Find existing code block part for this language, or create new one
+		let existingPart: VybeChatCodeBlockPart | undefined;
+		for (let i = 0; i < this.contentParts.length; i++) {
+			const part = this.contentParts[i];
+			if (part.kind === 'codeBlock') {
+				const partData = this.contentPartsData[i] as IVybeChatCodeBlockContent;
+				if (partData.language === language) {
+					existingPart = part as VybeChatCodeBlockPart;
+					break;
+				}
+			}
+		}
+
+		if (!existingPart) {
+			// Create new code block part
+			const contentData: IVybeChatCodeBlockContent = {
+				kind: 'codeBlock',
+				code: codeBlock.code,
+				language: codeBlock.language,
+				isStreaming: !isFinal
+			};
+			existingPart = this.addContentPart(contentData) as VybeChatCodeBlockPart | undefined;
+		}
+
+		if (existingPart && existingPart.updateContent) {
+			existingPart.updateContent({
+				kind: 'codeBlock',
+				code: codeBlock.code,
+				language: codeBlock.language,
+				isStreaming: !isFinal
+			});
+			// Update data tracking
+			const index = this.contentPartsData.findIndex(d => {
+				if (d.kind === 'codeBlock') {
+					const cb = d as IVybeChatCodeBlockContent;
+					return cb.language === language;
+				}
+				return false;
+			});
+			if (index >= 0) {
+				this.contentPartsData[index] = { kind: 'codeBlock', code: codeBlock.code, language: codeBlock.language, isStreaming: !isFinal };
+			}
+		}
+	}
+
+	/**
+	 * Phase 7: Append plain text to markdown part (for assistant.delta events)
+	 */
+	public appendText(text: string): void {
+		// Similar to appendMarkdownChunk, but explicitly for plain text deltas
+		this.accumulatedMarkdown += text;
+
+		// Find or create markdown part
+		let existingPart = this.contentParts.find(p => p.kind === 'markdown') as VybeChatMarkdownPart | undefined;
+
+		if (!existingPart) {
+			// Create new markdown part
+			const contentData: IVybeChatMarkdownContent = {
+				kind: 'markdown',
+				content: this.accumulatedMarkdown,
+				isStreaming: true
+			};
+			existingPart = this.addContentPart(contentData) as VybeChatMarkdownPart | undefined;
+		}
+
+		if (existingPart && existingPart.updateContent) {
+			existingPart.updateContent({
+				kind: 'markdown',
+				content: this.accumulatedMarkdown,
+				isStreaming: true
+			});
+			// Update data tracking
+			const index = this.contentPartsData.findIndex(d => d.kind === 'markdown');
+			if (index >= 0) {
+				this.contentPartsData[index] = { kind: 'markdown', content: this.accumulatedMarkdown, isStreaming: true };
+			}
+		}
+	}
+
+	/**
+	 * Phase 7: Start a new code block with given block_id
+	 */
+	public startCodeBlock(block_id: string, language: string): void {
+		// Create new code block part with empty code
+		const contentData: IVybeChatCodeBlockContent = {
+			kind: 'codeBlock',
+			code: '',
+			language: language || 'plaintext',
+			isStreaming: true
+		};
+
+		const codeBlockPart = this.addContentPart(contentData) as VybeChatCodeBlockPart | undefined;
+		if (codeBlockPart) {
+			// Store in Map keyed by block_id (not language, as multiple blocks can have same language)
+			this.activeCodeBlocks.set(block_id, codeBlockPart);
+		}
+	}
+
+	/**
+	 * Phase 7: Append text to existing code block by block_id
+	 */
+	public appendCodeBlock(block_id: string, text: string): void {
+		// Find code block part by block_id
+		const codeBlockPart = this.activeCodeBlocks.get(block_id);
+		if (!codeBlockPart) {
+			console.warn('[MessagePage] appendCodeBlock: block_id not found:', block_id);
+			return;
+		}
+
+		// Find the corresponding data in contentPartsData
+		const partIndex = this.contentParts.findIndex(p => p === codeBlockPart);
+		if (partIndex >= 0 && partIndex < this.contentPartsData.length) {
+			const existingData = this.contentPartsData[partIndex] as IVybeChatCodeBlockContent;
+			const updatedData: IVybeChatCodeBlockContent = {
+				kind: 'codeBlock',
+				code: existingData.code + text,
+				language: existingData.language,
+				isStreaming: true
+			};
+
+			// Update code block part's content
+			if (codeBlockPart.updateContent) {
+				codeBlockPart.updateContent(updatedData);
+			}
+			this.contentPartsData[partIndex] = updatedData;
+		}
+
+		// Trigger scroll update if callback exists
+		if (codeBlockPart.onStreamingUpdate) {
+			codeBlockPart.onStreamingUpdate();
+		}
+	}
+
+	/**
+	 * Phase 7: Finalize a code block (mark as complete, stop streaming)
+	 */
+	public endCodeBlock(block_id: string): void {
+		// Find code block part by block_id
+		const codeBlockPart = this.activeCodeBlocks.get(block_id);
+		if (!codeBlockPart) {
+			console.warn('[MessagePage] endCodeBlock: block_id not found:', block_id);
+			return;
+		}
+
+		// Find the corresponding data in contentPartsData
+		const partIndex = this.contentParts.findIndex(p => p === codeBlockPart);
+		if (partIndex >= 0 && partIndex < this.contentPartsData.length) {
+			const existingData = this.contentPartsData[partIndex] as IVybeChatCodeBlockContent;
+			const updatedData: IVybeChatCodeBlockContent = {
+				kind: 'codeBlock',
+				code: existingData.code,
+				language: existingData.language,
+				isStreaming: false
+			};
+
+			// Update code block part with isStreaming: false
+			if (codeBlockPart.updateContent) {
+				codeBlockPart.updateContent(updatedData);
+			}
+			this.contentPartsData[partIndex] = updatedData;
+		}
+
+		// Remove from active blocks Map
+		this.activeCodeBlocks.delete(block_id);
+
+		// Trigger scroll update if callback exists
+		if (codeBlockPart.onStreamingUpdate) {
+			codeBlockPart.onStreamingUpdate();
+		}
+	}
+
+	/**
+	 * Phase 7: Update agent phase status indicator
+	 * Simple structure matching provided HTML: <div class="simulated-thinking-container"><span class="make-shine">text</span></div>
+	 */
+	public updatePhase(phase: string, label?: string): void {
+		// Create or update phase indicator element above assistant message
+		if (!this.phaseIndicator) {
+			// Create simple structure matching provided HTML
+			const container = document.createElement('div');
+			container.className = 'simulated-thinking-container simulated-thinking-container-group-summary';
+
+			// Phase text with shine animation
+			const phaseTextElement = document.createElement('span');
+			phaseTextElement.className = 'make-shine';
+
+			// Build hierarchy
+			container.appendChild(phaseTextElement);
+
+			// Store the text element for updates
+			(container as any).__phaseTextElement = phaseTextElement;
+
+			this.phaseIndicator = container;
+
+			// Insert before aiResponseArea
+			if (this.aiResponseArea && this.aiResponseArea.parentElement) {
+				this.aiResponseArea.parentElement.insertBefore(this.phaseIndicator, this.aiResponseArea);
+			}
+		}
+
+		// Display label or default label based on phase
+		const displayLabel = label || this.getDefaultPhaseLabel(phase);
+		const phaseTextElement = (this.phaseIndicator as any).__phaseTextElement;
+		if (phaseTextElement) {
+			phaseTextElement.textContent = displayLabel;
+		}
+	}
+
+	/**
+	 * Get default phase label if none provided
+	 */
+	private getDefaultPhaseLabel(phase: string): string {
+		switch (phase) {
+			case 'planning':
+				return 'Planning next step';
+			case 'acting':
+				return 'Executing tool';
+			case 'reflecting':
+				return 'Analyzing result';
+			case 'finalizing':
+				return 'Finalizing response';
+			default:
+				return phase;
+		}
+	}
+
+	/**
+	 * Phase 7: Add a tool call card to the message
+	 */
+	public addToolCall(tool_id: string, tool_name: string, arguments_: Record<string, unknown>): void {
+		// Create a new UI element for tool call
+		const toolCallElement = document.createElement('div');
+		toolCallElement.className = 'vybe-tool-call';
+		toolCallElement.dataset.toolId = tool_id;
+		toolCallElement.style.cssText = `
+			margin: 8px 0;
+			padding: 12px;
+			background: var(--vscode-input-background);
+			border: 1px solid var(--vscode-input-border);
+			border-radius: 4px;
+		`;
+
+		// Header with tool name
+		const header = document.createElement('div');
+		header.style.cssText = 'font-weight: 600; margin-bottom: 8px;';
+		header.textContent = `🔧 ${tool_name}`;
+		toolCallElement.appendChild(header);
+
+		// Arguments preview (truncated)
+		const argsPreview = document.createElement('div');
+		argsPreview.style.cssText = 'font-size: 12px; color: var(--vscode-descriptionForeground); font-family: monospace;';
+		const argsStr = JSON.stringify(arguments_, null, 2);
+		argsPreview.textContent = argsStr.length > 200 ? argsStr.substring(0, 200) + '...' : argsStr;
+		toolCallElement.appendChild(argsPreview);
+
+		// Status: pending
+		const status = document.createElement('div');
+		status.style.cssText = 'font-size: 11px; color: var(--vscode-descriptionForeground); margin-top: 4px;';
+		status.textContent = 'Status: Pending';
+		toolCallElement.appendChild(status);
+
+		// Add to message timeline
+		if (this.aiResponseArea) {
+			this.aiResponseArea.appendChild(toolCallElement);
+		}
+
+		// Store in Map
+		this.toolCallElements.set(tool_id, toolCallElement);
+	}
+
+	/**
+	 * Phase 7: Update tool call with result or error
+	 */
+	public updateToolResult(tool_id: string, result: unknown, error?: string): void {
+		// Find tool call element by tool_id
+		const toolCallElement = this.toolCallElements.get(tool_id);
+		if (!toolCallElement) {
+			console.warn('[MessagePage] updateToolResult: tool_id not found:', tool_id);
+			return;
+		}
+
+		// Find status element
+		const statusElement = toolCallElement.querySelector('div:last-child') as HTMLElement;
+		if (statusElement) {
+			if (error) {
+				statusElement.textContent = `Status: Failed - ${error}`;
+				statusElement.style.color = 'var(--vscode-errorForeground)';
+			} else {
+				statusElement.textContent = 'Status: Completed';
+				statusElement.style.color = 'var(--vscode-descriptionForeground)';
+
+				// Add result preview
+				const resultPreview = document.createElement('div');
+				resultPreview.style.cssText = 'font-size: 12px; color: var(--vscode-descriptionForeground); font-family: monospace; margin-top: 8px;';
+				const resultStr = JSON.stringify(result, null, 2);
+				resultPreview.textContent = resultStr.length > 200 ? resultStr.substring(0, 200) + '...' : resultStr;
+				toolCallElement.appendChild(resultPreview);
+			}
+		}
+	}
+
+	/**
+	 * Phase 7: Mark message as complete, stop streaming indicators
+	 */
+	public finalize(): void {
+
+		// Set isStreaming: false on all content parts
+		for (const part of this.contentParts) {
+			if (part.updateContent) {
+				const partData = this.contentPartsData[this.contentParts.indexOf(part)];
+				if (partData) {
+					const updatedData = { ...partData, isStreaming: false };
+					part.updateContent(updatedData);
+				}
+			}
+		}
+
+		// Remove phase indicator if exists
+		if (this.phaseIndicator) {
+			this.phaseIndicator.remove();
+			this.phaseIndicator = null;
+		}
+	}
+
+	/**
+	 * Phase 7: Display error banner in message
+	 */
+	public showError(message: string, code?: string): void {
+		// Create error content part or banner element
+		const errorElement = document.createElement('div');
+		errorElement.className = 'vybe-error-banner';
+		errorElement.style.cssText = `
+			margin: 8px 0;
+			padding: 12px;
+			background: var(--vscode-inputValidation-errorBackground);
+			border: 1px solid var(--vscode-inputValidation-errorBorder);
+			border-radius: 4px;
+			color: var(--vscode-errorForeground);
+		`;
+
+		// Display message prominently
+		const messageElement = document.createElement('div');
+		messageElement.style.cssText = 'font-weight: 600; margin-bottom: 4px;';
+		messageElement.textContent = `⚠️ ${message}`;
+		errorElement.appendChild(messageElement);
+
+		// Show code if available (smaller, muted)
+		if (code) {
+			const codeElement = document.createElement('div');
+			codeElement.style.cssText = 'font-size: 11px; opacity: 0.8;';
+			codeElement.textContent = `Code: ${code}`;
+			errorElement.appendChild(codeElement);
+		}
+
+		// Add to message timeline
+		if (this.aiResponseArea) {
+			this.aiResponseArea.appendChild(errorElement);
+		}
+
+		// Finalize message (stop streaming)
+		this.finalize();
 	}
 
 	/**

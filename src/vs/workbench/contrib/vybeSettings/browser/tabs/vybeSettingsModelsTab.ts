@@ -403,7 +403,6 @@ export function renderModelsTab(
 				const parsed = JSON.parse(stored) as Partial<VybeLLMProviderSettings>;
 				return {
 					ollama: parsed.ollama || defaultVybeLLMProviderSettings.ollama,
-					vLLM: parsed.vLLM || defaultVybeLLMProviderSettings.vLLM,
 					lmStudio: parsed.lmStudio || defaultVybeLLMProviderSettings.lmStudio,
 				};
 			} catch {
@@ -418,7 +417,7 @@ export function renderModelsTab(
 	};
 
 	// Create endpoint input cells for each provider
-	const createEndpointCell = (providerName: 'ollama' | 'vLLM' | 'lmStudio', label: string, description: string, hasDivider: boolean = false): HTMLElement => {
+	const createEndpointCell = (providerName: 'ollama' | 'lmStudio', label: string, description: string, hasDivider: boolean = false): HTMLElement => {
 		const currentSettings = getProviderSettings();
 		const currentValue = currentSettings[providerName].endpoint;
 
@@ -571,7 +570,6 @@ export function renderModelsTab(
 
 	// Create provider endpoint cells
 	createEndpointCell('ollama', 'Ollama Endpoint', 'Local endpoint for Ollama (default: http://127.0.0.1:11434)', false);
-	createEndpointCell('vLLM', 'vLLM Endpoint', 'Local endpoint for vLLM (default: http://localhost:8000)', true);
 	createEndpointCell('lmStudio', 'LM Studio Endpoint', 'Local endpoint for LM Studio (default: http://localhost:1234)', true);
 
 	// Local Models section

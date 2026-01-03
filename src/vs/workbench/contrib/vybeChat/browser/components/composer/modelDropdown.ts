@@ -29,22 +29,16 @@ export class ModelDropdown extends Disposable {
 	private searchInput: HTMLInputElement | null = null;
 	private currentHoveredItem: HTMLElement | null = null;
 	private isHiding: boolean = false; // Flag to prevent immediate re-opening after hide
+	private justSelectedModel: boolean = false; // Flag to prevent reopening after model selection
 
 	private state: ModelDropdownState = {
 		isAutoEnabled: true,
 		isMaxModeEnabled: false,
-		selectedModelId: 'composer-1'
+		selectedModelId: '' // Will be set to first available model when Auto is off
 	};
 
 	// Cloud models (hardcoded for now - can be moved to a service later)
-	private readonly cloudModels: ModelItem[] = [
-		{ id: 'composer-1', label: 'Composer 1' },
-		{ id: 'opus-4.5', label: 'Opus 4.5', hasThinking: true },
-		{ id: 'sonnet-4.5', label: 'Sonnet 4.5', hasThinking: true },
-		{ id: 'gpt-5.1-codex-high', label: 'GPT-5.1 Codex High', hasThinking: true },
-		{ id: 'gpt-5.1', label: 'GPT-5.1', hasThinking: true },
-		{ id: 'gemini-3-pro', label: 'Gemini 3 Pro', hasThinking: true }
-	];
+	private readonly cloudModels: ModelItem[] = [];
 
 	private localModels: ModelItem[] = [];
 	private isLoadingModels = false;
@@ -55,16 +49,31 @@ export class ModelDropdown extends Disposable {
 	) {
 		super();
 
+		// Clean up any existing dropdowns on construction
+		this.cleanupAllDropdowns();
+
 		// Load local models if service is available
 		if (this.modelService) {
 			this._register(this.modelService.onDidModelsChange(() => {
-				if (this.dropdownContainer) {
+				// Only update if dropdown is open and not being hidden
+				if (this.dropdownContainer && !this.isHiding && this.contentArea) {
 					this.loadLocalModels().then(() => {
-						this.renderContent();
+						// Double-check dropdown is still open before rendering
+						if (this.dropdownContainer && !this.isHiding && this.contentArea) {
+							this.renderContent();
+						}
 					});
 				}
 			}));
 		}
+
+		// Ensure cleanup on dispose
+		this._register({
+			dispose: () => {
+				this.cleanupAllDropdowns();
+				this.hide();
+			}
+		});
 	}
 
 	private async loadLocalModels(): Promise<void> {
@@ -100,44 +109,86 @@ export class ModelDropdown extends Disposable {
 	}
 
 	async show(currentState: ModelDropdownState, openDownward: boolean = false, alignRight: boolean = false): Promise<void> {
-		// Don't show if we're in the middle of hiding (prevents immediate re-opening)
-		if (this.isHiding) {
-			return;
-		}
-		// Toggle behavior: if already open, close it
+		// CRITICAL: First, clean up ANY existing dropdowns in the DOM (prevent multiple instances)
+		this.cleanupAllDropdowns();
+
+		// If already open, close it (toggle behavior)
 		if (this.dropdownContainer) {
 			this.hide();
 			return;
 		}
+
+		// Don't show if we're in the middle of hiding (prevents immediate re-opening after model selection)
+		if (this.isHiding) {
+			return;
+		}
+
+		// Don't show if we just selected a model (prevents reopening due to state changes)
+		if (this.justSelectedModel) {
+			return;
+		}
+
 		// Update state before showing
 		this.state = { ...currentState };
 
 		// Load local models before showing dropdown
 		await this.loadLocalModels();
 
+		// If Auto is off and no valid model is selected, select the first available model
+		if (!this.state.isAutoEnabled && this.state.selectedModelId) {
+			const allModels = this.getAllModels();
+			const modelExists = allModels.some(m => m.id === this.state.selectedModelId);
+			if (!modelExists && allModels.length > 0) {
+				// Selected model doesn't exist, use first available
+				this.state.selectedModelId = allModels[0].id;
+				// Fire state change to update parent
+				this._onStateChange.fire({ ...this.state });
+			} else if (!modelExists && allModels.length === 0) {
+				// No models available, clear selection
+				this.state.selectedModelId = '';
+			}
+		}
+
 		this.createDropdown(openDownward, alignRight);
 	}
 
+	/**
+	 * Clean up ALL dropdown containers in the DOM (prevent multiple instances)
+	 */
+	private cleanupAllDropdowns(): void {
+		// Find all existing dropdown containers in the DOM
+		const existingDropdowns = document.querySelectorAll('.model-dropdown');
+		existingDropdowns.forEach(dropdown => {
+			try {
+				if (dropdown.parentNode) {
+					dropdown.parentNode.removeChild(dropdown);
+				}
+				dropdown.remove();
+			} catch (e) {
+				// Already removed, ignore
+			}
+		});
+	}
+
 	hide(): void {
+		// Clean up ALL dropdowns in DOM first (prevent multiple instances)
+		this.cleanupAllDropdowns();
+
 		if (this.dropdownContainer) {
-			// Set flag to prevent immediate re-opening
+			// Set flag to prevent immediate re-opening during cleanup
 			this.isHiding = true;
 
-			// Force remove from DOM and clear all references (matching history dropdown pattern)
-			if (this.dropdownContainer.parentNode) {
-				this.dropdownContainer.parentNode.removeChild(this.dropdownContainer);
-			}
-			// Also try remove() as fallback
-			this.dropdownContainer.remove();
-			// Clear all style properties to ensure it's completely gone
-			this.dropdownContainer.style.display = 'none';
-			this.dropdownContainer.style.visibility = 'hidden';
+			// Clear all references immediately
 			this.dropdownContainer = null;
+			this.contentArea = null;
+			this.searchInput = null;
+			this.currentHoveredItem = null;
 
-			// Clear flag after a short delay to allow click events to settle
+			// Clear flag after a delay to allow click events to settle
+			// This prevents the button click from immediately reopening
 			setTimeout(() => {
 				this.isHiding = false;
-			}, 100);
+			}, 200);
 		}
 	}
 
@@ -150,11 +201,15 @@ export class ModelDropdown extends Disposable {
 	}
 
 	private createDropdown(openDownward: boolean = false, alignRight: boolean = false): void {
+		// CRITICAL: Ensure no existing dropdowns before creating new one
+		this.cleanupAllDropdowns();
 
 		const isDarkTheme = this.isDarkTheme();
 
-		// Outer container
+		// Outer container - create with unique class to identify it
 		this.dropdownContainer = append(document.body, $('.model-dropdown'));
+		// Add a unique identifier to track this instance
+		this.dropdownContainer.setAttribute('data-model-dropdown-instance', 'active');
 		this.dropdownContainer.style.cssText = `
 			box-sizing: border-box;
 			padding: 0px;
@@ -261,30 +316,49 @@ export class ModelDropdown extends Disposable {
 		this.renderContent();
 
 		// Click outside to close
-		let isHandlingModelClick = false;
+		// Store reference to handler for proper cleanup
 		const clickHandler = (e: MouseEvent) => {
-			// If we just handled a model click, ignore this event (it's the same click bubbling)
-			if (isHandlingModelClick) {
-				isHandlingModelClick = false;
+			// Only handle if this is still the active dropdown
+			if (!this.dropdownContainer || this.dropdownContainer.getAttribute('data-model-dropdown-instance') !== 'active') {
+				document.removeEventListener('click', clickHandler, true);
 				return;
 			}
 
-			if (this.dropdownContainer && !this.dropdownContainer.contains(e.target as Node) && !this.anchorElement.contains(e.target as Node)) {
-				this.hide();
-				document.removeEventListener('click', clickHandler, true);
+			// Don't close if clicking inside the dropdown
+			if (this.dropdownContainer.contains(e.target as Node)) {
+				return;
 			}
+
+			// Don't close if clicking the anchor button (it will toggle itself)
+			if (this.anchorElement.contains(e.target as Node)) {
+				return;
+			}
+
+			// Close if clicking outside
+			this.hide();
+			document.removeEventListener('click', clickHandler, true);
 		};
+
+		// Add listener after a small delay to avoid immediate triggering
 		setTimeout(() => {
 			document.addEventListener('click', clickHandler, true);
 		}, 0);
 
+		// Register for cleanup
 		this._register({
-			dispose: () => document.removeEventListener('click', clickHandler, true)
+			dispose: () => {
+				document.removeEventListener('click', clickHandler, true);
+				// Also clean up the dropdown container if it still exists
+				if (this.dropdownContainer) {
+					this.cleanupAllDropdowns();
+				}
+			}
 		});
 	}
 
 	private renderContent(): void {
-		if (!this.contentArea) {
+		// Don't render if dropdown is being hidden or has been hidden
+		if (!this.contentArea || !this.dropdownContainer || this.isHiding) {
 			return;
 		}
 
@@ -308,9 +382,12 @@ export class ModelDropdown extends Disposable {
 				if (newState) {
 					this.state.isMaxModeEnabled = false;
 				}
-				this._onStateChange.fire(this.state);
-				// Re-render to show/hide model list
-				this.renderContent();
+				// Fire state change with a copy to ensure immutability
+				this._onStateChange.fire({ ...this.state });
+				// Re-render to show/hide model list (only if dropdown is still open)
+				if (this.contentArea) {
+					this.renderContent();
+				}
 			}
 		);
 
@@ -678,14 +755,27 @@ export class ModelDropdown extends Disposable {
 		this._register(addDisposableListener(item, 'click', (e) => {
 			e.stopPropagation();
 			e.preventDefault();
-			// Mark that we're handling a model click to prevent anchor click handler from firing
-			(e as any).__modelClickHandled = true;
+			e.stopImmediatePropagation(); // Prevent any other handlers from firing
+
+			// Set flag to prevent reopening
+			this.justSelectedModel = true;
+
 			// Update state: when a model is manually selected, auto mode should be disabled
 			this.state.isAutoEnabled = false;
 			this.state.selectedModelId = model.id;
-			this._onStateChange.fire(this.state);
-			// Hide dropdown immediately - the state change will update the label
+
+			// Hide dropdown FIRST to prevent any re-opening
 			this.hide();
+
+			// Fire state change AFTER hiding to update parent
+			// Use setTimeout to ensure hide() completes first
+			setTimeout(() => {
+				this._onStateChange.fire({ ...this.state });
+				// Clear the flag after state change is fired
+				setTimeout(() => {
+					this.justSelectedModel = false;
+				}, 200);
+			}, 0);
 		}));
 	}
 }

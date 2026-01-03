@@ -4,7 +4,11 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { VybeChatContentPart, IVybeChatThinkingContent } from './vybeChatContentPart.js';
+import { VybeChatCodeBlockPart } from './vybeChatCodeBlockPart.js';
 import * as dom from '../../../../../base/browser/dom.js';
+import { MarkdownString } from '../../../../../base/common/htmlContent.js';
+import { IMarkdownRendererService } from '../../../../../platform/markdown/browser/markdownRenderer.js';
+import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 
 const $ = dom.$;
 
@@ -28,9 +32,15 @@ export class VybeChatThinkingPart extends VybeChatContentPart {
 	private duration: number = 0;
 	private streamingIntervalId: ReturnType<typeof setTimeout> | null = null;
 	public onStreamingUpdate?: () => void; // Callback for parent to handle scrolling
+	private codeBlockIndex: number = 0;
+	private codeBlockParts: VybeChatCodeBlockPart[] = [];
+	private codeBlockMap: Map<number, VybeChatCodeBlockPart> = new Map();
+	private rafId: number | null = null; // RequestAnimationFrame ID for batching updates
 
 	constructor(
-		content: IVybeChatThinkingContent
+		content: IVybeChatThinkingContent,
+		private readonly markdownRendererService?: IMarkdownRendererService,
+		private readonly instantiationService?: IInstantiationService
 	) {
 		super('thinking');
 		this.targetContent = Array.isArray(content.value) ? content.value.join('\n\n') : content.value;
@@ -277,31 +287,145 @@ export class VybeChatThinkingPart extends VybeChatContentPart {
 	}
 
 	/**
-	 * Render thinking content as PLAIN TEXT with streaming animation.
+	 * Pre-process thinking content to restrict markdown to minimal elements.
+	 * Only allows: paragraphs, inline code, and code blocks (matches Cursor's approach).
+	 * Removes everything else: headings, lists, tables, bold/italic, links, etc.
+	 */
+	private preprocessThinkingContent(content: string): string {
+		// First, protect code blocks from being modified (they're allowed)
+		// IMPORTANT: Only match COMPLETE code blocks (```...```), not incomplete ones during streaming
+		const codeBlockPlaceholders: string[] = [];
+		let placeholderIndex = 0;
+
+		// Also track incomplete code blocks (during streaming)
+		const incompleteCodeBlockPlaceholders: string[] = [];
+		let incompleteIndex = 0;
+
+		// Check for incomplete code block at the end (streaming scenario)
+		// Look for ``` that doesn't have a closing ```
+		let processed = content;
+		const incompleteBlockMatch = processed.match(/```[\w]*\n?[\s\S]*$/);
+		if (incompleteBlockMatch) {
+			const incompleteBlock = incompleteBlockMatch[0];
+			// Check if it's actually incomplete (doesn't contain closing ``` after the opening)
+			const closingIndex = incompleteBlock.indexOf('```', 3);
+			if (closingIndex === -1) {
+				// This is an incomplete code block - protect it
+				const placeholder = `__INCOMPLETE_CODE_BLOCK_${incompleteIndex}__`;
+				incompleteCodeBlockPlaceholders[incompleteIndex] = incompleteBlock;
+				incompleteIndex++;
+				// Replace the incomplete block at the end
+				processed = processed.replace(/```[\w]*\n?[\s\S]*$/, placeholder);
+			}
+		}
+
+		// Replace COMPLETE code blocks with placeholders to protect them
+		// Use non-greedy match to handle multiple code blocks
+		const contentWithPlaceholders = processed.replace(/```[\w]*\n?[\s\S]*?```/g, (match) => {
+			const placeholder = `__CODE_BLOCK_PLACEHOLDER_${placeholderIndex}__`;
+			codeBlockPlaceholders[placeholderIndex] = match;
+			placeholderIndex++;
+			return placeholder;
+		});
+
+		processed = contentWithPlaceholders;
+
+		// Remove headings (# ## ###) - convert to paragraphs
+		processed = processed.replace(/^#{1,6}\s+(.+)$/gm, (match, content) => {
+			return content.trim(); // Convert heading to paragraph
+		});
+
+		// Remove lists (both unordered - and ordered 1.)
+		// Convert list items to paragraphs
+		processed = processed.replace(/^[\s]*[-*+]\s+(.+)$/gm, (match, content) => {
+			return content.trim(); // Convert list item to paragraph
+		});
+		processed = processed.replace(/^[\s]*\d+\.\s+(.+)$/gm, (match, content) => {
+			return content.trim(); // Convert numbered list item to paragraph
+		});
+
+		// Remove task lists (GFM - [ ] and [x])
+		processed = processed.replace(/^[\s]*[-*+]\s+\[[ x]\]\s+(.+)$/gm, (match, content) => {
+			return content.trim();
+		});
+
+		// Remove tables (|...|)
+		processed = processed.replace(/^\|.+\|$/gm, '');
+
+		// Remove horizontal rules (---)
+		processed = processed.replace(/^---+$/gm, '');
+
+		// Remove blockquotes (>)
+		processed = processed.replace(/^>\s*(.+)$/gm, (match, content) => {
+			return content.trim(); // Convert blockquote to paragraph
+		});
+
+		// Remove bold/italic formatting (**text**, *text*) - keep the text
+		// But preserve inline code (`...`) - it's allowed
+		// IMPORTANT: Don't match placeholders (they contain underscores)
+		// Process bold first (to avoid conflicts)
+		// Split by placeholders, process each segment separately
+		const segments = processed.split(/(__CODE_BLOCK_PLACEHOLDER_\d+__|__INCOMPLETE_CODE_BLOCK_\d+__)/g);
+		const processedSegments = segments.map((segment) => {
+			// Skip placeholders - they're already protected
+			if (segment.match(/^__(CODE_BLOCK_PLACEHOLDER|INCOMPLETE_CODE_BLOCK)_\d+__$/)) {
+				return segment;
+			}
+			// Process this segment (no placeholders here, so safe to use simple regex)
+			let seg = segment;
+			seg = seg.replace(/\*\*([^*]+)\*\*/g, '$1'); // Bold
+			seg = seg.replace(/\*([^*]+)\*/g, '$1'); // Italic (but not if it's part of bold)
+			seg = seg.replace(/__([^_]+)__/g, '$1'); // Bold (underscore)
+			seg = seg.replace(/_([^_]+)_/g, '$1'); // Italic (underscore)
+			return seg;
+		});
+		processed = processedSegments.join('');
+
+		// Remove links [text](url) - keep the text
+		processed = processed.replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1');
+
+		// Remove images ![alt](url)
+		processed = processed.replace(/!\[([^\]]*)\]\([^\)]+\)/g, '');
+
+		// Remove strikethrough (~~text~~)
+		processed = processed.replace(/~~([^~]+)~~/g, '$1');
+
+		// Restore incomplete code blocks first (they're at the end)
+		for (let i = incompleteCodeBlockPlaceholders.length - 1; i >= 0; i--) {
+			const placeholder = `__INCOMPLETE_CODE_BLOCK_${i}__`;
+			processed = processed.replace(placeholder, incompleteCodeBlockPlaceholders[i]);
+		}
+
+		// Restore complete code blocks (they're allowed)
+		for (let i = codeBlockPlaceholders.length - 1; i >= 0; i--) {
+			const placeholder = `__CODE_BLOCK_PLACEHOLDER_${i}__`;
+			processed = processed.replace(placeholder, codeBlockPlaceholders[i]);
+		}
+
+		// Clean up multiple consecutive blank lines (max 2)
+		processed = processed.replace(/\n{3,}/g, '\n\n');
+
+		return processed.trim();
+	}
+
+	/**
+	 * Render thinking content as MARKDOWN with restrictions (paragraphs, inline code, code blocks only).
 	 */
 	private renderThinkingContent(container: HTMLElement): void {
-		// Clear existing
-		while (container.firstChild) {
-			container.removeChild(container.firstChild);
+		if (!this.markdownRendererService || !this.instantiationService) {
+			// Fallback to plain text if markdown renderer not available
+			this.renderPlainText(container);
+			return;
 		}
 
-		// Render as plain text (inherit color from parent)
-		this.textContentElement = $('div', {
-			style: `
-				white-space: pre-wrap;
-				word-break: break-word;
-				line-height: 1.4;
-			`
-		});
-		this.textContentElement.textContent = this.currentContent;
-		container.appendChild(this.textContentElement);
+		// Pre-process content to restrict markdown elements
+		// Even if content is empty, render it (empty state is valid during initial streaming)
+		const processedContent = this.preprocessThinkingContent(this.currentContent || '');
 
-		// Start streaming animation if streaming
-		if (this.isStreaming && this.targetContent && this.targetContent !== this.currentContent) {
-			this.startStreamingAnimation();
-		}
+		// Render markdown
+		this.renderMarkdown(container, processedContent);
 
-		// AUTO-SCROLL to bottom during streaming (simple CSS scrolling)
+		// AUTO-SCROLL to bottom during streaming
 		if (this.isStreaming && this.contentElement) {
 			setTimeout(() => {
 				if (this.contentElement && this.contentElement.scrollHeight > this.contentElement.clientHeight) {
@@ -312,51 +436,233 @@ export class VybeChatThinkingPart extends VybeChatContentPart {
 	}
 
 	/**
-	 * Stream thinking content character by character (legible speed).
+	 * Fallback: Render as plain text if markdown renderer not available.
 	 */
-	private startStreamingAnimation(): void {
-		// Clear any existing animation
-		if (this.streamingIntervalId) {
-			clearTimeout(this.streamingIntervalId);
-			this.streamingIntervalId = null;
+	private renderPlainText(container: HTMLElement): void {
+		// Clear existing
+		while (container.firstChild) {
+			container.removeChild(container.firstChild);
 		}
 
-		const fullText = this.targetContent;
-		let charIndex = this.currentContent.length; // Start from where we left off
-		const CHAR_DELAY_MS = 15; // 15ms per character (fast but legible)
+		// Render as plain text
+		this.textContentElement = $('div', {
+			style: `
+				white-space: pre-wrap;
+				word-break: break-word;
+				line-height: 1.4;
+			`
+		});
+		this.textContentElement.textContent = this.currentContent;
+		container.appendChild(this.textContentElement);
+	}
 
-		const streamNextChar = () => {
-			if (charIndex >= fullText.length || !this.isStreaming) {
-				// Streaming complete
-				this.streamingIntervalId = null;
-				return;
+	/**
+	 * Render markdown content using VS Code's markdown renderer.
+	 * Only allows: paragraphs, inline code, and code blocks.
+	 */
+	private renderMarkdown(container: HTMLElement, content: string): void {
+		if (!this.markdownRendererService || !this.instantiationService) {
+			return;
+		}
+
+		// Extract code blocks from processed content for reuse
+		const newCodeBlocks = this.extractCodeBlocks(content);
+
+		// Update code blocks directly if structure matches (prevents flicker)
+		const codeBlocksUpdated = this.updateCodeBlocksDirectly(newCodeBlocks);
+
+		// Clear existing content (this removes code block DOM nodes, but we'll reuse them)
+		while (container.firstChild) {
+			container.removeChild(container.firstChild);
+		}
+
+		// Only clear code blocks if structure changed
+		if (!codeBlocksUpdated) {
+			this.codeBlockParts.forEach(part => part.dispose());
+			this.codeBlockParts = [];
+			this.codeBlockMap.clear();
+		}
+		this.codeBlockIndex = 0;
+
+		const markdownString = new MarkdownString(content, {
+			isTrusted: true,
+			supportThemeIcons: true,
+			supportHtml: false
+		});
+
+		// Capture services in local variables for the callback
+		const instantiationService = this.instantiationService;
+		if (!instantiationService) {
+			return;
+		}
+
+		// Render using VS Code's markdown renderer service
+		// Restricted markdown: only paragraphs, inline code, and code blocks
+		const result = this.markdownRendererService.render(markdownString, {
+			fillInIncompleteTokens: this.isStreaming, // Handle incomplete markdown during streaming
+			markedOptions: {
+				gfm: false, // Disable GFM to avoid tables and task lists
+				breaks: true // Line breaks create <br>
+			},
+			codeBlockRendererSync: (languageId: string, code: string) => {
+				// Check if we can reuse an existing code block
+				const existingBlock = this.codeBlockMap.get(this.codeBlockIndex);
+				if (existingBlock) {
+					// Reuse existing block - already updated above
+					this.codeBlockIndex++;
+					return existingBlock.domNode;
+				}
+
+				// Create a new code block part with Monaco editor (smaller/faded for thinking)
+				const codeBlockPart = instantiationService.createInstance(
+					VybeChatCodeBlockPart,
+					{
+						kind: 'codeBlock' as const,
+						code: code,
+						language: languageId || 'plaintext'
+					},
+					this.codeBlockIndex
+				);
+
+				// Apply thinking-specific styling (faded/miniaturized)
+				if (codeBlockPart.domNode) {
+					codeBlockPart.domNode.style.opacity = '0.7'; // Faded appearance
+					codeBlockPart.domNode.style.transform = 'scale(0.95)'; // Slightly smaller
+					codeBlockPart.domNode.style.transformOrigin = 'top left';
+				}
+
+				// Track for disposal and reuse
+				this.codeBlockParts.push(codeBlockPart);
+				this.codeBlockMap.set(this.codeBlockIndex, codeBlockPart);
+				this._register(codeBlockPart);
+				this.codeBlockIndex++;
+
+				// Return the DOM node
+				return codeBlockPart.domNode;
+			}
+		});
+
+		// Append the rendered content
+		container.appendChild(result.element);
+
+		// Post-process: Remove empty paragraphs created by LLM blank lines
+		this.removeEmptyParagraphs(container);
+
+		// Register disposables
+		this._register(result);
+	}
+
+	/**
+	 * Extract code blocks from markdown to get their content.
+	 */
+	private extractCodeBlocks(markdown: string): Array<{ language: string; code: string; index: number }> {
+		const blocks: Array<{ language: string; code: string; index: number }> = [];
+		const lines = markdown.split('\n');
+		let inBlock = false;
+		let startLine = 0;
+		let languageId = '';
+
+		for (let i = 0; i < lines.length; i++) {
+			const line = lines[i];
+			if (!inBlock && line.match(/^```(\w*)/)) {
+				inBlock = true;
+				startLine = i + 1;
+				languageId = line.substring(3).trim();
+			} else if (inBlock && line.match(/^```\s*$/)) {
+				inBlock = false;
+				const code = lines.slice(startLine, i).join('\n');
+				blocks.push({
+					language: languageId || 'plaintext',
+					code,
+					index: blocks.length
+				});
+			}
+		}
+
+		// Handle unclosed code block (streaming)
+		if (inBlock) {
+			const code = lines.slice(startLine).join('\n');
+			blocks.push({
+				language: languageId || 'plaintext',
+				code,
+				index: blocks.length
+			});
+		}
+
+		return blocks;
+	}
+
+	/**
+	 * Update existing code blocks directly if structure matches.
+	 * This prevents flickering by updating code blocks in-place before re-rendering.
+	 */
+	private updateCodeBlocksDirectly(newBlocks: Array<{ language: string; code: string; index: number }>): boolean {
+		// Only update if we have the same number of code blocks and they match by index
+		if (this.codeBlockMap.size !== newBlocks.length) {
+			return false;
+		}
+
+		// Update each code block
+		for (const block of newBlocks) {
+			const existingBlock = this.codeBlockMap.get(block.index);
+			if (!existingBlock) {
+				return false; // Missing block, need full re-render
 			}
 
-			// Add next character
-			this.currentContent = fullText.substring(0, charIndex + 1);
-			charIndex++;
+			// Update the code block content directly
+			try {
+				existingBlock.updateContent({
+					kind: 'codeBlock' as const,
+					code: block.code,
+					language: block.language,
+					isStreaming: this.isStreaming
+				});
+			} catch (e) {
+				return false; // Update failed, need full re-render
+			}
+		}
 
-			// Update text display
-			if (this.textContentElement) {
-				this.textContentElement.textContent = this.currentContent;
+		return true; // All code blocks updated successfully
+	}
+
+	/**
+	 * Remove empty or whitespace-only paragraphs that create unwanted gaps.
+	 * LLMs often output extra blank lines which get rendered as empty <p> elements.
+	 */
+	private removeEmptyParagraphs(container: HTMLElement): void {
+		// Find all paragraphs in the rendered markdown
+		const paragraphs = container.querySelectorAll('p');
+		for (const p of paragraphs) {
+			const text = p.textContent?.trim() || '';
+
+			// Remove if empty or only contains whitespace/line breaks
+			if (text === '' || text === '\n' || text === '\r\n' || text.length === 0) {
+				p.remove();
+				continue;
 			}
 
-			// Auto-scroll to bottom (internal)
-			if (this.contentElement && this.contentElement.scrollHeight > this.contentElement.clientHeight) {
-				this.contentElement.scrollTop = this.contentElement.scrollHeight;
+			// Also remove paragraphs that only contain <br> tags (common from markdown blank lines)
+			const children = p.childNodes;
+			let onlyBrTags = true;
+			for (let i = 0; i < children.length; i++) {
+				const node = children[i];
+				if (node.nodeType === Node.TEXT_NODE) {
+					// Check if text node is empty or only whitespace
+					if (node.textContent?.trim() !== '') {
+						onlyBrTags = false;
+						break;
+					}
+				} else if (node.nodeType === Node.ELEMENT_NODE && (node as Element).tagName !== 'BR') {
+					// Not a <br> tag, so this paragraph has real content
+					onlyBrTags = false;
+					break;
+				}
 			}
 
-			// Notify parent for page-level scroll
-			if (this.onStreamingUpdate) {
-				this.onStreamingUpdate();
+			if (onlyBrTags && children.length > 0) {
+				p.remove();
 			}
-
-			// Schedule next character
-			this.streamingIntervalId = setTimeout(streamNextChar, CHAR_DELAY_MS);
-		};
-
-		// Start streaming
-		this.streamingIntervalId = setTimeout(streamNextChar, CHAR_DELAY_MS);
+		}
 	}
 
 	/**
@@ -409,19 +715,21 @@ export class VybeChatThinkingPart extends VybeChatContentPart {
 		this.duration = newContent.duration || this.duration;
 		this.isStreaming = isNowStreaming;
 
-		// If streaming, animate towards target; if complete, show all at once
-		if (!isNowStreaming) {
-			this.currentContent = newText; // Show complete text immediately
-			if (this.streamingIntervalId) {
-				clearTimeout(this.streamingIntervalId);
-				this.streamingIntervalId = null;
-			}
+		// Update currentContent to match target (real-time streaming from MCP events)
+		this.currentContent = newText;
+
+		// Stop any existing animation (we're rendering directly from MCP events)
+		if (this.streamingIntervalId) {
+			clearTimeout(this.streamingIntervalId);
+			this.streamingIntervalId = null;
 		}
 
-		// Re-render content ONLY if it changed
-		if (contentChanged) {
+		// Always re-render if content changed OR if we're streaming (to show updates in real-time)
+		// CRITICAL: Render immediately during streaming to show content as it arrives
+		if (contentChanged || isNowStreaming) {
 			const markdownContainer = this.contentElement?.querySelector('.anysphere-markdown-container-root');
 			if (markdownContainer) {
+				// Render immediately - don't batch during streaming (we want real-time updates)
 				this.renderThinkingContent(markdownContainer as HTMLElement);
 			}
 		}
@@ -485,6 +793,17 @@ export class VybeChatThinkingPart extends VybeChatContentPart {
 			clearTimeout(this.streamingIntervalId);
 			this.streamingIntervalId = null;
 		}
+
+		// Clean up requestAnimationFrame
+		if (this.rafId !== null) {
+			cancelAnimationFrame(this.rafId);
+			this.rafId = null;
+		}
+
+		// Clean up code blocks
+		this.codeBlockParts.forEach(part => part.dispose());
+		this.codeBlockParts = [];
+		this.codeBlockMap.clear();
 
 		super.dispose();
 		this.container = undefined;

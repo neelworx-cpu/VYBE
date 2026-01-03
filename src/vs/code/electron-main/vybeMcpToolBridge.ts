@@ -34,14 +34,23 @@ function ensureResponseHandlerRegistered(): void {
 	responseHandlerRegistered = true;
 
 	validatedIpcMain.on('vscode:vybeMcpToolResponse', (event, requestId: string, result: ToolExecutionResult) => {
+		console.log(`[vybeMcpToolBridge] Received tool response (requestId: ${requestId})`, {
+			success: result.success,
+			hasResult: !!result.result,
+			error: result.error || 'none'
+		});
 		const pending = pendingToolRequests.get(requestId);
 		if (pending) {
 			pendingToolRequests.delete(requestId);
 			if (result.success) {
+				console.log(`[vybeMcpToolBridge] Resolving tool request ${requestId} with success`);
 				pending.resolve(result.result);
 			} else {
+				console.error(`[vybeMcpToolBridge] Rejecting tool request ${requestId} with error:`, result.error);
 				pending.reject(new Error(result.error || 'Tool execution failed'));
 			}
+		} else {
+			console.warn(`[vybeMcpToolBridge] Received response for unknown requestId: ${requestId}`);
 		}
 	});
 }
@@ -52,6 +61,12 @@ function ensureResponseHandlerRegistered(): void {
 function forwardToolToRenderer(toolName: string, params: unknown): Promise<unknown> {
 	ensureResponseHandlerRegistered();
 
+	console.log(`[vybeMcpToolBridge] forwardToolToRenderer called: ${toolName}`, {
+		paramsKeys: params && typeof params === 'object' ? Object.keys(params as object) : 'not an object',
+		task_id: (params as any)?.task_id || 'none',
+		model_id: (params as any)?.model_id || 'none'
+	});
+
 	return new Promise((resolve, reject) => {
 		const requestId = `tool_${Date.now()}_${Math.random()}`;
 
@@ -59,12 +74,14 @@ function forwardToolToRenderer(toolName: string, params: unknown): Promise<unkno
 
 		const windows = BrowserWindow.getAllWindows();
 		if (windows.length > 0) {
+			console.log(`[vybeMcpToolBridge] Sending tool request to renderer: ${toolName} (requestId: ${requestId})`);
 			windows[0].webContents.send('vscode:vybeMcpToolRequest', {
 				requestId,
 				toolName,
 				params
 			});
 		} else {
+			console.error('[vybeMcpToolBridge] No renderer window available');
 			pendingToolRequests.delete(requestId);
 			reject(new Error('No renderer window available'));
 			return;
@@ -110,7 +127,9 @@ export function registerVybeMcpTools(toolHost: VybeStdioToolHost): void {
 						maxTokens: { type: 'number' }
 					}
 				},
-				stream: { type: 'boolean' }
+				stream: { type: 'boolean' },
+				task_id: { type: 'string', description: 'Task ID for real-time event emission' },
+				model_id: { type: 'string', description: 'Selected model ID (format: "provider:modelName" or cloud model ID)' }
 			},
 			required: ['messages']
 		} as IJSONSchema,
@@ -128,7 +147,7 @@ export function registerVybeMcpTools(toolHost: VybeStdioToolHost): void {
 			properties: {
 				providerName: {
 					type: 'string',
-					enum: ['ollama', 'vLLM', 'lmStudio']
+					enum: ['ollama', 'lmStudio']
 				}
 			}
 		} as IJSONSchema,
