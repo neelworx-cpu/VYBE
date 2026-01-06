@@ -18,7 +18,17 @@ export type StreamingEvent =
   | ToolResultEvent
   | AssistantFinalEvent
   | AgentPhaseEvent
-  | StreamingErrorEvent;
+  | StreamingErrorEvent
+  | BlockCreateEvent
+  | BlockAppendEvent
+  | BlockFinalizeEvent
+  | MessageCompleteEvent
+  // New simplified events (Production Architecture)
+  | ThinkingDeltaEvent
+  | ContentDeltaEvent
+  | NewToolCallEvent
+  | NewToolResultEvent
+  | NewMessageCompleteEvent;
 
 export interface AssistantDeltaEvent {
   type: 'assistant.delta';
@@ -113,4 +123,130 @@ export interface StreamingErrorEvent {
     code?: string;
   };
 }
+
+/**
+ * Block-based event types (Production architecture)
+ * These events represent structured content blocks, not raw markdown.
+ */
+export interface ContentBlock {
+  id: string;
+  type: 'text' | 'code' | 'thinking' | 'tool_call' | 'tool_result';
+  content: string;
+  isStreaming: boolean;
+  language?: string;
+  tool?: string;
+  args?: Record<string, unknown>;
+  result?: unknown;
+  status?: 'pending' | 'running' | 'done' | 'error';
+}
+
+export interface BlockCreateEvent {
+  type: 'block.create';
+  task_id: string;
+  payload: {
+    block: ContentBlock;
+  };
+}
+
+export interface BlockAppendEvent {
+  type: 'block.append';
+  task_id: string;
+  payload: {
+    blockId: string;
+    delta: string;
+  };
+}
+
+export interface BlockFinalizeEvent {
+  type: 'block.finalize';
+  task_id: string;
+  payload: {
+    blockId: string;
+    content: string;
+  };
+}
+
+export interface MessageCompleteEvent {
+  type: 'message.complete';
+  task_id: string;
+  payload: {
+    messageId: string;
+  };
+}
+
+// ============================================================================
+// New Simplified Events (Production Architecture)
+// ============================================================================
+
+/**
+ * Thinking delta from Ollama's native thinking field
+ */
+export interface ThinkingDeltaEvent {
+  type: 'thinking.delta';
+  task_id: string;
+  payload: {
+    delta: string;
+  };
+}
+
+/**
+ * Content delta from Ollama's native content field
+ */
+export interface ContentDeltaEvent {
+  type: 'content.delta';
+  task_id: string;
+  payload: {
+    delta: string;
+  };
+}
+
+/**
+ * Tool call with display tool detection
+ */
+export interface NewToolCallEvent {
+  type: 'tool.call';
+  task_id: string;
+  payload: {
+    id: string;
+    name: string;
+    args: Record<string, unknown>;
+    isDisplayTool: boolean;
+  };
+}
+
+/**
+ * Tool result
+ */
+export interface NewToolResultEvent {
+  type: 'tool.result';
+  task_id: string;
+  payload: {
+    id: string;
+    result: unknown;
+    error?: string;
+  };
+}
+
+/**
+ * New message complete event (empty payload)
+ */
+export interface NewMessageCompleteEvent {
+  type: 'message.complete';
+  task_id: string;
+  payload: Record<string, never>;
+}
+
+/**
+ * New error event
+ */
+export interface NewErrorEvent {
+  type: 'error';
+  task_id: string;
+  payload: {
+    message: string;
+    code?: string;
+  };
+}
+
+
 

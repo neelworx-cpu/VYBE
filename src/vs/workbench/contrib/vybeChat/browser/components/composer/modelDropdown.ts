@@ -79,23 +79,24 @@ export class ModelDropdown extends Disposable {
 	private async loadLocalModels(): Promise<void> {
 		if (!this.modelService || this.isLoadingModels) {
 			if (!this.modelService) {
-				console.warn('[ModelDropdown] Model service not available, local models will not be shown');
+				console.warn('[ModelDropdown] Model service not available, models will not be shown');
 			}
 			return;
 		}
 
 		this.isLoadingModels = true;
 		try {
-			console.log('[ModelDropdown] Loading local models...');
-			const vybeModels = await this.modelService.getAllModels();
-			console.log(`[ModelDropdown] Loaded ${vybeModels.length} local models:`, vybeModels.map(m => m.label));
+			console.log('[ModelDropdown] Loading enabled models...');
+			// Use getEnabledModels() to only show models user has enabled in settings
+			const vybeModels = await this.modelService.getEnabledModels();
+			console.log(`[ModelDropdown] Loaded ${vybeModels.length} enabled models:`, vybeModels.map(m => m.label));
 			this.localModels = vybeModels.map((model) => ({
 				id: model.id,
-				label: `${model.label} (${model.providerLabel})`,
+				label: model.isLocal ? `${model.label} (${model.providerLabel})` : `${model.label}`,
 				hasThinking: model.hasThinking,
 			}));
 		} catch (error) {
-			console.error('[ModelDropdown] Failed to load local models:', error);
+			console.error('[ModelDropdown] Failed to load models:', error);
 			// Failed to load - keep existing models
 			this.localModels = [];
 		} finally {

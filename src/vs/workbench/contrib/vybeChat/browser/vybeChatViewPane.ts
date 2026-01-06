@@ -446,15 +446,22 @@ export class VybeChatViewPane extends ViewPane {
 
 			eventSubscription = this._mcpExecutionService.subscribeToTaskEvents(taskId, (event: any) => {
 				hasReceivedEvents = true;
-				console.log('[VYBE Chat] Received event:', event.type, event);
 
 				try {
-					// Type guard: ensure event matches StreamingEvent shape
-					if (event && event.type && event.task_id === taskId) {
+					const eventTaskId = event?.task_id || '';
+					const taskIdMatches = eventTaskId === taskId || eventTaskId.startsWith(taskId) || taskId.startsWith(eventTaskId);
+
+					// Removed verbose logging - use targeted logs in markdown part instead
+
+					if (event && event.type && taskIdMatches) {
 						eventHandler.handleEvent(event as StreamingEvent);
-					} else {
-						// Legacy event or malformed - ignore safely
-						console.debug('[VYBE Chat] Ignoring legacy/malformed event:', event);
+					} else if (event?.type === 'assistant.delta') {
+						console.warn('[VYBE Chat] assistant.delta event filtered out:', {
+							eventTaskId,
+							expectedTaskId: taskId,
+							taskIdMatches,
+							hasType: !!event.type
+						});
 					}
 				} catch (error) {
 					console.error('[VYBE Chat] Error handling event:', error, event);
@@ -487,12 +494,14 @@ export class VybeChatViewPane extends ViewPane {
 			// If we received streaming events, content parts are already updated
 			// CRITICAL: When streaming is active, IGNORE result completely to prevent JSON blob rendering
 			if (hasReceivedEvents) {
+				// GUARD: hasReceivedEvents === true means streaming events were received. Legacy paths MUST be inert.
 				// Finalize streaming content parts
 				// Phase 7: Content parts are already updated via StreamingEventHandler events
 				// The handler will call messagePage.finalize() on assistant.final event
 				// DO NOT render result.summary or result.content - events are the source of truth
 				// Note: Finalization is handled by StreamingEventHandler via the assistant.final event
 			} else {
+				// LEGACY FALLBACK: Only executed when hasReceivedEvents === false (no streaming events received).
 				// No events received - fallback to old behavior (build from result)
 				const newContentParts: any[] = [];
 
@@ -879,23 +888,79 @@ export class VybeChatViewPane extends ViewPane {
 	 */
 	public resetScrollState(): void {
 		this.autoScrollDisabled = false;
+		// Cancel any pending scroll updates
+		if (this.scrollRafId !== null) {
+			cancelAnimationFrame(this.scrollRafId);
+			this.scrollRafId = null;
+		}
+		if (this.scrollTimeout !== null) {
+			clearTimeout(this.scrollTimeout);
+			this.scrollTimeout = null;
+		}
 		// Scroll to bottom
 		if (this.chatArea) {
 			this.chatArea.scrollTop = this.chatArea.scrollHeight;
 		}
 	}
 
+	private scrollRafId: number | null = null; // Debounce rapid scroll updates
+	private scrollTimeout: ReturnType<typeof setTimeout> | null = null; // Additional throttle for scroll updates
+
 	public scrollToShowLatestContent(): void {
 		if (!this.chatArea || this.autoScrollDisabled) {
 			return;
 		}
 
-		// Auto-scroll enabled: scroll to bottom to reveal new content
-		requestAnimationFrame(() => {
-			if (this.chatArea && !this.autoScrollDisabled) {
-				this.chatArea.scrollTop = this.chatArea.scrollHeight;
+		// CRITICAL: Only scroll if new content extends beyond the current viewport
+		// This prevents jumping when code blocks grow incrementally
+		const scrollTop = this.chatArea.scrollTop;
+		const scrollHeight = this.chatArea.scrollHeight;
+		const clientHeight = this.chatArea.clientHeight;
+		const distanceFromBottom = scrollHeight - (scrollTop + clientHeight);
+
+		// Only scroll if content extends beyond viewport (with 10px threshold to prevent micro-scrolls)
+		if (distanceFromBottom > 10) {
+			// Cancel any pending scroll update
+			if (this.scrollRafId !== null) {
+				cancelAnimationFrame(this.scrollRafId);
 			}
-		});
+			if (this.scrollTimeout !== null) {
+				clearTimeout(this.scrollTimeout);
+			}
+
+			// Throttle scroll updates: wait 50ms to batch rapid updates
+			// This prevents jumping when code blocks grow character-by-character
+			this.scrollTimeout = setTimeout(() => {
+				// Schedule scroll update (batched via RAF)
+				this.scrollRafId = requestAnimationFrame(() => {
+					if (this.chatArea && !this.autoScrollDisabled) {
+						const beforeScroll = this.chatArea.scrollTop;
+						const newScrollHeight = this.chatArea.scrollHeight;
+						const newClientHeight = this.chatArea.clientHeight;
+						const newDistanceFromBottom = newScrollHeight - (beforeScroll + newClientHeight);
+
+						// Only scroll if content still extends beyond viewport
+						if (newDistanceFromBottom > 10) {
+							this.chatArea.scrollTop = newScrollHeight;
+							const afterScroll = this.chatArea.scrollTop;
+
+							// DIAGNOSTIC: Log scroll jumps (only if significant)
+							if (Math.abs(afterScroll - beforeScroll) > 100) {
+								console.log('[Scroll] Large scroll jump', {
+									before: beforeScroll,
+									after: afterScroll,
+									scrollHeight: newScrollHeight,
+									jump: afterScroll - beforeScroll,
+									distanceFromBottom: newDistanceFromBottom
+								});
+							}
+						}
+					}
+					this.scrollRafId = null;
+				});
+				this.scrollTimeout = null;
+			}, 50); // 50ms throttle to batch rapid updates
+		}
 	}
 
 	private handleStopGeneration(): void {

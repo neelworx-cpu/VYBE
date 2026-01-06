@@ -112,7 +112,10 @@ export class VybeMcpMainService extends Disposable {
 						event
 					});
 				}
-				logger.info(`Forwarded agent_event to renderer: task=${taskId}, type=${event.type}`);
+				// Only log non-streaming events to reduce noise (assistant.delta events are too frequent)
+				if (event.type !== 'assistant.delta' && event.type !== 'assistant.thinking.delta' && event.type !== 'assistant.block.delta') {
+					logger.info(`Forwarded agent_event to renderer: task=${taskId}, type=${event.type}`);
+				}
 			}));
 
 			// Log stderr for debugging

@@ -819,3 +819,4 @@ Void's tool calling architecture is **well-separated** and **compatible** with V
 The safest integration point is at the **agent loop layer** — MCP should own orchestration, while transport and execution remain "dumb plumbing."
 
 
+

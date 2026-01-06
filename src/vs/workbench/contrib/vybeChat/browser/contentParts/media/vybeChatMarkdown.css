@@ -61,7 +61,7 @@
 	font-size: 16.9px; /* Match computed: 16.9px */
 	font-weight: 600;
 	line-height: 21.125px; /* Match computed */
-	margin: 20px 0 10px 0; /* Match computed: margin-top: 20px, margin-bottom: 10px */
+	margin: 10px 0 10px 0; /* Equal top/bottom: 10px */
 	color: var(--vscode-foreground);
 }
 
@@ -78,7 +78,7 @@
 	font-size: 14.95px; /* Match computed: 14.95px */
 	font-weight: 600;
 	line-height: 18.6875px; /* Match computed */
-	margin: 18px 0 8px 0; /* Match computed: margin-top: 18px, margin-bottom: 8px */
+	margin: 8px 0 8px 0; /* Equal top/bottom: 8px */
 	color: var(--vscode-foreground);
 }
 

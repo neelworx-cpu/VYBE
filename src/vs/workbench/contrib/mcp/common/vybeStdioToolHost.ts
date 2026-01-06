@@ -65,7 +65,7 @@ export class VybeStdioToolHost extends Disposable implements IMcpMessageTranspor
 	public readonly onDidReceiveAgentEvent: Event<{ taskId: string; event: any }> = this._onDidReceiveAgentEventEmitter.event;
 
 	private readonly tools = new Map<string, VybeToolDefinition>();
-	private pendingRequests = new Map<MCP.RequestId, { resolve: (result: MCP.Result) => void; reject: (error: MCP.Error) => void }>();
+	private pendingRequests = new Map<MCP.RequestId, { resolve: (result: MCP.Result) => void; reject: (error: Error) => void }>();
 	private buffer = '';
 
 	constructor(
@@ -436,6 +436,139 @@ export class VybeStdioToolHost extends Disposable implements IMcpMessageTranspor
 	}
 
 	/**
+	 * Public method to call an MCP tool directly
+	 * First checks if it's an IDE-side tool, otherwise sends MCP request to server
+	 */
+	public async callTool(toolName: string, arguments_: any): Promise<any> {
+		this.log(LogLevel.Info, `[ToolHost] callTool: ${toolName}`);
+		this.log(LogLevel.Debug, `[ToolHost] Available IDE tools: ${Array.from(this.tools.keys()).join(', ')}`);
+
+		// Check if MCP connection is established
+		const currentState = this._state.get();
+		if (currentState.state !== McpConnectionState.Kind.Running) {
+			const error = new Error(`MCP connection not ready. Current state: ${currentState.state}`);
+			this.log(LogLevel.Error, error.message);
+			throw error;
+		}
+
+		// First check if it's an IDE-side tool (registered via registerTool)
+		if (this.tools.has(toolName)) {
+			this.log(LogLevel.Info, `[ToolHost] Calling IDE-side tool: ${toolName}`);
+			return this.handleToolsCall({
+				name: toolName,
+				arguments: arguments_
+			}).then(result => {
+				// Extract the text content from the result
+				if (result.content && result.content.length > 0) {
+					const textContent = result.content[0];
+					if (textContent.type === 'text') {
+						try {
+							return JSON.parse(textContent.text);
+						} catch {
+							return textContent.text;
+						}
+					}
+				}
+				return result;
+			});
+		}
+
+		// Not an IDE-side tool - send MCP request to server
+		this.log(LogLevel.Info, `[ToolHost] Calling server-side tool via MCP: ${toolName}`);
+		try {
+			const result = await this.sendMcpRequest('tools/call', {
+				name: toolName,
+				arguments: arguments_
+			});
+
+			this.log(LogLevel.Info, `[ToolHost] MCP tool result received for: ${toolName}`);
+
+			// MCP tools/call returns CallToolResult with content array
+			if (result && 'content' in result && Array.isArray(result.content)) {
+				const textContent = result.content.find((c: any) => c.type === 'text');
+				if (textContent && textContent.text) {
+					try {
+						return JSON.parse(textContent.text);
+					} catch {
+						return textContent.text;
+					}
+				}
+			}
+			return result;
+		} catch (error) {
+			this.log(LogLevel.Error, `[ToolHost] Error calling MCP tool ${toolName}: ${error instanceof Error ? error.message : String(error)}`);
+			throw error;
+		}
+	}
+
+	/**
+	 * Send an MCP request to the server and wait for response
+	 */
+	private async sendMcpRequest(method: string, params: any): Promise<MCP.Result> {
+		const requestId: MCP.RequestId = Math.random().toString(36).substring(2, 15);
+
+		const request: MCP.JSONRPCRequest = {
+			jsonrpc: MCP.JSONRPC_VERSION,
+			id: requestId,
+			method,
+			params
+		};
+
+		this.log(LogLevel.Info, `[ToolHost] Sending MCP request: ${method} (id: ${requestId})`);
+
+		return new Promise((resolve, reject) => {
+			// Timeout after 30 seconds
+			const timeout = setTimeout(() => {
+				this.pendingRequests.delete(requestId);
+				const error = new Error(`MCP request timeout: ${method}`);
+				this.log(LogLevel.Error, error.message);
+				reject(error);
+			}, 30000);
+
+			// Store pending request with timeout cleanup
+			this.pendingRequests.set(requestId, {
+				resolve: (result) => {
+					clearTimeout(timeout);
+					this.log(LogLevel.Info, `[ToolHost] MCP request resolved: ${method} (id: ${requestId})`);
+					resolve(result);
+				},
+				reject: (error: unknown) => {
+					clearTimeout(timeout);
+					// Extract error message from MCP.Error or regular Error
+					let errorMessage: string;
+					if (error && typeof error === 'object') {
+						if ('message' in error && typeof error.message === 'string') {
+							errorMessage = error.message;
+						} else if (error instanceof Error) {
+							errorMessage = error.message;
+						} else {
+							errorMessage = String(error);
+						}
+					} else if (error instanceof Error) {
+						errorMessage = error.message;
+					} else {
+						errorMessage = String(error);
+					}
+					this.log(LogLevel.Error, `[ToolHost] MCP request rejected: ${method} (id: ${requestId}) - ${errorMessage}`);
+					// Always reject with a proper Error object for IPC serialization
+					reject(new Error(errorMessage));
+				}
+			});
+
+			// Send request
+			try {
+				this.send(request);
+			} catch (error) {
+				clearTimeout(timeout);
+				this.pendingRequests.delete(requestId);
+				const errorMessage = error instanceof Error ? error.message : String(error);
+				this.log(LogLevel.Error, `[ToolHost] Failed to send MCP request: ${errorMessage}`);
+				reject(new Error(`Failed to send MCP request: ${errorMessage}`));
+			}
+		});
+	}
+
+	/**
 	 * Handle notification (no response needed)
 	 */
 	private handleNotification(notification: MCP.Notification): void {
@@ -461,7 +594,10 @@ export class VybeStdioToolHost extends Disposable implements IMcpMessageTranspor
 		const pending = this.pendingRequests.get(errorResponse.id);
 		if (pending) {
 			this.pendingRequests.delete(errorResponse.id);
-			pending.reject(errorResponse.error);
+			// Extract message from MCP.Error and create a proper Error object for IPC serialization
+			const errorMessage = errorResponse.error?.message || `MCP error ${errorResponse.error?.code || 'unknown'}`;
+			this.log(LogLevel.Error, `[ToolHost] MCP error response: ${errorMessage}`);
+			pending.reject(new Error(errorMessage));
 		}
 	}
 

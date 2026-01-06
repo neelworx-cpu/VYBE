@@ -497,11 +497,11 @@ export class VybeChatThinkingPart extends VybeChatContentPart {
 		}
 
 		// Render using VS Code's markdown renderer service
-		// Restricted markdown: only paragraphs, inline code, and code blocks
+		// Supports: paragraphs, inline code, code blocks, bold, italic, lists (ul/ol), tables
 		const result = this.markdownRendererService.render(markdownString, {
 			fillInIncompleteTokens: this.isStreaming, // Handle incomplete markdown during streaming
 			markedOptions: {
-				gfm: false, // Disable GFM to avoid tables and task lists
+				gfm: true, // Enable GitHub Flavored Markdown for lists, tables, etc.
 				breaks: true // Line breaks create <br>
 			},
 			codeBlockRendererSync: (languageId: string, code: string) => {

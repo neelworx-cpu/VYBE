@@ -21,7 +21,8 @@ import { VybeChatReadingFilesPart, IVybeChatReadingFilesContent } from '../../co
 import { VybeChatSearchedPart, IVybeChatSearchedContent } from '../../contentParts/vybeChatSearchedPart.js';
 import { VybeChatExploredPart, IVybeChatExploredContent, ExploredAction } from '../../contentParts/vybeChatExploredPart.js';
 import { VybeChatPlanDocumentPart } from '../../contentParts/vybeChatPlanDocumentPart.js';
-import type { IVybeChatPlanDocumentContent, IVybeChatListedContent, IVybeChatDirectoryContent, IVybeChatMarkdownContent, IVybeChatCodeBlockContent, VybeChatContentPartKind } from '../../contentParts/vybeChatContentPart.js';
+import type { IVybeChatPlanDocumentContent, IVybeChatListedContent, IVybeChatDirectoryContent, IVybeChatMarkdownContent, IVybeChatCodeBlockContent, IVybeChatThinkingContent, VybeChatContentPartKind } from '../../contentParts/vybeChatContentPart.js';
+import type { ContentBlock } from '../../../common/streaming_event_types.js';
 import { IMarkdownRendererService } from '../../../../../../platform/markdown/browser/markdownRenderer.js';
 import { IModelService } from '../../../../../../editor/common/services/model.js';
 import { ILanguageService } from '../../../../../../editor/common/languages/language.js';
@@ -78,6 +79,11 @@ export class MessagePage extends Disposable {
 	// Content parts for AI response
 	private contentParts: IVybeChatContentPart[] = [];
 	private contentPartsData: IVybeChatContentData[] = []; // Track original data for grouping
+
+	// NEW: Block-based content model (Production architecture)
+	private blocks: Map<string, ContentBlock> = new Map(); // Track blocks by ID
+	private blockToPartMap: Map<string, IVybeChatContentPart> = new Map(); // Map block ID to content part
+
 	private markdownRendererService: IMarkdownRendererService | undefined;
 	private instantiationService: IInstantiationService | undefined;
 	private modelService: IModelService | undefined;
@@ -520,6 +526,7 @@ export class MessagePage extends Disposable {
 			return part;
 		}
 
+		console.warn('[MessagePage] Failed to create content part:', contentData.kind);
 		return null;
 	}
 
@@ -673,7 +680,11 @@ export class MessagePage extends Disposable {
 
 		switch (contentData.kind) {
 			case 'thinking': {
-				const thinkingPart = this._register(new VybeChatThinkingPart(contentData));
+				const thinkingPart = this._register(new VybeChatThinkingPart(
+					contentData,
+					this.markdownRendererService,
+					this.instantiationService
+				));
 
 				// Wire up streaming callback for smart scrolling
 				if (thinkingPart && this.options.onContentUpdate) {
@@ -811,6 +822,10 @@ export class MessagePage extends Disposable {
 
 	// Track accumulated content for streaming updates
 	private accumulatedThinking: string = '';
+	private thinkingStartTime: number | null = null; // Track when thinking started (for duration)
+	// Track accumulated markdown content (single source of truth for what we're building)
+	// This is needed because markdown part's currentContent is only updated after rendering,
+	// and rendering may be batched via requestAnimationFrame, causing stale reads
 	private accumulatedMarkdown: string = '';
 	private accumulatedCodeBlocks: Map<string, { code: string; language: string }> = new Map(); // key: language, value: {code, language}
 
@@ -823,6 +838,11 @@ export class MessagePage extends Disposable {
 	 * Append chunk to thinking part (creates if doesn't exist).
 	 */
 	public appendThinkingChunk(chunk: string): void {
+		// Track when thinking started (for duration calculation)
+		if (this.thinkingStartTime === null) {
+			this.thinkingStartTime = Date.now();
+		}
+
 		this.accumulatedThinking += chunk;
 
 		// Find or create thinking part
@@ -830,7 +850,7 @@ export class MessagePage extends Disposable {
 
 		if (!existingPart) {
 			// Create new thinking part
-			const contentData: any = {
+			const contentData: IVybeChatThinkingContent = {
 				kind: 'thinking',
 				value: this.accumulatedThinking,
 				isStreaming: true
@@ -839,49 +859,94 @@ export class MessagePage extends Disposable {
 		}
 
 		if (existingPart && existingPart.updateContent) {
-			existingPart.updateContent({
+			const thinkingContent: IVybeChatThinkingContent = {
 				kind: 'thinking',
 				value: this.accumulatedThinking,
 				isStreaming: true
-			});
-			// Update data tracking
+			};
+			existingPart.updateContent(thinkingContent);
+			// Update data tracking - ensure it's always updated
 			const index = this.contentPartsData.findIndex(d => d.kind === 'thinking');
 			if (index >= 0) {
-				this.contentPartsData[index] = { kind: 'thinking', value: this.accumulatedThinking, isStreaming: true } as any;
+				this.contentPartsData[index] = thinkingContent;
+			} else {
+				// If not found, add it (shouldn't happen, but be safe)
+				this.contentPartsData.push(thinkingContent);
 			}
 		}
 	}
 
 	/**
+	 * Finalize thinking part when content starts streaming.
+	 * Transitions from "Thinking" → "Thought for Xs"
+	 */
+	public finalizeThinking(): void {
+		const thinkingPart = this.contentParts.find(p => p.kind === 'thinking') as VybeChatThinkingPart | undefined;
+		if (!thinkingPart) {
+			return; // No thinking part to finalize
+		}
+
+		// Calculate duration
+		const duration = this.thinkingStartTime !== null ? Date.now() - this.thinkingStartTime : 0;
+
+		// Update thinking part with isStreaming: false and duration
+		const thinkingContent: IVybeChatThinkingContent = {
+			kind: 'thinking',
+			value: this.accumulatedThinking,
+			isStreaming: false,
+			duration
+		};
+
+		thinkingPart.updateContent(thinkingContent);
+
+		// Update data tracking
+		const index = this.contentPartsData.findIndex(d => d.kind === 'thinking');
+		if (index >= 0) {
+			this.contentPartsData[index] = thinkingContent;
+		}
+
+		console.log('[MessagePage] Thinking finalized:', { duration: Math.round(duration / 1000) + 's' });
+	}
+
+	/**
 	 * Append chunk to markdown part (creates if doesn't exist).
+	 * SIMPLIFIED: Same pattern as appendText - accumulate in MessagePage, update part
 	 */
 	public appendMarkdownChunk(chunk: string): void {
+		// Accumulate chunk (single source of truth in MessagePage)
 		this.accumulatedMarkdown += chunk;
 
 		// Find or create markdown part
-		let existingPart = this.contentParts.find(p => p.kind === 'markdown') as VybeChatMarkdownPart | undefined;
+		let part = this.contentParts.find(p => p.kind === 'markdown') as VybeChatMarkdownPart | undefined;
 
-		if (!existingPart) {
+		if (!part) {
 			// Create new markdown part
 			const contentData: IVybeChatMarkdownContent = {
 				kind: 'markdown',
 				content: this.accumulatedMarkdown,
 				isStreaming: true
 			};
-			existingPart = this.addContentPart(contentData) as VybeChatMarkdownPart | undefined;
+			part = this.addContentPart(contentData) as VybeChatMarkdownPart | undefined;
+			if (!part) {
+				return;
+			}
 		}
 
-		if (existingPart && existingPart.updateContent) {
-			existingPart.updateContent({
+		// Update part with accumulated content
+		if (part.updateContent) {
+			part.updateContent({
 				kind: 'markdown',
 				content: this.accumulatedMarkdown,
 				isStreaming: true
 			});
-			// Update data tracking
-			const index = this.contentPartsData.findIndex(d => d.kind === 'markdown');
-			if (index >= 0) {
-				this.contentPartsData[index] = { kind: 'markdown', content: this.accumulatedMarkdown, isStreaming: true };
-			}
+		}
+
+		// Update data tracking
+		const index = this.contentPartsData.findIndex(d => d.kind === 'markdown');
+		if (index >= 0) {
+			this.contentPartsData[index] = { kind: 'markdown', content: this.accumulatedMarkdown, isStreaming: true };
+		} else {
+			this.contentPartsData.push({ kind: 'markdown', content: this.accumulatedMarkdown, isStreaming: true });
 		}
 	}
 
@@ -945,36 +1010,150 @@ export class MessagePage extends Disposable {
 	}
 
 	/**
+	 * Reset markdown accumulation (called when a new stream starts after finalization)
+	 */
+	public resetMarkdownAccumulation(): void {
+		this.accumulatedMarkdown = '';
+	}
+
+	/**
+	 * Get accumulated markdown content (for comparison with final events)
+	 */
+	public getAccumulatedMarkdown(): string {
+		return this.accumulatedMarkdown;
+	}
+
+	/**
 	 * Phase 7: Append plain text to markdown part (for assistant.delta events)
+	 * SIMPLIFIED: Just append delta. No guards, no deduplication, no complexity.
+	 * The markdown part's internal dedupe will handle duplicate renders.
 	 */
 	public appendText(text: string): void {
-		// Similar to appendMarkdownChunk, but explicitly for plain text deltas
+		if (!text || text.length === 0) {
+			return;
+		}
+
+		// CRITICAL: Check if we already have final content (from setMarkdownContent)
+		// If so, ignore appendText - the final content is authoritative
+		// This prevents late-arriving deltas from corrupting the final content
+		const existingData = this.contentPartsData.find(d => d.kind === 'markdown');
+		if (existingData && !existingData.isStreaming) {
+			// Already finalized - ignore late deltas
+			return;
+		}
+
+		// Simple: append delta to accumulated content
 		this.accumulatedMarkdown += text;
 
 		// Find or create markdown part
-		let existingPart = this.contentParts.find(p => p.kind === 'markdown') as VybeChatMarkdownPart | undefined;
+		let part = this.contentParts.find(p => p.kind === 'markdown') as VybeChatMarkdownPart | undefined;
 
-		if (!existingPart) {
+		if (!part) {
 			// Create new markdown part
 			const contentData: IVybeChatMarkdownContent = {
 				kind: 'markdown',
 				content: this.accumulatedMarkdown,
 				isStreaming: true
 			};
-			existingPart = this.addContentPart(contentData) as VybeChatMarkdownPart | undefined;
+			part = this.addContentPart(contentData) as VybeChatMarkdownPart | undefined;
+			if (!part) {
+				return; // Can't proceed without a part
+			}
 		}
 
-		if (existingPart && existingPart.updateContent) {
-			existingPart.updateContent({
+		// Update part with accumulated content (part's internal dedupe will prevent duplicate renders)
+		if (part.updateContent) {
+			part.updateContent({
 				kind: 'markdown',
 				content: this.accumulatedMarkdown,
 				isStreaming: true
 			});
-			// Update data tracking
-			const index = this.contentPartsData.findIndex(d => d.kind === 'markdown');
-			if (index >= 0) {
-				this.contentPartsData[index] = { kind: 'markdown', content: this.accumulatedMarkdown, isStreaming: true };
+		}
+
+		// Update data tracking
+		const index = this.contentPartsData.findIndex(d => d.kind === 'markdown');
+		if (index >= 0) {
+			this.contentPartsData[index] = { kind: 'markdown', content: this.accumulatedMarkdown, isStreaming: true };
+		} else {
+			this.contentPartsData.push({ kind: 'markdown', content: this.accumulatedMarkdown, isStreaming: true });
+		}
+	}
+
+	/**
+	 * Set markdown content directly (used by assistant.final to ensure completeness)
+	 * This replaces accumulated content with the authoritative full_text
+	 * ONLY if the content has actually changed - prevents unnecessary re-renders
+	 */
+	public setMarkdownContentIfChanged(fullText: string): void {
+		// DIAGNOSTIC: Log content being set
+		const hasCodeBlocks = fullText.includes('```');
+		const currentHasCodeBlocks = this.accumulatedMarkdown.includes('```');
+		console.log('[MessagePage] setMarkdownContentIfChanged', {
+			fullTextLength: fullText.length,
+			accumulatedLength: this.accumulatedMarkdown.length,
+			fullTextHasCodeBlocks: hasCodeBlocks,
+			accumulatedHasCodeBlocks: currentHasCodeBlocks,
+			contentMatches: this.accumulatedMarkdown === fullText
+		});
+
+		// CRITICAL: Only update if content actually changed
+		// This prevents re-rendering code blocks unnecessarily, which causes flicker
+		if (this.accumulatedMarkdown === fullText) {
+			// Content matches - update data tracking and markdown part's streaming state
+			// updateContent will detect content unchanged and skip re-render (code blocks preserved)
+			const existingData = this.contentPartsData.find(d => d.kind === 'markdown');
+			if (existingData && existingData.isStreaming) {
+				existingData.isStreaming = false;
+				// Call updateContent - it will detect content unchanged and just update streaming state
+				const part = this.contentParts.find(p => p.kind === 'markdown') as VybeChatMarkdownPart | undefined;
+				if (part && part.updateContent) {
+					part.updateContent({
+						kind: 'markdown',
+						content: this.accumulatedMarkdown,
+						isStreaming: false
+					});
+				}
 			}
+			return; // No change needed
+		}
+
+
+		// Replace accumulated content with full_text (authoritative source)
+		this.accumulatedMarkdown = fullText;
+
+		// Find or create markdown part
+		let part = this.contentParts.find(p => p.kind === 'markdown') as VybeChatMarkdownPart | undefined;
+
+		if (!part) {
+			// Create new markdown part
+			const contentData: IVybeChatMarkdownContent = {
+				kind: 'markdown',
+				content: this.accumulatedMarkdown,
+				isStreaming: false // Not streaming - this is the final content
+			};
+			part = this.addContentPart(contentData) as VybeChatMarkdownPart | undefined;
+			if (!part) {
+				return; // Can't proceed without a part
+			}
+		}
+
+		// Update part with full text (part's internal dedupe will prevent duplicate renders)
+		// CRITICAL: Set isStreaming: false since this is the final authoritative content
+		// This prevents late-arriving deltas from appending after we've set the final content
+		if (part.updateContent) {
+			part.updateContent({
+				kind: 'markdown',
+				content: this.accumulatedMarkdown,
+				isStreaming: false // Not streaming - this is the final content
+			});
+		}
+
+		// Update data tracking
+		const index = this.contentPartsData.findIndex(d => d.kind === 'markdown');
+		if (index >= 0) {
+			this.contentPartsData[index] = { kind: 'markdown', content: this.accumulatedMarkdown, isStreaming: false };
+		} else {
+			this.contentPartsData.push({ kind: 'markdown', content: this.accumulatedMarkdown, isStreaming: false });
 		}
 	}
 
@@ -1203,21 +1382,278 @@ export class MessagePage extends Disposable {
 	/**
 	 * Phase 7: Mark message as complete, stop streaming indicators
 	 */
+	/**
+	 * Block-based methods (Production architecture)
+	 * These methods handle structured block events from the server.
+	 */
+
+	/**
+	 * Create a new content block
+	 */
+	public createBlock(block: ContentBlock): void {
+		// DEDUPE: Skip if block already exists
+		if (this.blocks.has(block.id)) {
+			console.log('[MessagePage] createBlock: block already exists, skipping', block.id);
+			return;
+		}
+		console.log('[MessagePage] createBlock', { id: block.id, type: block.type, contentLength: block.content.length });
+		this.blocks.set(block.id, block);
+		this.renderBlock(block);
+	}
+
+	/**
+	 * Append delta to an existing block
+	 */
+	public appendToBlock(blockId: string, delta: string): void {
+		const block = this.blocks.get(blockId);
+		if (!block) {
+			console.warn('[MessagePage] appendToBlock: block not found', blockId);
+			return;
+		}
+
+		block.content += delta;
+		this.updateBlockContent(blockId, block.content);
+	}
+
+	/**
+	 * Finalize a block (mark as complete)
+	 */
+	public finalizeBlock(blockId: string, content: string): void {
+		const block = this.blocks.get(blockId);
+		if (!block) {
+			console.warn('[MessagePage] finalizeBlock: block not found', blockId);
+			return;
+		}
+
+		block.content = content;
+		block.isStreaming = false;
+		this.updateBlockContent(blockId, content);
+	}
+
+	/**
+	 * Mark message as complete
+	 */
+	public setComplete(): void {
+		// Finalize all streaming blocks (block-based model)
+		for (const block of this.blocks.values()) {
+			if (block.isStreaming) {
+				block.isStreaming = false;
+				this.updateBlockContent(block.id, block.content);
+			}
+		}
+
+		// Also finalize content parts (thinking, markdown, etc.)
+		// This ensures thinking transitions from "Thinking" → "Thought for Xs"
+		this.finalize();
+	}
+
+	/**
+	 * Add a code block from a display tool (show_code)
+	 * Production architecture: Code blocks come from tool calls, not markdown parsing
+	 */
+	public addCodeBlockFromTool(
+		toolId: string,
+		language: string,
+		code: string,
+		filename?: string,
+		description?: string
+	): void {
+		console.log('[MessagePage] addCodeBlockFromTool', { toolId, language, codeLength: code.length, filename });
+
+		// Create a code block content part
+		const contentData: IVybeChatCodeBlockContent = {
+			kind: 'codeBlock',
+			code: code,
+			language: language || 'plaintext',
+			isStreaming: false,
+			filename: filename
+		};
+
+		// If there's a description, add it as markdown before the code block
+		if (description) {
+			const descriptionData: IVybeChatMarkdownContent = {
+				kind: 'markdown',
+				content: description,
+				isStreaming: false
+			};
+			this.addContentPart(descriptionData);
+		}
+
+		// Add the code block
+		const part = this.addContentPart(contentData);
+		if (part) {
+			// Track as a block for consistency
+			const block: ContentBlock = {
+				id: toolId,
+				type: 'code',
+				content: code,
+				isStreaming: false,
+				language: language
+			};
+			this.blocks.set(toolId, block);
+			this.blockToPartMap.set(toolId, part);
+		}
+	}
+
+	/**
+	 * Render a block (create appropriate content part)
+	 */
+	private renderBlock(block: ContentBlock): void {
+		let part: IVybeChatContentPart | undefined;
+
+		if (block.type === 'text') {
+			// Text block - use markdown part
+			const contentData: IVybeChatMarkdownContent = {
+				kind: 'markdown',
+				content: block.content,
+				isStreaming: block.isStreaming
+			};
+			part = this.addContentPart(contentData) || undefined;
+		} else if (block.type === 'code') {
+			// Code block - use code block part
+			const contentData: IVybeChatCodeBlockContent = {
+				kind: 'codeBlock',
+				code: block.content,
+				language: block.language || 'plaintext',
+				isStreaming: block.isStreaming
+			};
+			part = this.addContentPart(contentData) || undefined;
+		} else if (block.type === 'thinking') {
+			// Thinking block - use thinking part
+			const contentData: IVybeChatThinkingContent = {
+				kind: 'thinking',
+				value: block.content, // Thinking uses 'value' not 'content'
+				isStreaming: block.isStreaming
+			};
+			part = this.addContentPart(contentData) || undefined;
+		}
+
+		if (part) {
+			this.blockToPartMap.set(block.id, part);
+		}
+	}
+
+	/**
+	 * Update block content (update existing content part)
+	 */
+	private updateBlockContent(blockId: string, content: string): void {
+		const block = this.blocks.get(blockId);
+		if (!block) {
+			return;
+		}
+
+		const part = this.blockToPartMap.get(blockId);
+		if (!part || !part.updateContent) {
+			return;
+		}
+
+		if (block.type === 'text') {
+			part.updateContent({
+				kind: 'markdown',
+				content: content,
+				isStreaming: block.isStreaming
+			});
+		} else if (block.type === 'code') {
+			part.updateContent({
+				kind: 'codeBlock',
+				code: content,
+				language: block.language || 'plaintext',
+				isStreaming: block.isStreaming
+			});
+		} else if (block.type === 'thinking') {
+			part.updateContent({
+				kind: 'thinking',
+				value: content, // Thinking uses 'value' not 'content'
+				isStreaming: block.isStreaming
+			});
+		}
+
+		// Trigger scroll update
+		if (this.options.onContentUpdate) {
+			this.options.onContentUpdate();
+		}
+	}
+
 	public finalize(): void {
+		// Finalize all content parts
 
 		// Set isStreaming: false on all content parts
 		for (const part of this.contentParts) {
 			if (part.updateContent) {
-				const partData = this.contentPartsData[this.contentParts.indexOf(part)];
+				// Find part data by kind (more reliable than index, especially for thinking/markdown/codeBlock)
+				const partData = this.contentPartsData.find(d => {
+					if (d.kind === part.kind) {
+						// For thinking/markdown/codeBlock, there's only one of each kind
+						if (d.kind === 'thinking' || d.kind === 'markdown' || d.kind === 'codeBlock') {
+							return true;
+						}
+						// For other kinds, match by kind
+						return true;
+					}
+					return false;
+				});
+
 				if (partData) {
+					// Ensure content exists for markdown parts before updating
+					if (partData.kind === 'markdown') {
+						const markdownContent = (partData as any).content;
+						if (!markdownContent || markdownContent.length === 0) {
+							continue;
+						}
+					}
 					const updatedData = { ...partData, isStreaming: false };
-					part.updateContent(updatedData);
+
+					// Add duration for thinking parts
+					if (updatedData.kind === 'thinking' && this.thinkingStartTime !== null) {
+						(updatedData as any).duration = Date.now() - this.thinkingStartTime;
+					}
+
+					try {
+						// Ensure content is always a string (never undefined)
+						if (updatedData.kind === 'markdown' && !(updatedData as any).content) {
+							(updatedData as any).content = '';
+						}
+						// Update the part
+						part.updateContent(updatedData);
+						// Update contentPartsData to reflect finalization
+						const dataIndex = this.contentPartsData.findIndex(d => {
+							if (d.kind === part.kind) {
+								if (d.kind === 'thinking' || d.kind === 'markdown' || d.kind === 'codeBlock') {
+									return true;
+								}
+								return true;
+							}
+							return false;
+						});
+						if (dataIndex >= 0) {
+							this.contentPartsData[dataIndex] = updatedData;
+						}
+					} catch (error) {
+						console.error('[MessagePage] Error updating content part during finalize:', error, {
+							partKind: partData.kind,
+							hasContent: !!(partData as any).content || !!(partData as any).value,
+							contentLength: (partData as any).content ? (partData as any).content.length :
+							             ((partData as any).value ? ((partData as any).value instanceof Array ? (partData as any).value.join('').length : (partData as any).value.length) : 0),
+							errorMessage: error instanceof Error ? error.message : String(error)
+						});
+						// Don't re-throw - continue finalizing other parts
+					}
 				}
 			}
 		}
 
-		// Remove phase indicator if exists
-		if (this.phaseIndicator) {
+		// Remove phase indicator if exists, but only if we have content
+		// This prevents the phase indicator from vanishing before content appears
+		const hasContent = this.contentParts.length > 0 && this.contentParts.some(part => {
+			if (part.kind === 'markdown') {
+				const index = this.contentParts.indexOf(part);
+				const partData = index >= 0 ? this.contentPartsData[index] : undefined;
+				return partData && (partData as any).content && (partData as any).content.length > 0;
+			}
+			return true; // Other parts count as content
+		});
+
+		if (this.phaseIndicator && hasContent) {
 			this.phaseIndicator.remove();
 			this.phaseIndicator = null;
 		}
@@ -1266,6 +1702,10 @@ export class MessagePage extends Disposable {
 	 * Update existing content parts with streaming data.
 	 * Updates individual parts, then checks for grouping when research actions complete.
 	 * contentParts should be the full array of all parts so far.
+	 */
+	/**
+	 * Update content parts (legacy fallback or non-streaming content)
+	 * NOTE: This method is called ONLY when hasReceivedEvents === false OR for non-streaming content updates (e.g., error messages).
 	 */
 	public updateContentParts(contentParts: IVybeChatContentData[]): void {
 		if (!this.aiResponseArea || !this.markdownRendererService) {

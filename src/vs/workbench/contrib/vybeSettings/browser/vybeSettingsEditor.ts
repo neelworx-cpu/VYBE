@@ -368,15 +368,17 @@ export class VybeSettingsEditor extends EditorPane {
 		const viewportWidth = scrollableDomNode.clientWidth;
 		const viewportHeight = scrollableDomNode.clientHeight;
 
-		// Set content wrapper dimensions to match viewport
-		// This ensures clientHeight = viewportHeight, while scrollHeight = content height
+		// Temporarily remove height constraint to measure actual content height
+		this.contentWrapperEl.style.height = 'auto';
 		this.contentWrapperEl.style.width = `${viewportWidth}px`;
-		this.contentWrapperEl.style.height = `${viewportHeight}px`;
 
 		// Force layout recalculation to get actual content dimensions
 		void this.contentWrapperEl.offsetHeight;
 		const contentWidth = this.contentWrapperEl.scrollWidth;
 		const contentHeight = this.contentWrapperEl.scrollHeight;
+
+		// Now set the wrapper height to viewport height for proper scrolling
+		this.contentWrapperEl.style.height = `${viewportHeight}px`;
 
 		// Set scroll dimensions explicitly
 		// height = viewport (visible area)
