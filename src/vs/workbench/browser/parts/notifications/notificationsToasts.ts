@@ -12,7 +12,7 @@ import { IInstantiationService } from '../../../../platform/instantiation/common
 import { NotificationsList } from './notificationsList.js';
 import { Event, Emitter } from '../../../../base/common/event.js';
 import { IWorkbenchLayoutService, Parts } from '../../../services/layout/browser/layoutService.js';
-import { NOTIFICATIONS_TOAST_BORDER, NOTIFICATIONS_BACKGROUND, SIDE_BAR_BACKGROUND } from '../../../common/theme.js';
+import { NOTIFICATIONS_TOAST_BORDER, SIDE_BAR_BACKGROUND } from '../../../common/theme.js';
 import { IThemeService, Themable } from '../../../../platform/theme/common/themeService.js';
 /* widgetShadow import removed - shadow no longer used */
 import { IEditorGroupsService } from '../../../services/editor/common/editorGroupsService.js';

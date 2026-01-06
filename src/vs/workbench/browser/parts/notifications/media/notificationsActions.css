@@ -13,7 +13,7 @@
 	height: 12px !important; /* Match icon height */
 	line-height: 12px !important; /* Match icon line-height */
 	display: flex !important; /* Use flex for alignment */
-	align-items: center !important; /* Vertically center icons */
+	align-items: flex-start !important; /* Align icons to top */
 	justify-content: center !important; /* Horizontally center icons */
 }
 
@@ -41,7 +41,7 @@
 	height: 12px !important; /* Match icon height */
 	line-height: 12px !important; /* Match icon line-height */
 	display: flex !important; /* Use flex for alignment */
-	align-items: center !important; /* Vertically center icons */
+	align-items: flex-start !important; /* Align icons to top */
 	justify-content: center !important; /* Horizontally center icons */
 }
 
@@ -112,7 +112,7 @@
 	padding-left: 3px !important; /* Left padding for spacing */
 	padding-right: 3px !important; /* Right padding for spacing */
 	display: flex !important; /* Use flex for alignment */
-	align-items: center !important; /* Vertically center icon */
+	align-items: flex-start !important; /* Align icon to top */
 	justify-content: center !important; /* Horizontally center icon */
 }
 

@@ -9,7 +9,9 @@
 	color: var(--vscode-notifications-foreground);
 	background: var(--vscode-sideBar-background); /* Use sidebar background (secondary panel) - works for both VYBE Dark (#1a1b1d) and VYBE Light (#FFFFFF) */
 	outline-color: var(--vscode-contrastBorder);
-	max-width: 340px; /* Maximum width for notifications */
+	max-width: 100%; /* Use 100% to fit within toast container */
+	width: 100%; /* Full width to fit within toast container */
+	box-sizing: border-box; /* Include padding and border in width calculation */
 	font-family: "Segoe WPC", "Segoe UI", sans-serif; /* Cursor notification font family */
 }
 
@@ -33,13 +35,18 @@
 .monaco-workbench .notifications-list-container .notification-list-item > .notification-list-item-main-row {
 	display: flex;
 	flex-grow: 1;
+	column-gap: 6px; /* 6px gap between icon and message */
+	row-gap: 6px; /* 6px gap between rows */
+	padding-left: 2px; /* 2px left padding */
+	align-items: flex-start; /* Align items to top (changed from center) */
+	min-width: 0; /* Allow flex items to shrink below their content size */
 }
 
 /** Notification: Icon */
 
 .monaco-workbench .notifications-list-container .notification-list-item .notification-list-item-icon {
 	display: flex;
-	align-items: center;
+	align-items: flex-start; /* Align icon to top to match text alignment */
 	justify-content: center;
 	flex-basis: 14px; /* Cursor style */
 	flex-grow: 0;
@@ -70,8 +77,11 @@
 	overflow: hidden;
 	text-overflow: ellipsis;
 	flex: 1; /* let the message always grow */
+	min-width: 0; /* Allow flex item to shrink below content size to prevent overflow */
 	user-select: text;
 	-webkit-user-select: text;
+	display: flex; /* Use flex for alignment */
+	align-items: center; /* Vertically center content */
 }
 
 .monaco-workbench .notifications-list-container .notification-list-item .notification-list-item-message a {
@@ -114,8 +124,9 @@
 .monaco-workbench .notifications-list-container .notification-list-item > .notification-list-item-details-row {
 	display: none;
 	align-items: center;
-	padding-left: 5px;
-	overflow: hidden; /* details row should never overflow */
+	padding-left: 4px; /* 4px left padding (changed from 5px) */
+	overflow: visible; /* Changed from hidden to visible to allow content to display */
+	min-width: 0; /* Allow flex item to shrink below content size to prevent overflow */
 }
 
 .monaco-workbench .notifications-list-container .notification-list-item.expanded > .notification-list-item-details-row {
