@@ -69,7 +69,7 @@
 		"notebook.selectedCellBackground": "#C8DDF150",
 		"notificationCenterHeader.background": "#FFFFFF",
 		"notificationCenterHeader.foreground": "#3B3B3B",
-		"notifications.background": "#FFFFFF",
+		"notifications.background": "#eceff2",
 		"notifications.border": "#E5E5E5",
 		"notifications.foreground": "#3B3B3B",
 		"panel.background": "#FFFFFF",

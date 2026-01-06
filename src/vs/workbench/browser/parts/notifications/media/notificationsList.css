@@ -7,14 +7,16 @@
 
 .monaco-workbench .notifications-list-container {
 	color: var(--vscode-notifications-foreground);
-	background: var(--vscode-notifications-background);
+	background: var(--vscode-sideBar-background); /* Use sidebar background (secondary panel) - works for both VYBE Dark (#1a1b1d) and VYBE Light (#FFFFFF) */
 	outline-color: var(--vscode-contrastBorder);
+	max-width: 340px; /* Maximum width for notifications */
+	font-family: "Segoe WPC", "Segoe UI", sans-serif; /* Cursor notification font family */
 }
 
 .monaco-workbench .notifications-list-container .notification-list-item {
 	display: flex;
 	flex-direction: column-reverse; /* the details row appears first in order for better keyboard access to notification buttons */
-	padding: 10px 5px;
+	padding: 8px; /* 8px padding on all sides */
 	height: 100%;
 	box-sizing: border-box;
 }
@@ -22,7 +24,7 @@
 .monaco-workbench .notifications-list-container .notification-offset-helper {
 	opacity: 0;
 	position: absolute;
-	line-height: 22px;
+	line-height: 16px; /* Reduced line-height for tighter text spacing */
 	word-wrap: break-word; /* never overflow long words, but break to next line */
 }
 
@@ -38,19 +40,33 @@
 .monaco-workbench .notifications-list-container .notification-list-item .notification-list-item-icon {
 	display: flex;
 	align-items: center;
-	flex: 0 0 16px;
-	height: 22px;
-	margin-right: 4px;
-	margin-left: 4px;
-	font-size: 18px;
-	background-position: center;
+	justify-content: center;
+	flex-basis: 14px; /* Cursor style */
+	flex-grow: 0;
+	flex-shrink: 0;
+	width: 13.995px; /* Cursor style */
+	height: 15.99px; /* Cursor style */
+	margin-top: 0 !important; /* No top margin */
+	margin-bottom: 0 !important; /* No bottom margin */
+	margin-left: 0; /* No left margin */
+	margin-right: 4px; /* Right margin for spacing from message */
+	padding-top: 0 !important; /* No top padding */
+	padding-bottom: 0 !important; /* No bottom padding */
+	padding-left: 0; /* No left padding */
+	padding-right: 0; /* No right padding */
+	font-size: 12px; /* Icon size 12px */
+	line-height: 12px; /* Cursor style */
+	background-position: 50% 50%; /* Cursor style */
 	background-repeat: no-repeat;
+	text-align: center;
 }
 
 /** Notification: Message */
 
 .monaco-workbench .notifications-list-container .notification-list-item .notification-list-item-message {
-	line-height: 22px;
+	line-height: 16px; /* Reduced line-height for tighter text spacing */
+	font-size: 12px; /* Text font size 12px */
+	font-family: "Segoe WPC", "Segoe UI", sans-serif; /* Cursor notification font family */
 	overflow: hidden;
 	text-overflow: ellipsis;
 	flex: 1; /* let the message always grow */
@@ -77,7 +93,13 @@
 
 .monaco-workbench .notifications-list-container .notification-list-item .notification-list-item-toolbar-container {
 	display: none;
-	height: 22px;
+	height: 15.99px; /* Match Cursor height */
+	line-height: 15.99px; /* Match height to prevent vertical spacing */
+	margin-top: 0 !important;
+	margin-bottom: 0 !important;
+	padding-top: 0 !important;
+	padding-bottom: 0 !important;
+	vertical-align: top; /* Align to top */
 }
 
 .monaco-workbench .notifications-list-container .monaco-list:focus-within .notification-list-item .notification-list-item-toolbar-container,
@@ -105,6 +127,7 @@
 .monaco-workbench .notifications-list-container .notification-list-item .notification-list-item-source {
 	flex: 1;
 	font-size: 12px;
+	font-family: "Segoe WPC", "Segoe UI", sans-serif; /* Cursor notification font family */
 	overflow: hidden; /* always give away space to buttons container */
 	text-overflow: ellipsis;
 }
@@ -118,7 +141,7 @@
 
 .monaco-workbench .notifications-list-container .notification-list-item .notification-list-item-buttons-container > .monaco-button-dropdown,
 .monaco-workbench .notifications-list-container .notification-list-item .notification-list-item-buttons-container > .monaco-button {
-	margin: 4px 5px; /* allows button focus outline to be visible */
+	margin: 0 2px; /* 2px left and right for button spacing */
 }
 
 .monaco-workbench .notifications-list-container .notification-list-item .notification-list-item-buttons-container .monaco-button {
@@ -127,11 +150,38 @@
 
 .monaco-workbench .notifications-list-container .notification-list-item .notification-list-item-buttons-container .monaco-text-button {
 	width: fit-content;
-	padding: 4px 10px;
+	padding: 1px 6px; /* 1px vertical, 6px horizontal */
 	display: inline-block;	/* to enable ellipsis in text overflow */
 	font-size: 12px;
+	font-family: "Segoe WPC", "Segoe UI", sans-serif; /* Cursor notification font family */
 	overflow: hidden;
 	text-overflow: ellipsis;
+	height: 19.98px !important; /* Ensure consistent height for all buttons (matches Cursor) */
+	line-height: 18px; /* Match Cursor line-height */
+	box-sizing: border-box;
+}
+
+/* Secondary button background color (Show Recommendations) - uses activity bar/status bar background */
+/* Very specific selector to override inline styles set by button.ts */
+.monaco-workbench .notifications-list-container .notification-list-item .notification-list-item-details-row .notification-list-item-buttons-container .monaco-button.secondary.monaco-text-button,
+.monaco-workbench .notifications-list-container .notification-list-item .notification-list-item-details-row .notification-list-item-buttons-container .monaco-button.secondary.monaco-text-button.default-colors,
+.monaco-workbench .notifications-list-container .notification-list-item.expanded .notification-list-item-details-row .notification-list-item-buttons-container .monaco-button.secondary.monaco-text-button,
+.monaco-workbench .notifications-list-container .notification-list-item.expanded .notification-list-item-details-row .notification-list-item-buttons-container .monaco-button.secondary.monaco-text-button.default-colors {
+	background-color: var(--vscode-activityBar-background) !important; /* Use activity bar/status bar background */
+	color: var(--vscode-activityBar-foreground) !important; /* Use activity bar foreground for text */
+	height: 19.98px !important; /* Ensure same height as primary button */
+	line-height: 18px !important; /* Match Cursor line-height */
+	box-sizing: border-box !important;
+}
+
+/* Override hover state for secondary button - slightly darker using filter */
+.monaco-workbench .notifications-list-container .notification-list-item .notification-list-item-details-row .notification-list-item-buttons-container .monaco-button.secondary.monaco-text-button:hover,
+.monaco-workbench .notifications-list-container .notification-list-item .notification-list-item-details-row .notification-list-item-buttons-container .monaco-button.secondary.monaco-text-button.default-colors:hover,
+.monaco-workbench .notifications-list-container .notification-list-item.expanded .notification-list-item-details-row .notification-list-item-buttons-container .monaco-button.secondary.monaco-text-button:hover,
+.monaco-workbench .notifications-list-container .notification-list-item.expanded .notification-list-item-details-row .notification-list-item-buttons-container .monaco-button.secondary.monaco-text-button.default-colors:hover {
+	background-color: var(--vscode-activityBar-background) !important;
+	filter: brightness(0.9) !important; /* Slightly darker on hover */
+	color: var(--vscode-activityBar-foreground) !important;
 }
 
 .monaco-workbench .notifications-list-container .notification-list-item .notification-list-item-buttons-container .monaco-dropdown-button {

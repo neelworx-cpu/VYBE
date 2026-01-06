@@ -23,6 +23,8 @@
 
 .monaco-workbench > .notifications-toasts .notification-toast-container {
 	overflow: hidden; /* this ensures that the notification toast does not shine through */
+	max-width: 340px; /* Maximum width for notification toasts */
+	font-family: "Segoe WPC", "Segoe UI", sans-serif; /* Cursor notification font family */
 }
 
 .monaco-workbench > .notifications-toasts .notification-toast-container > .notification-toast {

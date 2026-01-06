@@ -5,7 +5,7 @@
 
 import './media/notificationsCenter.css';
 import './media/notificationsActions.css';
-import { NOTIFICATIONS_CENTER_HEADER_FOREGROUND, NOTIFICATIONS_CENTER_HEADER_BACKGROUND, NOTIFICATIONS_CENTER_BORDER } from '../../../common/theme.js';
+import { NOTIFICATIONS_CENTER_HEADER_FOREGROUND, NOTIFICATIONS_CENTER_HEADER_BACKGROUND, NOTIFICATIONS_CENTER_BORDER, SIDE_BAR_BACKGROUND } from '../../../common/theme.js';
 import { IThemeService, Themable } from '../../../../platform/theme/common/themeService.js';
 import { INotificationsModel, INotificationChangeEvent, NotificationChangeType, NotificationViewItemContentChangeKind } from '../../../common/notifications.js';
 import { IWorkbenchLayoutService, Parts } from '../../../services/layout/browser/layoutService.js';
@@ -15,7 +15,7 @@ import { INotificationsCenterController, NotificationActionRunner } from './noti
 import { NotificationsList } from './notificationsList.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { $, Dimension, isAncestorOfActiveElement } from '../../../../base/browser/dom.js';
-import { widgetShadow } from '../../../../platform/theme/common/colorRegistry.js';
+/* widgetShadow import removed - shadow no longer used */
 import { IEditorGroupsService } from '../../../services/editor/common/editorGroupsService.js';
 import { localize } from '../../../../nls.js';
 import { ActionBar } from '../../../../base/browser/ui/actionbar/actionbar.js';
@@ -32,7 +32,7 @@ import { AccessibilitySignal, IAccessibilitySignalService } from '../../../../pl
 
 export class NotificationsCenter extends Themable implements INotificationsCenterController {
 
-	private static readonly MAX_DIMENSIONS = new Dimension(450, 400);
+	private static readonly MAX_DIMENSIONS = new Dimension(340, 400);
 
 	private static readonly MAX_NOTIFICATION_SOURCES = 10; // maximum number of notification sources to show in configure dropdown
 
@@ -320,8 +320,8 @@ export class NotificationsCenter extends Themable implements INotificationsCente
 
 	override updateStyles(): void {
 		if (this.notificationsCenterContainer && this.notificationsCenterHeader) {
-			const widgetShadowColor = this.getColor(widgetShadow);
-			this.notificationsCenterContainer.style.boxShadow = widgetShadowColor ? `0 0 8px 2px ${widgetShadowColor}` : '';
+			/* Shadow removed - no box-shadow applied */
+			this.notificationsCenterContainer.style.boxShadow = '';
 
 			const borderColor = this.getColor(NOTIFICATIONS_CENTER_BORDER);
 			this.notificationsCenterContainer.style.border = borderColor ? `1px solid ${borderColor}` : '';
@@ -329,7 +329,8 @@ export class NotificationsCenter extends Themable implements INotificationsCente
 			const headerForeground = this.getColor(NOTIFICATIONS_CENTER_HEADER_FOREGROUND);
 			this.notificationsCenterHeader.style.color = headerForeground ?? '';
 
-			const headerBackground = this.getColor(NOTIFICATIONS_CENTER_HEADER_BACKGROUND);
+			/* Use sidebar background (same as notification background) - works for both VYBE Dark (#1a1b1d) and VYBE Light (#FFFFFF) */
+			const headerBackground = this.getColor(SIDE_BAR_BACKGROUND);
 			this.notificationsCenterHeader.style.background = headerBackground ?? '';
 
 		}

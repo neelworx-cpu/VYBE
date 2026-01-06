@@ -3,12 +3,159 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-.monaco-workbench .notifications-list-container .notification-list-item .notification-list-item-toolbar-container .action-item,
-.monaco-workbench > .notifications-center > .notifications-center-header > .notifications-center-header-toolbar .action-item {
+.monaco-workbench .notifications-list-container .notification-list-item .notification-list-item-toolbar-container .action-item {
 	margin-right: 4px;
+	margin-top: 0 !important; /* No top margin */
+	margin-bottom: 0 !important; /* No bottom margin */
+	margin-left: 4px; /* Left margin for spacing */
+	padding-top: 0 !important; /* No top padding */
+	padding-bottom: 0 !important; /* No bottom padding */
+	height: 12px !important; /* Match icon height */
+	line-height: 12px !important; /* Match icon line-height */
+	display: flex !important; /* Use flex for alignment */
+	align-items: center !important; /* Vertically center icons */
+	justify-content: center !important; /* Horizontally center icons */
 }
 
-.monaco-workbench .notifications-list-container .notification-list-item .notification-list-item-toolbar-container .action-item:first-child,
+/* Notification center header toolbar action items - 12px icons, aligned together */
+.monaco-workbench > .notifications-center > .notifications-center-header > .notifications-center-header-toolbar .action-item {
+	margin-right: 4px;
+	margin-top: 0 !important; /* No top margin */
+	margin-bottom: 0 !important; /* No bottom margin */
+	margin-left: 4px; /* Left margin for spacing */
+	padding-top: 0 !important; /* No top padding */
+	padding-bottom: 0 !important; /* No bottom padding */
+	height: 12px !important; /* Match icon height */
+	line-height: 12px !important; /* Match icon line-height */
+	display: flex !important; /* Use flex for alignment */
+	align-items: center !important; /* Vertically center icons */
+	justify-content: center !important; /* Horizontally center icons */
+}
+
+.monaco-workbench .notifications-list-container .notification-list-item .notification-list-item-toolbar-container .action-item:first-child {
+	margin-left: 4px;
+	margin-top: 0 !important; /* No top margin */
+	margin-bottom: 0 !important; /* No bottom margin */
+	padding-top: 0 !important; /* No top padding */
+	padding-bottom: 0 !important; /* No bottom padding */
+	height: 12px !important; /* Match icon height */
+	line-height: 12px !important; /* Match icon line-height */
+	display: flex !important; /* Use flex for alignment */
+	align-items: center !important; /* Vertically center icons */
+	justify-content: center !important; /* Horizontally center icons */
+}
+
+/* Notification center header toolbar first action item */
 .monaco-workbench > .notifications-center > .notifications-center-header > .notifications-center-header-toolbar .action-item:first-child {
 	margin-left: 4px;
+	margin-top: 0 !important; /* No top margin */
+	margin-bottom: 0 !important; /* No bottom margin */
+	padding-top: 0 !important; /* No top padding */
+	padding-bottom: 0 !important; /* No bottom padding */
+	height: 12px !important; /* Match icon height */
+	line-height: 12px !important; /* Match icon line-height */
+	display: flex !important; /* Use flex for alignment */
+	align-items: center !important; /* Vertically center icons */
+	justify-content: center !important; /* Horizontally center icons */
+}
+
+/* Action bar and actions container - remove top/bottom spacing */
+.monaco-workbench .notifications-list-container .notification-list-item .notification-list-item-toolbar-container .monaco-action-bar {
+	margin-top: 0 !important;
+	margin-bottom: 0 !important;
+	padding-top: 0 !important;
+	padding-bottom: 0 !important;
+	height: 15.99px !important; /* Match Cursor height */
+	line-height: 15.99px !important; /* Match height to prevent vertical spacing */
+	vertical-align: top !important; /* Align to top */
+	display: flex !important; /* Use flex for better alignment */
+	align-items: flex-start !important; /* Align items to top */
+}
+
+.monaco-workbench .notifications-list-container .notification-list-item .notification-list-item-toolbar-container .monaco-action-bar .actions-container {
+	margin-top: 0 !important;
+	margin-bottom: 0 !important;
+	padding-top: 0 !important;
+	padding-bottom: 0 !important;
+	height: 15.99px !important; /* Match Cursor height */
+	line-height: 15.99px !important; /* Match height to prevent vertical spacing */
+	align-items: flex-start !important; /* Align items to top */
+}
+
+/* Dropdown elements - remove top/bottom spacing */
+.monaco-workbench .notifications-list-container .notification-list-item .notification-list-item-toolbar-container .action-item .monaco-dropdown {
+	margin-top: 0 !important;
+	margin-bottom: 0 !important;
+	padding-top: 0 !important;
+	padding-bottom: 0 !important;
+}
+
+.monaco-workbench .notifications-list-container .notification-list-item .notification-list-item-toolbar-container .action-item .monaco-dropdown .dropdown-label {
+	margin-top: 0 !important;
+	margin-bottom: 0 !important;
+	padding-top: 0 !important;
+	padding-bottom: 0 !important;
+}
+
+/* Action icons (configure and clear) - 12px font size */
+.monaco-workbench .notifications-list-container .notification-list-item .notification-list-item-toolbar-container .action-item .action-label.codicon {
+	font-size: 12px !important;
+	line-height: 12px !important;
+	height: 12px !important;
+	width: 12px !important;
+	margin-top: 0 !important; /* No top margin */
+	margin-bottom: 0 !important; /* No bottom margin */
+	margin-left: 0 !important;
+	margin-right: 0 !important;
+	padding-top: 0 !important; /* No top padding */
+	padding-bottom: 0 !important; /* No bottom padding */
+	padding-left: 3px !important; /* Left padding for spacing */
+	padding-right: 3px !important; /* Right padding for spacing */
+	display: flex !important; /* Use flex for alignment */
+	align-items: center !important; /* Vertically center icon */
+	justify-content: center !important; /* Horizontally center icon */
+}
+
+/* Header toolbar icons - ensure 12px font size and proper alignment */
+.monaco-workbench > .notifications-center > .notifications-center-header > .notifications-center-header-toolbar .action-item .action-label.codicon {
+	font-size: 12px !important;
+	line-height: 12px !important;
+	height: 12px !important;
+	width: 12px !important;
+	margin-top: 0 !important;
+	margin-bottom: 0 !important;
+	margin-left: 0 !important;
+	margin-right: 0 !important;
+	padding-top: 0 !important;
+	padding-bottom: 0 !important;
+	padding-left: 3px !important;
+	padding-right: 3px !important;
+	display: flex !important;
+	align-items: center !important;
+	justify-content: center !important;
+}
+
+/* Header toolbar action bar and container - ensure icons are aligned together */
+.monaco-workbench > .notifications-center > .notifications-center-header > .notifications-center-header-toolbar .monaco-action-bar {
+	margin-top: 0 !important;
+	margin-bottom: 0 !important;
+	padding-top: 0 !important;
+	padding-bottom: 0 !important;
+	height: 12px !important; /* Match icon height */
+	line-height: 12px !important; /* Match icon line-height */
+	display: flex !important;
+	align-items: center !important; /* Vertically center all icons */
+	justify-content: flex-end !important; /* Align icons to the right */
+}
+
+.monaco-workbench > .notifications-center > .notifications-center-header > .notifications-center-header-toolbar .monaco-action-bar .actions-container {
+	margin-top: 0 !important;
+	margin-bottom: 0 !important;
+	padding-top: 0 !important;
+	padding-bottom: 0 !important;
+	height: 12px !important; /* Match icon height */
+	line-height: 12px !important; /* Match icon line-height */
+	align-items: center !important; /* Vertically center all icons */
+	display: flex !important;
+	gap: 0; /* No gap between icons - they should be aligned together */
 }

@@ -12,9 +12,9 @@ import { IInstantiationService } from '../../../../platform/instantiation/common
 import { NotificationsList } from './notificationsList.js';
 import { Event, Emitter } from '../../../../base/common/event.js';
 import { IWorkbenchLayoutService, Parts } from '../../../services/layout/browser/layoutService.js';
-import { NOTIFICATIONS_TOAST_BORDER, NOTIFICATIONS_BACKGROUND } from '../../../common/theme.js';
+import { NOTIFICATIONS_TOAST_BORDER, NOTIFICATIONS_BACKGROUND, SIDE_BAR_BACKGROUND } from '../../../common/theme.js';
 import { IThemeService, Themable } from '../../../../platform/theme/common/themeService.js';
-import { widgetShadow } from '../../../../platform/theme/common/colorRegistry.js';
+/* widgetShadow import removed - shadow no longer used */
 import { IEditorGroupsService } from '../../../services/editor/common/editorGroupsService.js';
 import { INotificationsToastController } from './notificationsCommands.js';
 import { IContextKey, IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js';
@@ -42,7 +42,7 @@ enum ToastVisibility {
 
 export class NotificationsToasts extends Themable implements INotificationsToastController {
 
-	private static readonly MAX_WIDTH = 450;
+	private static readonly MAX_WIDTH = 340;
 	private static readonly MAX_NOTIFICATIONS = 3;
 
 	private static readonly PURGE_TIMEOUT: { [severity: number]: number } = {
@@ -486,14 +486,14 @@ export class NotificationsToasts extends Themable implements INotificationsToast
 
 	override updateStyles(): void {
 		this.mapNotificationToToast.forEach(({ toast }) => {
-			const backgroundColor = this.getColor(NOTIFICATIONS_BACKGROUND);
+			const backgroundColor = this.getColor(SIDE_BAR_BACKGROUND); /* Use sidebar background (secondary panel) - works for both VYBE Dark (#1a1b1d) and VYBE Light (#FFFFFF) */
 			toast.style.background = backgroundColor ? backgroundColor : '';
 
-			const widgetShadowColor = this.getColor(widgetShadow);
-			toast.style.boxShadow = widgetShadowColor ? `0 0 8px 2px ${widgetShadowColor}` : '';
+			/* Shadow removed - no box-shadow applied */
+			toast.style.boxShadow = '';
 
 			const borderColor = this.getColor(NOTIFICATIONS_TOAST_BORDER);
-			toast.style.border = borderColor ? `1px solid ${borderColor}` : '';
+			toast.style.border = borderColor ? `2px solid ${borderColor}` : ''; /* Increased border width from 1px to 2px */
 		});
 	}
 

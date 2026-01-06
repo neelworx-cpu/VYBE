@@ -11,6 +11,10 @@
 	display: none;
 	overflow: hidden;
 	border-radius: 4px;
+	max-width: 340px; /* Match toast width */
+	width: 340px; /* Fixed width to match max-width */
+	background: var(--vscode-sideBar-background); /* Use sidebar background (secondary panel) - works for both VYBE Dark (#1a1b1d) and VYBE Light (#FFFFFF) */
+	box-sizing: border-box;
 }
 
 .monaco-workbench.nostatusbar > .notifications-center {
@@ -26,14 +30,19 @@
 .monaco-workbench > .notifications-center > .notifications-center-header {
 	display: flex;
 	align-items: center;
-	padding-left: 8px;
-	padding-right: 5px;
-	height: 35px;
+	padding-top: 0; /* No top padding */
+	padding-bottom: 0; /* No bottom padding */
+	padding-left: 8px; /* 8px left padding */
+	padding-right: 8px; /* 8px right padding */
+	height: auto; /* Auto height for more compact layout */
+	min-height: 28px; /* Minimum height to accommodate content */
+	background: var(--vscode-sideBar-background) !important; /* Use sidebar background (same as notification background) - works for both VYBE Dark (#1a1b1d) and VYBE Light (#FFFFFF) */
 }
 
 .monaco-workbench > .notifications-center > .notifications-center-header > .notifications-center-header-title {
 	text-transform: uppercase;
-	font-size: 11px;
+	font-size: 12px; /* Changed from 11px to 12px */
+	line-height: 16px; /* Add line-height for better spacing */
 }
 
 .monaco-workbench > .notifications-center > .notifications-center-header > .notifications-center-header-toolbar {
