@@ -50,7 +50,7 @@ type ListParams_Internal_Ollama = {
 
 type ListParams_Internal_OpenAI = {
 	settingsOfProvider: VybeLLMProviderSettings;
-	providerName: 'vLLM' | 'lmStudio';
+	providerName: 'lmStudio';
 	onSuccess: (param: { models: OpenaiCompatibleModelResponse[] }) => void;
 	onError: (param: { error: string }) => void;
 };
@@ -66,10 +66,6 @@ const newOpenAICompatibleSDK = async ({ settingsOfProvider, providerName }: { se
 		const thisConfig = settingsOfProvider[providerName];
 		return new OpenAI({ baseURL: `${thisConfig.endpoint}/v1`, apiKey: 'noop', ...commonPayloadOpts });
 	}
-	else if (providerName === 'vLLM') {
-		const thisConfig = settingsOfProvider[providerName];
-		return new OpenAI({ baseURL: `${thisConfig.endpoint}/v1`, apiKey: 'noop', ...commonPayloadOpts });
-	}
 	else if (providerName === 'lmStudio') {
 		const thisConfig = settingsOfProvider[providerName];
 		return new OpenAI({ baseURL: `${thisConfig.endpoint}/v1`, apiKey: 'noop', ...commonPayloadOpts });
@@ -78,7 +74,7 @@ const newOpenAICompatibleSDK = async ({ settingsOfProvider, providerName }: { se
 };
 
 // Convert LLM tool call to our tool format
-const rawToolCallObjOfParamsStr = (name: string, toolParamsStr: string, id: string): RawToolCallObj | null => {
+const rawToolCallObjOfParamsStr = (name: string, toolParamsStr: string, id: string, index: number = 0): RawToolCallObj | null => {
 	let input: unknown;
 	try { input = JSON.parse(toolParamsStr); }
 	catch (e) { return null; }
@@ -87,7 +83,7 @@ const rawToolCallObjOfParamsStr = (name: string, toolParamsStr: string, id: stri
 	if (typeof input !== 'object') return null;
 
 	const rawParams: RawToolParamsObj = input as Record<string, string | undefined>;
-	return { id, name, rawParams, doneParams: Object.keys(rawParams), isDone: true };
+	return { id, name, rawParams, doneParams: Object.keys(rawParams), isDone: true, index };
 };
 
 const invalidApiKeyMessage = (providerName: VybeLLMProviderName) => `Invalid ${providerName} API key.`;
@@ -101,6 +97,8 @@ const _sendOpenAICompatibleChat = async ({ messages, onText, onFinalMessage, onE
 		stream: true,
 		temperature: options?.temperature,
 		max_tokens: options?.maxTokens,
+		// NOTE: tools and tool_choice removed - they were only used for rendering tools (emit_markdown, etc.)
+		// Real action tools (file ops, terminal, etc.) are handled separately via MCP tools
 	};
 
 	let fullReasoningSoFar = '';
@@ -109,41 +107,105 @@ const _sendOpenAICompatibleChat = async ({ messages, onText, onFinalMessage, onE
 	let toolId = '';
 	let toolParamsStr = '';
 
+	// Track multiple tool calls by index (for action tools only - file ops, terminal, etc.)
+	// Tool arguments must be complete, valid JSON - no partial parsing
+	const toolCalls = new Map<number, { name: string; params: string; id: string }>();
+
 	openai.chat.completions
 		.create(openAIOptions)
 		.then(async (response: any) => {
 			_setAborter(() => response.controller.abort());
 			// when receive text
 			for await (const chunk of response) {
+				const choice = chunk.choices[0];
+				const deltaToolCalls = choice?.delta?.tool_calls ?? [];
+				const deltaContent = choice?.delta?.content ?? '';
+
 				// message
-				const newText = chunk.choices[0]?.delta?.content ?? '';
+				const newText = deltaContent;
 				fullTextSoFar += newText;
 
-				// tool call
-				for (const tool of chunk.choices[0]?.delta?.tool_calls ?? []) {
-					const index = tool.index;
-					if (index !== 0) continue;
+				// tool call - handle multiple tool calls by index
+				// Accumulate tool call parameters (they arrive incrementally during streaming)
+				for (const tool of deltaToolCalls) {
+					const index = tool.index ?? 0;
 
-					toolName += tool.function?.name ?? '';
-					toolParamsStr += tool.function?.arguments ?? '';
-					toolId += tool.id ?? '';
+					if (!toolCalls.has(index)) {
+						toolCalls.set(index, { name: '', params: '', id: '' });
+					}
+
+					const toolCall = toolCalls.get(index)!;
+					toolCall.name += tool.function?.name ?? '';
+					toolCall.params += tool.function?.arguments ?? '';
+					toolCall.id += tool.id ?? '';
 				}
+
+				// Build toolCalls array for onText callback
+				// Only include tool calls with complete, valid JSON arguments
+				const toolCallsArray: RawToolCallObj[] = [];
+				for (const [index, tc] of toolCalls) {
+					if (tc.name && tc.params) {
+						// Try to parse params - only include if valid JSON
+						try {
+							const parsed = JSON.parse(tc.params);
+							if (typeof parsed === 'object' && parsed !== null) {
+								toolCallsArray.push({
+									name: tc.name,
+									rawParams: parsed as RawToolParamsObj,
+									doneParams: Object.keys(parsed),
+									id: tc.id,
+									isDone: false, // Will be set to true on final message
+									index
+								});
+							}
+						} catch {
+							// Params incomplete or invalid - skip for now, will be parsed on final message
+							// NO partial parsing, NO regex extraction
+						}
+					}
+				}
+
+				// For backward compatibility, also set toolCall (first tool call)
+				const firstToolCall = toolCallsArray.length > 0 ? toolCallsArray[0] : undefined;
 
 				// call onText
 				onText({
 					fullText: fullTextSoFar,
 					fullReasoning: fullReasoningSoFar,
 					delta: newText,
-					toolCall: !toolName ? undefined : { name: toolName, rawParams: {}, isDone: false, doneParams: [], id: toolId },
+					toolCall: firstToolCall, // Backward compatibility
+					toolCalls: toolCallsArray.length > 0 ? toolCallsArray : undefined, // NEW: Multiple tool calls
 				});
 			}
-			// on final
-			if (!fullTextSoFar && !fullReasoningSoFar && !toolName) {
+			// on final - parse all tool calls
+			// Only parse tool calls with complete, valid JSON arguments
+			const finalToolCalls: RawToolCallObj[] = [];
+			for (const [index, tc] of toolCalls) {
+				if (tc.name && tc.params) {
+					const parsed = rawToolCallObjOfParamsStr(tc.name, tc.params, tc.id, index);
+					if (parsed) {
+						finalToolCalls.push({ ...parsed, isDone: true });
+					}
+					// If parsing fails, tool call is invalid - skip it (no partial parsing, no regex)
+				}
+			}
+
+			// Also handle legacy single tool call for backward compatibility
+			if (toolName && toolParamsStr && finalToolCalls.length === 0) {
+				const legacyToolCall = rawToolCallObjOfParamsStr(toolName, toolParamsStr, toolId, 0);
+				if (legacyToolCall) {
+					finalToolCalls.push({ ...legacyToolCall, isDone: true });
+				}
+			}
+
+			if (!fullTextSoFar && !fullReasoningSoFar && finalToolCalls.length === 0) {
 				onError({ message: 'Vybe: Response from model was empty.', fullError: null });
 			}
 			else {
-				const toolCall = rawToolCallObjOfParamsStr(toolName, toolParamsStr, toolId);
-				const toolCallObj = toolCall ? { toolCall } : {};
+				const toolCallObj = finalToolCalls.length > 0 ? {
+					toolCall: finalToolCalls[0], // Backward compatibility
+					toolCalls: finalToolCalls // NEW: All tool calls
+				} : {};
 				onFinalMessage({ fullText: fullTextSoFar, fullReasoning: fullReasoningSoFar, anthropicReasoning: null, ...toolCallObj });
 			}
 		})
@@ -241,10 +303,6 @@ export const sendLLMMessageToProviderImplementation = {
 	ollama: {
 		sendChat: (params: SendChatParams_Internal) => _sendOpenAICompatibleChat(params),
 		list: (params: ModelListParams<OllamaModelResponse>) => ollamaList({ ...params, providerName: 'ollama' }),
-	},
-	vLLM: {
-		sendChat: (params: SendChatParams_Internal) => _sendOpenAICompatibleChat(params),
-		list: (params: ModelListParams<OpenaiCompatibleModelResponse>) => _openaiCompatibleList({ ...params, providerName: 'vLLM' }),
 	},
 	lmStudio: {
 		sendChat: (params: SendChatParams_Internal) => _sendOpenAICompatibleChat(params),

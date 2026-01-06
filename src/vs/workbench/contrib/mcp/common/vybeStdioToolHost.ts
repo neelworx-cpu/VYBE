@@ -56,14 +56,16 @@ export class VybeStdioToolHost extends Disposable implements IMcpMessageTranspor
 	private readonly _onDidReceiveMessageEmitter = new Emitter<MCP.JSONRPCMessage>();
 	private readonly _onDidLogEmitter = new Emitter<{ level: LogLevel; message: string }>();
 	private readonly _onDidReceiveCommandResultEmitter = new Emitter<{ taskId: string; result: any }>();
+	private readonly _onDidReceiveAgentEventEmitter = new Emitter<{ taskId: string; event: any }>();
 
 	public readonly state: IObservable<McpConnectionState> = this._state;
 	public readonly onDidReceiveMessage: Event<MCP.JSONRPCMessage> = this._onDidReceiveMessageEmitter.event;
 	public readonly onDidLog: Event<{ level: LogLevel; message: string }> = this._onDidLogEmitter.event;
 	public readonly onDidReceiveCommandResult: Event<{ taskId: string; result: any }> = this._onDidReceiveCommandResultEmitter.event;
+	public readonly onDidReceiveAgentEvent: Event<{ taskId: string; event: any }> = this._onDidReceiveAgentEventEmitter.event;
 
 	private readonly tools = new Map<string, VybeToolDefinition>();
-	private pendingRequests = new Map<MCP.RequestId, { resolve: (result: MCP.Result) => void; reject: (error: MCP.Error) => void }>();
+	private pendingRequests = new Map<MCP.RequestId, { resolve: (result: MCP.Result) => void; reject: (error: Error) => void }>();
 	private buffer = '';
 
 	constructor(
@@ -75,16 +77,13 @@ export class VybeStdioToolHost extends Disposable implements IMcpMessageTranspor
 		// Set up message reading from MCP process stdout
 		mcpProcess.stdout.setEncoding('utf8');
 		mcpProcess.stdout.on('data', (chunk: string) => {
-			// Log to both file logger and console for debugging
-			console.log(`[VYBE ToolHost] Received ${chunk.length} bytes from MCP process stdout`);
-			console.log(`[VYBE ToolHost] Chunk content (first 200 chars): ${chunk.substring(0, 200)}`);
 			this.log(LogLevel.Info, `[ToolHost] Received ${chunk.length} bytes from MCP process`);
 			this.buffer += chunk;
 			this.processBuffer();
 		});
 
 		mcpProcess.stdout.on('end', () => {
-			console.log(`[VYBE ToolHost] MCP process stdout ended`);
+			// MCP process stdout ended
 		});
 
 		mcpProcess.stdout.on('error', (error: Error) => {
@@ -94,13 +93,10 @@ export class VybeStdioToolHost extends Disposable implements IMcpMessageTranspor
 
 		mcpProcess.stderr.on('data', (data: Buffer) => {
 			const stderrText = data.toString().trimEnd();
-			console.log(`[VYBE ToolHost] MCP stderr: ${stderrText.substring(0, 200)}`);
 			this.log(LogLevel.Warning, `[MCP stderr] ${stderrText}`);
 		});
 
 		mcpProcess.on('exit', (code, signal) => {
-			console.log(`[VYBE ToolHost] MCP process exited - code: ${code}, signal: ${signal}`);
-			console.log(`[VYBE ToolHost] Buffer at exit: ${this.buffer.substring(0, 200)}`);
 			if (code !== null) {
 				this.log(LogLevel.Info, `MCP process exited with code ${code}`);
 			} else if (signal) {
@@ -150,7 +146,6 @@ export class VybeStdioToolHost extends Disposable implements IMcpMessageTranspor
 			this.mcpProcess.stdin.write(data, 'utf8');
 			// Log message type (request has 'method', response has 'result' or 'error')
 			const messageType = 'method' in message ? message.method : ('result' in message ? 'response' : 'error');
-			console.log(`[VYBE ToolHost] Sent message: ${messageType} (${contentLength} bytes)`);
 			this.log(LogLevel.Info, `[ToolHost] Sent message: ${messageType} (${contentLength} bytes)`);
 		} catch (error) {
 			console.error(`[VYBE ToolHost] Failed to send message:`, error);
@@ -173,10 +168,8 @@ export class VybeStdioToolHost extends Disposable implements IMcpMessageTranspor
 	 * MCP protocol uses Content-Length headers, not newline-separated JSON
 	 */
 	private processBuffer(): void {
-		console.log(`[VYBE ToolHost] processBuffer called, buffer length: ${this.buffer.length}`);
-
-		// Check for command_result messages (non-MCP protocol) before processing MCP messages
-		// Command results are plain JSON lines with "type": "command_result"
+		// Check for command_result and agent_event messages (non-MCP protocol) before processing MCP messages
+		// These are plain JSON lines with "type": "command_result" or "type": "agent_event"
 		const lines = this.buffer.split('\n');
 		for (let i = 0; i < lines.length - 1; i++) { // -1 to keep last (potentially incomplete) line
 			const line = lines[i].trim();
@@ -185,10 +178,20 @@ export class VybeStdioToolHost extends Disposable implements IMcpMessageTranspor
 					const parsed = JSON.parse(line);
 					if (parsed.type === 'command_result' && parsed.task_id) {
 						// Found a command result - emit it and remove from buffer
-						console.log(`[VYBE ToolHost] Found command_result for task ${parsed.task_id}`);
 						this._onDidReceiveCommandResultEmitter.fire({
 							taskId: parsed.task_id,
 							result: parsed.result
+						});
+						// Remove this line from buffer (including the newline)
+						const lineIndex = this.buffer.indexOf(line);
+						if (lineIndex !== -1) {
+							this.buffer = this.buffer.substring(0, lineIndex) + this.buffer.substring(lineIndex + line.length + 1);
+						}
+					} else if (parsed.type === 'agent_event' && parsed.task_id && parsed.event) {
+						// Found an agent event - emit it and remove from buffer
+						this._onDidReceiveAgentEventEmitter.fire({
+							taskId: parsed.task_id,
+							event: parsed.event
 						});
 						// Remove this line from buffer (including the newline)
 						const lineIndex = this.buffer.indexOf(line);
@@ -204,15 +207,12 @@ export class VybeStdioToolHost extends Disposable implements IMcpMessageTranspor
 
 		// Skip any non-MCP protocol messages (logs, etc.) by finding the first "Content-Length:" header
 		const firstContentLength = this.buffer.indexOf('Content-Length:');
-		console.log(`[VYBE ToolHost] First Content-Length at index: ${firstContentLength}`);
 
 		if (firstContentLength > 0) {
 			// There's non-MCP content before the first MCP message, skip it
-			console.log(`[VYBE ToolHost] Skipping ${firstContentLength} bytes of non-MCP content`);
 			this.buffer = this.buffer.substring(firstContentLength);
 		} else if (firstContentLength === -1) {
 			// No Content-Length found at all - this might be stderr output or the MCP message hasn't arrived yet
-			console.log(`[VYBE ToolHost] No Content-Length header found yet, buffer content: ${this.buffer.substring(0, 100)}`);
 			// Don't clear the buffer - wait for more data that might contain the MCP message
 			// The buffer will accumulate until we get the actual MCP protocol message
 			return;
@@ -225,22 +225,18 @@ export class VybeStdioToolHost extends Disposable implements IMcpMessageTranspor
 				const nextContentLength = this.buffer.indexOf('Content-Length:');
 				if (nextContentLength === -1) {
 					// No MCP messages in buffer, clear it
-					console.log(`[VYBE ToolHost] No more Content-Length headers found`);
 					this.buffer = '';
 					break;
 				}
-				console.log(`[VYBE ToolHost] Skipping ${nextContentLength} bytes of non-MCP content`);
 				this.buffer = this.buffer.substring(nextContentLength);
 			}
 
 			const headerEnd = this.buffer.indexOf('\r\n\r\n');
 			if (headerEnd === -1) {
-				console.log(`[VYBE ToolHost] No header end found, waiting for more data`);
 				break; // Need more data for header
 			}
 
 			const headerText = this.buffer.substring(0, headerEnd);
-			console.log(`[VYBE ToolHost] Found header: ${headerText}`);
 			const contentLengthMatch = headerText.match(/Content-Length:\s*(\d+)/i);
 			if (!contentLengthMatch) {
 				console.error(`[VYBE ToolHost] Invalid MCP message header: ${headerText}`);
@@ -257,22 +253,28 @@ export class VybeStdioToolHost extends Disposable implements IMcpMessageTranspor
 
 			const contentLength = parseInt(contentLengthMatch[1], 10);
 			const messageStart = headerEnd + 4; // After \r\n\r\n
-			const messageEnd = messageStart + contentLength;
-			console.log(`[VYBE ToolHost] Content-Length: ${contentLength}, buffer length: ${this.buffer.length}, messageEnd: ${messageEnd}`);
 
-			if (this.buffer.length < messageEnd) {
-				console.log(`[VYBE ToolHost] Need more data: have ${this.buffer.length}, need ${messageEnd}`);
+			// Convert to Buffer to work with bytes, not characters (for UTF-8 safety)
+			const bufferBytes = Buffer.from(this.buffer, 'utf-8');
+			const messageStartBytes = Buffer.byteLength(this.buffer.substring(0, messageStart), 'utf-8');
+			const messageEndBytes = messageStartBytes + contentLength;
+			const availableBytes = bufferBytes.length - messageStartBytes;
+
+			if (availableBytes < contentLength) {
 				break; // Need more data for message body
 			}
 
-			const messageJson = this.buffer.substring(messageStart, messageEnd);
-			console.log(`[VYBE ToolHost] Extracted message JSON: ${messageJson.substring(0, 100)}...`);
-			this.buffer = this.buffer.substring(messageEnd);
+			// Extract exactly contentLength bytes
+			const messageBytes = bufferBytes.subarray(messageStartBytes, messageEndBytes);
+			const messageJson = messageBytes.toString('utf-8');
+
+			// Remove processed message from buffer (by bytes)
+			const remainingBufferBytes = bufferBytes.subarray(messageEndBytes);
+			this.buffer = remainingBufferBytes.toString('utf-8');
 
 			try {
 				const message = JSON.parse(messageJson) as MCP.JSONRPCMessage;
 				const msgType = 'method' in message ? message.method : 'response/error';
-				console.log(`[VYBE ToolHost] Parsed message: ${msgType}`);
 				this.log(LogLevel.Info, `[ToolHost] Parsed message: ${msgType}`);
 				this.handleMessage(message);
 			} catch (error) {
@@ -312,7 +314,6 @@ export class VybeStdioToolHost extends Disposable implements IMcpMessageTranspor
 	 */
 	private async handleRequest(request: MCP.Request & { id: MCP.RequestId }): Promise<void> {
 		this.log(LogLevel.Info, `Handling request: ${request.method} (id: ${request.id})`);
-
 		try {
 			let result: MCP.Result;
 
@@ -356,7 +357,6 @@ export class VybeStdioToolHost extends Disposable implements IMcpMessageTranspor
 		// Use the client's requested protocol version, or fall back to latest if not provided
 		// The MCP SDK client may not support the latest version, so we should match what it requests
 		const requestedVersion = params?.protocolVersion || MCP.LATEST_PROTOCOL_VERSION;
-		console.log(`[VYBE ToolHost] Client requested protocol version: ${requestedVersion}`);
 
 		const result = {
 			protocolVersion: requestedVersion, // Return the version the client requested
@@ -413,20 +413,159 @@ export class VybeStdioToolHost extends Disposable implements IMcpMessageTranspor
 	private async handleToolsCall(params: MCP.CallToolRequestParams): Promise<MCP.CallToolResult> {
 		const tool = this.tools.get(params.name);
 		if (!tool) {
+			console.error(`[VYBE ToolHost] Tool not found: ${params.name}. Available tools:`, Array.from(this.tools.keys()));
 			throw new Error(`Tool not found: ${params.name}`);
 		}
 
 		const token = CancellationToken.None; // TODO: Support cancellation tokens from MCP
-		const result = await tool.handler(params.arguments || {}, token);
 
-		return {
-			content: [
-				{
-					type: 'text',
-					text: typeof result === 'string' ? result : JSON.stringify(result)
+		try {
+			const result = await tool.handler(params.arguments || {}, token);
+			return {
+				content: [
+					{
+						type: 'text',
+						text: typeof result === 'string' ? result : JSON.stringify(result)
+					}
+				]
+			};
+		} catch (error) {
+			console.error(`[VYBE ToolHost] Tool handler error for ${params.name}:`, error);
+			throw error;
+		}
+	}
+
+	/**
+	 * Public method to call an MCP tool directly
+	 * First checks if it's an IDE-side tool, otherwise sends MCP request to server
+	 */
+	public async callTool(toolName: string, arguments_: any): Promise<any> {
+		this.log(LogLevel.Info, `[ToolHost] callTool: ${toolName}`);
+		this.log(LogLevel.Debug, `[ToolHost] Available IDE tools: ${Array.from(this.tools.keys()).join(', ')}`);
+
+		// Check if MCP connection is established
+		const currentState = this._state.get();
+		if (currentState.state !== McpConnectionState.Kind.Running) {
+			const error = new Error(`MCP connection not ready. Current state: ${currentState.state}`);
+			this.log(LogLevel.Error, error.message);
+			throw error;
+		}
+
+		// First check if it's an IDE-side tool (registered via registerTool)
+		if (this.tools.has(toolName)) {
+			this.log(LogLevel.Info, `[ToolHost] Calling IDE-side tool: ${toolName}`);
+			return this.handleToolsCall({
+				name: toolName,
+				arguments: arguments_
+			}).then(result => {
+				// Extract the text content from the result
+				if (result.content && result.content.length > 0) {
+					const textContent = result.content[0];
+					if (textContent.type === 'text') {
+						try {
+							return JSON.parse(textContent.text);
+						} catch {
+							return textContent.text;
+						}
+					}
 				}
-			]
+				return result;
+			});
+		}
+
+		// Not an IDE-side tool - send MCP request to server
+		this.log(LogLevel.Info, `[ToolHost] Calling server-side tool via MCP: ${toolName}`);
+		try {
+			const result = await this.sendMcpRequest('tools/call', {
+				name: toolName,
+				arguments: arguments_
+			});
+
+			this.log(LogLevel.Info, `[ToolHost] MCP tool result received for: ${toolName}`);
+
+			// MCP tools/call returns CallToolResult with content array
+			if (result && 'content' in result && Array.isArray(result.content)) {
+				const textContent = result.content.find((c: any) => c.type === 'text');
+				if (textContent && textContent.text) {
+					try {
+						return JSON.parse(textContent.text);
+					} catch {
+						return textContent.text;
+					}
+				}
+			}
+			return result;
+		} catch (error) {
+			this.log(LogLevel.Error, `[ToolHost] Error calling MCP tool ${toolName}: ${error instanceof Error ? error.message : String(error)}`);
+			throw error;
+		}
+	}
+
+	/**
+	 * Send an MCP request to the server and wait for response
+	 */
+	private async sendMcpRequest(method: string, params: any): Promise<MCP.Result> {
+		const requestId: MCP.RequestId = Math.random().toString(36).substring(2, 15);
+
+		const request: MCP.JSONRPCRequest = {
+			jsonrpc: MCP.JSONRPC_VERSION,
+			id: requestId,
+			method,
+			params
 		};
+
+		this.log(LogLevel.Info, `[ToolHost] Sending MCP request: ${method} (id: ${requestId})`);
+
+		return new Promise((resolve, reject) => {
+			// Timeout after 30 seconds
+			const timeout = setTimeout(() => {
+				this.pendingRequests.delete(requestId);
+				const error = new Error(`MCP request timeout: ${method}`);
+				this.log(LogLevel.Error, error.message);
+				reject(error);
+			}, 30000);
+
+			// Store pending request with timeout cleanup
+			this.pendingRequests.set(requestId, {
+				resolve: (result) => {
+					clearTimeout(timeout);
+					this.log(LogLevel.Info, `[ToolHost] MCP request resolved: ${method} (id: ${requestId})`);
+					resolve(result);
+				},
+				reject: (error: unknown) => {
+					clearTimeout(timeout);
+					// Extract error message from MCP.Error or regular Error
+					let errorMessage: string;
+					if (error && typeof error === 'object') {
+						if ('message' in error && typeof error.message === 'string') {
+							errorMessage = error.message;
+						} else if (error instanceof Error) {
+							errorMessage = error.message;
+						} else {
+							errorMessage = String(error);
+						}
+					} else if (error instanceof Error) {
+						errorMessage = error.message;
+					} else {
+						errorMessage = String(error);
+					}
+					this.log(LogLevel.Error, `[ToolHost] MCP request rejected: ${method} (id: ${requestId}) - ${errorMessage}`);
+					// Always reject with a proper Error object for IPC serialization
+					reject(new Error(errorMessage));
+				}
+			});
+
+			// Send request
+			try {
+				this.send(request);
+			} catch (error) {
+				clearTimeout(timeout);
+				this.pendingRequests.delete(requestId);
+				const errorMessage = error instanceof Error ? error.message : String(error);
+				this.log(LogLevel.Error, `[ToolHost] Failed to send MCP request: ${errorMessage}`);
+				reject(new Error(`Failed to send MCP request: ${errorMessage}`));
+			}
+		});
 	}
 
 	/**
@@ -455,7 +594,10 @@ export class VybeStdioToolHost extends Disposable implements IMcpMessageTranspor
 		const pending = this.pendingRequests.get(errorResponse.id);
 		if (pending) {
 			this.pendingRequests.delete(errorResponse.id);
-			pending.reject(errorResponse.error);
+			// Extract message from MCP.Error and create a proper Error object for IPC serialization
+			const errorMessage = errorResponse.error?.message || `MCP error ${errorResponse.error?.code || 'unknown'}`;
+			this.log(LogLevel.Error, `[ToolHost] MCP error response: ${errorMessage}`);
+			pending.reject(new Error(errorMessage));
 		}
 	}
 
@@ -500,6 +642,8 @@ export class VybeStdioToolHost extends Disposable implements IMcpMessageTranspor
 		this.stop();
 		this._onDidReceiveMessageEmitter.dispose();
 		this._onDidLogEmitter.dispose();
+		this._onDidReceiveCommandResultEmitter.dispose();
+		this._onDidReceiveAgentEventEmitter.dispose();
 		super.dispose();
 	}
 }

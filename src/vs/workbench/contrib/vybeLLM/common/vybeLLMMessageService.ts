@@ -115,7 +115,6 @@ export class VybeLLMMessageService extends Disposable implements IVybeLLMMessage
 				const parsed = JSON.parse(stored) as Partial<VybeLLMProviderSettings>;
 				return {
 					ollama: { ...defaultVybeLLMProviderSettings.ollama, ...parsed.ollama },
-					vLLM: { ...defaultVybeLLMProviderSettings.vLLM, ...parsed.vLLM },
 					lmStudio: { ...defaultVybeLLMProviderSettings.lmStudio, ...parsed.lmStudio },
 				} as VybeLLMProviderSettings;
 			} catch {
@@ -178,7 +177,7 @@ export class VybeLLMMessageService extends Disposable implements IVybeLLMMessage
 					requestId,
 				} satisfies MainModelListParams<OllamaModelResponse>);
 			} else {
-				// vLLM or lmStudio - use OpenAI-compatible
+				// lmStudio - use OpenAI-compatible
 				this.listHooks.openAICompat.success[requestId] = (e) => {
 					resolve(e.models as OpenaiCompatibleModelResponse[]);
 					this._clearListHooks(requestId);

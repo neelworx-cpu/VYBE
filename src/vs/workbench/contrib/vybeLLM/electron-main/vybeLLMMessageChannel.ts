@@ -150,8 +150,8 @@ export class VybeLLMMessageChannel implements IServerChannel {
 			onSuccess: (p) => { emitters.success.fire({ requestId, ...p }); },
 			onError: (p) => { emitters.error.fire({ requestId, ...p }); },
 		};
-		if (providerName === 'vLLM' || providerName === 'lmStudio') {
-			const impl = sendLLMMessageToProviderImplementation[providerName as 'vLLM' | 'lmStudio'];
+		if (providerName === 'lmStudio') {
+			const impl = sendLLMMessageToProviderImplementation[providerName];
 			impl.list(mainThreadParams);
 		}
 	};

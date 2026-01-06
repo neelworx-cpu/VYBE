@@ -36,7 +36,7 @@ export class AgentModeDropdown extends Disposable {
 	private currentHoveredItem: HTMLElement | null = null;
 
 	private readonly modes: AgentModeItem[] = [
-		{ id: 'agent', label: 'Agent', icon: 'codicon-gear', shortcut: '⌘I' },
+		{ id: 'agent', label: 'Agent', icon: 'codicon-gear' },
 		{ id: 'plan', label: 'Plan', icon: 'codicon-check-all' },
 		{ id: 'ask', label: 'Ask', icon: 'codicon-comment' }
 	];
@@ -187,9 +187,11 @@ export class AgentModeDropdown extends Disposable {
 		`;
 		item.setAttribute('data-is-selected', isSelected ? 'true' : 'false');
 
-		// Track selected item as initially hovered
+		// Track selected item as initially hovered and keep background
 		if (isSelected) {
 			this.currentHoveredItem = item;
+			// Ensure selected item always has background
+			item.style.backgroundColor = hoverBg;
 		}
 
 		// Main content row - height: 16px, gap: 6px (1.5 * 4px = 6px)
@@ -212,7 +214,7 @@ export class AgentModeDropdown extends Disposable {
 			gap: 6px;
 			min-width: 0;
 			height: 16px;
-			width: 100%;
+			flex: 1;
 		`;
 
 		// Icon - 14px
@@ -261,14 +263,15 @@ export class AgentModeDropdown extends Disposable {
 			display: block;
 		`;
 
-		// For Agent mode, add inline L1/L2/L3 buttons
+		// For Agent mode, add inline L1/L2/L3 buttons on the right side
 		if (mode.id === 'agent') {
-			const levelButtonsContainer = append(labelContainer, $('.agent-level-buttons'));
+			// Move level buttons to right side instead of after label
+			const levelButtonsContainer = append(contentRow, $('.agent-level-buttons'));
 			levelButtonsContainer.style.cssText = `
 				display: flex;
 				align-items: center;
 				gap: 4px;
-				margin-left: 6px;
+				margin-left: auto;
 				flex-shrink: 0;
 			`;
 
@@ -276,6 +279,8 @@ export class AgentModeDropdown extends Disposable {
 				const isLevelSelected = level.id === this.selectedLevel;
 				const levelButton = append(levelButtonsContainer, $('span.agent-level-button'));
 				levelButton.textContent = level.id;
+				levelButton.setAttribute('data-level', level.id);
+				levelButton.setAttribute('data-selected', isLevelSelected ? 'true' : 'false');
 				levelButton.style.cssText = `
 					font-size: 11px;
 					line-height: 14px;
@@ -287,17 +292,18 @@ export class AgentModeDropdown extends Disposable {
 					font-weight: ${isLevelSelected ? '600' : '400'};
 					transition: color 0.15s ease;
 				`;
-				levelButton.setAttribute('data-level', level.id);
 
-				// Hover effect
+				// Hover effect - don't change color if selected (keep vybe green)
 				this._register(addDisposableListener(levelButton, 'mouseenter', () => {
-					if (!isLevelSelected) {
+					const isSelected = levelButton.getAttribute('data-selected') === 'true';
+					if (!isSelected) {
 						levelButton.style.color = isDarkTheme ? 'rgba(228, 228, 228, 0.9)' : 'rgba(51, 51, 51, 0.9)';
 					}
 				}));
 
 				this._register(addDisposableListener(levelButton, 'mouseleave', () => {
-					if (!isLevelSelected) {
+					const isSelected = levelButton.getAttribute('data-selected') === 'true';
+					if (!isSelected) {
 						levelButton.style.color = isDarkTheme ? 'rgba(228, 228, 228, 0.7)' : 'rgba(51, 51, 51, 0.7)';
 					}
 				}));
@@ -318,11 +324,13 @@ export class AgentModeDropdown extends Disposable {
 						if (prevButton) {
 							prevButton.style.color = currentIsDarkTheme ? 'rgba(228, 228, 228, 0.7)' : 'rgba(51, 51, 51, 0.7)';
 							prevButton.style.fontWeight = '400';
+							prevButton.setAttribute('data-selected', 'false');
 						}
 
-						// Update current button
+						// Update current button - always use vybe green for selected
 						levelButton.style.color = '#3ecf8e';
 						levelButton.style.fontWeight = '600';
+						levelButton.setAttribute('data-selected', 'true');
 					}
 
 					// Fire event
@@ -355,32 +363,18 @@ export class AgentModeDropdown extends Disposable {
 			`;
 		}
 
-		// Right side (checkmark only, no pencil) - height: 17px
-		const rightSide = append(contentRow, $('.agent-mode-right'));
-		rightSide.style.cssText = `
-			display: flex;
-			align-items: center;
-			gap: 6px;
-			height: 17px;
-		`;
-
-		// Checkmark (only for selected) - 10px
-		if (isSelected) {
-			const checkmark = append(rightSide, $('span.codicon.codicon-check'));
-			checkmark.style.cssText = `
-				font-size: 10px;
-				flex-shrink: 0;
-				margin-right: 0;
-				color: ${isDarkTheme ? 'rgba(228, 228, 228, 0.92)' : 'rgba(51, 51, 51, 0.9)'};
-			`;
-		}
+		// Right side removed - checkmark icon no longer needed
 
 		// Hover effect - same behavior as history dropdown
 		// Background moves from one item to another on hover and stays
+		// Selected item always keeps its background
 		this._register(addDisposableListener(item, 'mouseenter', () => {
-			// Remove background from previously hovered item
+			// Remove background from previously hovered item (unless it's selected)
 			if (this.currentHoveredItem && this.currentHoveredItem !== item) {
-				this.currentHoveredItem.style.backgroundColor = 'transparent';
+				const wasSelected = this.currentHoveredItem.getAttribute('data-is-selected') === 'true';
+				if (!wasSelected) {
+					this.currentHoveredItem.style.backgroundColor = 'transparent';
+				}
 			}
 
 			// Add background to current item

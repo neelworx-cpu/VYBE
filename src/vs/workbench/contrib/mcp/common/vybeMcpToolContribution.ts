@@ -177,6 +177,8 @@ export class VybeMcpToolContribution extends Disposable implements IWorkbenchCon
 								messages: Array<{ role: string; content: string }>;
 								options?: { temperature?: number; maxTokens?: number };
 								stream?: boolean;
+								task_id?: string;
+								model_id?: string;
 							},
 							token
 						);
@@ -190,7 +192,7 @@ export class VybeMcpToolContribution extends Disposable implements IWorkbenchCon
 					handler: async (params, token) => {
 						return handleVybeListModels(
 							this.modelService,
-							params as { providerName?: 'ollama' | 'vLLM' | 'lmStudio' },
+							params as { providerName?: 'ollama' | 'lmStudio' },
 							token
 						);
 					}
@@ -261,7 +263,6 @@ export class VybeMcpToolContribution extends Disposable implements IWorkbenchCon
 			// Check if we're in native environment (Electron, not web)
 			if (!isNative) {
 				// Web environment - skip stdio tool host initialization
-				console.log('[VYBE MCP] Skipping stdio tool host: not in native environment');
 				return;
 			}
 
@@ -284,19 +285,12 @@ export class VybeMcpToolContribution extends Disposable implements IWorkbenchCon
 				mcpCommand = process.env.VYBE_MCP_COMMAND;
 			}
 
-			// Debug logging
-			console.log('[VYBE MCP] Checking for VYBE_MCP_COMMAND:', mcpCommand ? `FOUND: ${mcpCommand}` : 'NOT FOUND');
-
 			// Skip if no MCP command configured
 			if (!mcpCommand) {
 				// Don't initialize if MCP command is not explicitly configured
 				// This prevents errors when MCP is not set up
-				console.log('[VYBE MCP] Skipping stdio tool host: VYBE_MCP_COMMAND not set');
-				console.log('[VYBE MCP] Note: Set VYBE_MCP_COMMAND environment variable before starting the IDE');
 				return;
 			}
-
-			console.log('[VYBE MCP] Initializing stdio tool host with command:', mcpCommand);
 
 			// NOTE: Process spawning MUST happen in main process, not renderer.
 			// The renderer process cannot access Node.js require() or child_process.
@@ -317,8 +311,6 @@ export class VybeMcpToolContribution extends Disposable implements IWorkbenchCon
 				}) as { success: boolean; error?: string };
 
 				if (result.success) {
-					console.log('[VYBE MCP] MCP process spawned successfully by main process');
-
 					// Set up IPC listener for tool execution requests from main process
 					this.setupToolExecutionListener();
 				} else {
@@ -403,12 +395,14 @@ export class VybeMcpToolContribution extends Disposable implements IWorkbenchCon
 	 */
 	private setupToolExecutionListener(): void {
 		if (!isNative || !ipcRenderer) {
+			console.warn('[vybeMcpToolContribution] Cannot setup tool execution listener: not native or no ipcRenderer');
 			return;
 		}
 
 		// Listen for tool execution requests from main process
 		ipcRenderer.on('vscode:vybeMcpToolRequest', async (event, ...args: unknown[]) => {
 			const request = args[0] as { requestId: string; toolName: string; params: unknown };
+
 			try {
 				let result: unknown;
 				// Use CancellationToken.None for Phase 1 (no cancellation support yet)
@@ -574,9 +568,12 @@ export class VybeMcpToolContribution extends Disposable implements IWorkbenchCon
 				});
 			} catch (error) {
 				// Send error response
+				const errorMessage = error instanceof Error ? error.message : String(error);
+				console.error(`[vybeMcpToolContribution] Tool execution error for ${request.toolName}:`, errorMessage);
+				console.error(`[vybeMcpToolContribution] Full error:`, error);
 				ipcRenderer.send('vscode:vybeMcpToolResponse', request.requestId, {
 					success: false,
-					error: error instanceof Error ? error.message : String(error)
+					error: errorMessage
 				});
 			}
 		});

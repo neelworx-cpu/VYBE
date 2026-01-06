@@ -69,7 +69,7 @@ export class MessageComposer extends Disposable {
 	private modelState: ModelDropdownState = {
 		isAutoEnabled: true,
 		isMaxModeEnabled: false,
-		selectedModelId: 'composer-1'
+		selectedModelId: '' // Will be set to first available model when Auto is off
 	};
 	private autoDropdownElement: HTMLElement | null = null;
 
@@ -620,6 +620,7 @@ export class MessageComposer extends Disposable {
 		agentLabel.style.fontWeight = '400';
 
 		const agentText = document.createElement('span');
+		agentText.className = 'vybe-ai-agent-text';
 		agentText.textContent = 'Agent';
 		agentText.style.opacity = '0.8';
 		agentText.style.maxWidth = '120px';
@@ -753,12 +754,26 @@ export class MessageComposer extends Disposable {
 
 		this._register(
 			addDisposableListener(this.autoDropdownElement, 'click', (e) => {
-				// Don't show if this click was from selecting a model (marked by dropdown)
-				if ((e as any).__modelClickHandled) {
+				e.stopPropagation();
+
+				// Check if dropdown just selected a model (prevent immediate reopening)
+				if (this.modelDropdown && (this.modelDropdown as any).justSelectedModel) {
 					return;
 				}
-				e.stopPropagation();
-				this.showModelDropdown();
+
+				// If dropdown is already open, it will close itself (toggle behavior)
+				// If it's closed, show it
+				if (this.modelDropdown) {
+					// Small delay to ensure any previous hide() has completed
+					setTimeout(() => {
+						// Double-check the flag before showing
+						if (!(this.modelDropdown as any).justSelectedModel) {
+							this.showModelDropdown();
+						}
+					}, 100);
+				} else {
+					this.showModelDropdown();
+				}
 			})
 		);
 
@@ -1563,6 +1578,7 @@ export class MessageComposer extends Disposable {
 				this.modelState = state;
 				this.updateModelLabel();
 				this.notifyModelChange();
+				// Don't reopen dropdown on state change - it should stay closed after model selection
 			}));
 		}
 
@@ -1593,7 +1609,20 @@ export class MessageComposer extends Disposable {
 			// If not found, try to extract a clean name from the ID
 			if (!selectedModel) {
 				const modelId = this.modelState.selectedModelId;
-				if (modelId.includes(':')) {
+				if (!modelId || modelId === '') {
+					// No model selected, show "Select model" or auto-select first
+					if (models.length > 0) {
+						// Auto-select first model if none selected
+						this.modelState.selectedModelId = models[0].id;
+						this.autoLabelElement.textContent = models[0].label;
+						// Fire state change to update dropdown
+						if (this.modelDropdown) {
+							(this.modelDropdown as any)._onStateChange.fire({ ...this.modelState });
+						}
+					} else {
+						this.autoLabelElement.textContent = 'No models';
+					}
+				} else if (modelId.includes(':')) {
 					// Format: "provider:modelName" or "provider:modelName:tag"
 					const parts = modelId.split(':');
 					if (parts.length >= 2) {
@@ -1641,8 +1670,8 @@ export class MessageComposer extends Disposable {
 				iconElement.classList.add(icons[mode]);
 			}
 
-			// Update text
-			const textElement = this.agentDropdown.querySelector('span:not(.codicon)') as HTMLElement;
+			// Update text - use specific class selector to find the correct span
+			const textElement = this.agentDropdown.querySelector('.vybe-ai-agent-text') as HTMLElement;
 			if (textElement) {
 				textElement.textContent = labels[mode];
 			}

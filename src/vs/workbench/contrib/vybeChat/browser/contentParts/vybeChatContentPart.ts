@@ -97,6 +97,7 @@ export interface IVybeChatCodeBlockContent {
 	code: string;      // The code content (final or target for streaming)
 	language: string;  // Programming language (typescript, python, etc.)
 	isStreaming?: boolean; // Whether code is currently streaming line-by-line
+	filename?: string; // Optional filename hint (from show_code tool)
 }
 
 /**

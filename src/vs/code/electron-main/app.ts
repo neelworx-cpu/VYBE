@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { app, protocol, session, Session, systemPreferences, WebFrameMain } from 'electron';
+import { app, BrowserWindow, protocol, session, Session, systemPreferences, WebFrameMain } from 'electron';
 import { addUNCHostToAllowlist, disableUNCAccessRestrictions } from '../../base/node/unc.js';
 import { validatedIpcMain } from '../../base/parts/ipc/electron-main/ipcMain.js';
 import { hostname, release } from 'os';
@@ -552,6 +552,94 @@ export class CodeApplication extends Disposable {
 				const result = await this.vybeMcpService.sendCommand(command, params, taskId);
 				return result;
 			} catch (error) {
+				throw error;
+			}
+		});
+
+		// VYBE MCP: Forward agent events from renderer to all renderers (for LLM streaming events)
+		validatedIpcMain.on('vscode:vybeAgentEvent', (event, payload: { taskId: string; event: any }) => {
+			// Forward to all renderer windows
+			const windows = BrowserWindow.getAllWindows();
+			for (const window of windows) {
+				window.webContents.send('vscode:vybeAgentEvent', payload);
+			}
+		});
+
+		// VYBE MCP: Call MCP tool from renderer (for model listing, etc.)
+		validatedIpcMain.handle('vscode:vybeMcpCallTool', async (event, { toolName, params }: { toolName: string; params: any }) => {
+			try {
+				if (!this.vybeMcpService) {
+					throw new Error('MCP service is not initialized');
+				}
+				this.logService.debug(`[VYBE MCP] Calling tool via command: ${toolName}`, params);
+				// Use sendCommand to call the tool via command protocol
+				// The MCP process will handle this as a 'call_tool' command
+				const taskId = `tool_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+				const result = await this.vybeMcpService.sendCommand('call_tool', {
+					tool_name: toolName,
+					arguments: params
+				}, taskId);
+				this.logService.debug(`[VYBE MCP] Tool result received for: ${toolName}`);
+				return result.result;
+			} catch (error) {
+				const errorMessage = error instanceof Error ? error.message : String(error);
+				const errorStack = error instanceof Error ? error.stack : undefined;
+				this.logService.error(`[VYBE MCP] callTool error: ${errorMessage}`, errorStack);
+				// Ensure error is properly serialized for IPC
+				throw new Error(errorMessage);
+			}
+		});
+
+		// VYBE MCP: Fetch API key from Supabase Edge Function (main process has no CORS restrictions)
+		validatedIpcMain.handle('vscode:vybeFetchApiKey', async (event, { provider }: { provider: string }) => {
+			try {
+				// Supabase configuration (anon key is public, safe to include)
+				const SUPABASE_URL = 'https://xlrcsusfaynypqvyfmgk.supabase.co';
+				const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhscmNzdXNmYXlueXBxdnlmbWdrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM5NDU3ODksImV4cCI6MjA3OTUyMTc4OX0.7Upe8xKgKSh9YRlsAS7uvLll1gENS27VTNRa6NMXBx8';
+				const edgeFunctionUrl = `${SUPABASE_URL}/functions/v1/get-llm-key`;
+
+				this.logService.debug(`[VYBE MCP] Fetching ${provider} API key from Edge Function`);
+
+				const response = await fetch(edgeFunctionUrl, {
+					method: 'POST',
+					headers: {
+						'Content-Type': 'application/json',
+						'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+					},
+					body: JSON.stringify({ provider }),
+				});
+
+				if (!response.ok) {
+					const errorText = await response.text().catch(() => 'Unable to read error response');
+					// Handle 429 rate limit errors specifically
+					if (response.status === 429) {
+						this.logService.warn(`[VYBE MCP] Rate limited (429) when fetching ${provider} API key. Please wait before retrying.`);
+						throw new Error(`429: Rate limited. Please wait before retrying. ${errorText}`);
+					}
+					throw new Error(`Edge Function error: ${response.status} ${response.statusText} - ${errorText}`);
+				}
+
+				const data = await response.json() as any;
+
+				this.logService.debug(`[VYBE MCP] Edge Function response received for ${provider}`);
+
+				// Check various possible response formats
+				const apiKey = data.apiKey || data.api_key || data.key || data.secret;
+
+				if (data.error) {
+					throw new Error(data.error);
+				}
+
+				if (!apiKey) {
+					this.logService.error(`[VYBE MCP] No API key found in response. Response keys:`, Object.keys(data));
+					throw new Error(`No apiKey in response. Response: ${JSON.stringify(data)}`);
+				}
+
+				this.logService.info(`[VYBE MCP] Successfully fetched ${provider} API key`);
+				return { apiKey };
+			} catch (error) {
+				const errorMessage = error instanceof Error ? error.message : String(error);
+				this.logService.error(`[VYBE MCP] Failed to fetch API key: ${errorMessage}`);
 				throw error;
 			}
 		});

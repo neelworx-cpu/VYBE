@@ -10,6 +10,7 @@ import './contentParts/media/vybeChatCodeBlock.css';
 import './contentParts/media/vybeChatTextEdit.css';
 // import './contentParts/media/vybeChatPlanDocument.css'; // TODO: Re-enable after rebuild
 import './contentParts/media/vybeChatTerminal.css';
+import './contentParts/media/vybeChatPhaseIndicator.css';
 import { ViewPane, IViewPaneOptions } from '../../../browser/parts/views/viewPane.js';
 import { addDisposableListener } from '../../../../base/browser/dom.js';
 import { IKeybindingService } from '../../../../platform/keybinding/common/keybinding.js';
@@ -47,6 +48,9 @@ import { FileKind } from '../../../../platform/files/common/files.js';
 import { getIconClasses } from '../../../../editor/common/services/getIconClasses.js';
 import { basename, dirname, relativePath } from '../../../../base/common/resources.js';
 import { IVybeChatMcpExecutionService } from '../common/vybeChatMcpExecutionService.js';
+import { IDisposable } from '../../../../base/common/lifecycle.js';
+import { StreamingEventHandler } from './streaming_event_handler.js';
+import type { StreamingEvent } from '../common/streaming_event_types.js';
 
 /**
  * VYBE Chat View Pane
@@ -416,44 +420,97 @@ export class VybeChatViewPane extends ViewPane {
 			}
 		}
 
-		// Track content parts for result display
-		const contentParts: any[] = [{
-			kind: 'markdown',
-			content: '',
-			isStreaming: false
-		}];
-
-		// Initial render with loading state
-		contentParts[0] = {
-			kind: 'markdown',
-			content: 'Executing task via MCP...',
-			isStreaming: false
-		};
-		messagePage.updateContentParts(contentParts);
+		// Set streaming state
+		messagePage.setStreaming(true);
 
 		try {
 			// Get selected mode and level from composer (defaults if not available)
 			const selectedMode = this.composer?.getAgentMode() || 'agent';
 			const selectedLevel = this.composer?.getAgentLevel() || 'L2';
+			const modelState = this.composer?.getModelState();
+			const selectedModelId = modelState?.selectedModelId;
 
-			// Call MCP execution service (Phase 4.1: blocking, final result only)
-			const result = await this._mcpExecutionService.solveTask({
+			// Debug: Log model selection
+			console.log('[VYBE Chat] Selected model ID:', selectedModelId || 'none (will fail)');
+			console.log('[VYBE Chat] Model state:', modelState);
+
+			// Generate taskId first (we'll use it for event subscription)
+			const taskId = `task-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+			// Subscribe to streaming events BEFORE starting the task
+			let eventSubscription: IDisposable | null = null;
+			let hasReceivedEvents = false;
+
+			// Phase 7: Create StreamingEventHandler for normalized events
+			const eventHandler = new StreamingEventHandler(messagePage, options.onContentUpdate);
+
+			eventSubscription = this._mcpExecutionService.subscribeToTaskEvents(taskId, (event: any) => {
+				hasReceivedEvents = true;
+
+				try {
+					const eventTaskId = event?.task_id || '';
+					const taskIdMatches = eventTaskId === taskId || eventTaskId.startsWith(taskId) || taskId.startsWith(eventTaskId);
+
+					// Removed verbose logging - use targeted logs in markdown part instead
+
+					if (event && event.type && taskIdMatches) {
+						eventHandler.handleEvent(event as StreamingEvent);
+					} else if (event?.type === 'assistant.delta') {
+						console.warn('[VYBE Chat] assistant.delta event filtered out:', {
+							eventTaskId,
+							expectedTaskId: taskId,
+							taskIdMatches,
+							hasType: !!event.type
+						});
+					}
+				} catch (error) {
+					console.error('[VYBE Chat] Error handling event:', error, event);
+				}
+			});
+
+			// Start the task (non-blocking - events will stream in)
+			const taskPromise = this._mcpExecutionService.solveTask({
 				goal: message,
 				repoId: workspaceFolder.uri.toString(),
 				files: files.length > 0 ? files : undefined,
 				mode: selectedMode,
-				agentLevel: selectedLevel
+				agentLevel: selectedLevel,
+				taskId: taskId, // Pass taskId so events match
+				modelId: selectedModelId
 			});
 
-			// Build content parts array: summary, plan, artifacts
-			const newContentParts: any[] = [];
+			// Wait for task to complete (but events are already streaming)
+			const result = await taskPromise;
 
-			// 1. Summary as markdown (always present, normalizer ensures this)
-			newContentParts.push({
-				kind: 'markdown',
-				content: result.summary || 'Task completed',
-				isStreaming: false
-			});
+			// Clean up event subscription
+			if (eventSubscription) {
+				eventSubscription.dispose();
+				eventSubscription = null;
+			}
+
+			// Phase 7: Dispose event handler
+			eventHandler.dispose();
+
+			// If we received streaming events, content parts are already updated
+			// CRITICAL: When streaming is active, IGNORE result completely to prevent JSON blob rendering
+			if (hasReceivedEvents) {
+				// GUARD: hasReceivedEvents === true means streaming events were received. Legacy paths MUST be inert.
+				// Finalize streaming content parts
+				// Phase 7: Content parts are already updated via StreamingEventHandler events
+				// The handler will call messagePage.finalize() on assistant.final event
+				// DO NOT render result.summary or result.content - events are the source of truth
+				// Note: Finalization is handled by StreamingEventHandler via the assistant.final event
+			} else {
+				// LEGACY FALLBACK: Only executed when hasReceivedEvents === false (no streaming events received).
+				// No events received - fallback to old behavior (build from result)
+				const newContentParts: any[] = [];
+
+				// 1. Summary as markdown (always present, normalizer ensures this)
+				newContentParts.push({
+					kind: 'markdown',
+					content: result.summary || 'Task completed',
+					isStreaming: false
+				});
 
 			// 2. Plan rendering (mode-dependent)
 			if (result.plan && result.plan.length > 0) {
@@ -510,8 +567,9 @@ export class VybeChatViewPane extends ViewPane {
 				});
 			}
 
-			// Update content parts (always has at least summary)
-			messagePage.updateContentParts(newContentParts);
+				// Update content parts (always has at least summary)
+				messagePage.updateContentParts(newContentParts);
+			}
 
 			// Stop streaming state
 			messagePage.setStreaming(false);
@@ -526,12 +584,12 @@ export class VybeChatViewPane extends ViewPane {
 		} catch (error) {
 			// Show error in markdown part
 			const errorMessage = error instanceof Error ? error.message : String(error);
-			contentParts[0] = {
+			const errorContentParts: any[] = [{
 				kind: 'markdown',
 				content: `**Error:** ${errorMessage}`,
 				isStreaming: false
-			};
-			messagePage.updateContentParts(contentParts);
+			}];
+			messagePage.updateContentParts(errorContentParts);
 
 			// Stop streaming state
 			messagePage.setStreaming(false);
@@ -830,23 +888,79 @@ export class VybeChatViewPane extends ViewPane {
 	 */
 	public resetScrollState(): void {
 		this.autoScrollDisabled = false;
+		// Cancel any pending scroll updates
+		if (this.scrollRafId !== null) {
+			cancelAnimationFrame(this.scrollRafId);
+			this.scrollRafId = null;
+		}
+		if (this.scrollTimeout !== null) {
+			clearTimeout(this.scrollTimeout);
+			this.scrollTimeout = null;
+		}
 		// Scroll to bottom
 		if (this.chatArea) {
 			this.chatArea.scrollTop = this.chatArea.scrollHeight;
 		}
 	}
 
+	private scrollRafId: number | null = null; // Debounce rapid scroll updates
+	private scrollTimeout: ReturnType<typeof setTimeout> | null = null; // Additional throttle for scroll updates
+
 	public scrollToShowLatestContent(): void {
 		if (!this.chatArea || this.autoScrollDisabled) {
 			return;
 		}
 
-		// Auto-scroll enabled: scroll to bottom to reveal new content
-		requestAnimationFrame(() => {
-			if (this.chatArea && !this.autoScrollDisabled) {
-				this.chatArea.scrollTop = this.chatArea.scrollHeight;
+		// CRITICAL: Only scroll if new content extends beyond the current viewport
+		// This prevents jumping when code blocks grow incrementally
+		const scrollTop = this.chatArea.scrollTop;
+		const scrollHeight = this.chatArea.scrollHeight;
+		const clientHeight = this.chatArea.clientHeight;
+		const distanceFromBottom = scrollHeight - (scrollTop + clientHeight);
+
+		// Only scroll if content extends beyond viewport (with 10px threshold to prevent micro-scrolls)
+		if (distanceFromBottom > 10) {
+			// Cancel any pending scroll update
+			if (this.scrollRafId !== null) {
+				cancelAnimationFrame(this.scrollRafId);
 			}
-		});
+			if (this.scrollTimeout !== null) {
+				clearTimeout(this.scrollTimeout);
+			}
+
+			// Throttle scroll updates: wait 50ms to batch rapid updates
+			// This prevents jumping when code blocks grow character-by-character
+			this.scrollTimeout = setTimeout(() => {
+				// Schedule scroll update (batched via RAF)
+				this.scrollRafId = requestAnimationFrame(() => {
+					if (this.chatArea && !this.autoScrollDisabled) {
+						const beforeScroll = this.chatArea.scrollTop;
+						const newScrollHeight = this.chatArea.scrollHeight;
+						const newClientHeight = this.chatArea.clientHeight;
+						const newDistanceFromBottom = newScrollHeight - (beforeScroll + newClientHeight);
+
+						// Only scroll if content still extends beyond viewport
+						if (newDistanceFromBottom > 10) {
+							this.chatArea.scrollTop = newScrollHeight;
+							const afterScroll = this.chatArea.scrollTop;
+
+							// DIAGNOSTIC: Log scroll jumps (only if significant)
+							if (Math.abs(afterScroll - beforeScroll) > 100) {
+								console.log('[Scroll] Large scroll jump', {
+									before: beforeScroll,
+									after: afterScroll,
+									scrollHeight: newScrollHeight,
+									jump: afterScroll - beforeScroll,
+									distanceFromBottom: newDistanceFromBottom
+								});
+							}
+						}
+					}
+					this.scrollRafId = null;
+				});
+				this.scrollTimeout = null;
+			}, 50); // 50ms throttle to batch rapid updates
+		}
 	}
 
 	private handleStopGeneration(): void {

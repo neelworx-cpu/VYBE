@@ -17,6 +17,7 @@ import { IEnvironmentMainService } from '../../platform/environment/electron-mai
 import { URI } from '../../base/common/uri.js';
 import { VybeStdioToolHost } from '../../workbench/contrib/mcp/common/vybeStdioToolHost.js';
 import { registerVybeMcpTools } from './vybeMcpToolBridge.js';
+import { BrowserWindow } from 'electron';
 
 export interface SpawnVybeMcpOptions {
 	mcpCommand: string;
@@ -100,6 +101,22 @@ export class VybeMcpMainService extends Disposable {
 			// Register tool handlers that forward to renderer via IPC
 			registerVybeMcpTools(this.toolHost);
 			logger.info('Registered VYBE MCP tools on stdio tool host');
+
+			// Subscribe to agent events and forward to renderer
+			this._register(this.toolHost.onDidReceiveAgentEvent(({ taskId, event }) => {
+				// Forward agent event to all renderer windows via IPC
+				const windows = BrowserWindow.getAllWindows();
+				for (const window of windows) {
+					window.webContents.send('vscode:vybeAgentEvent', {
+						taskId,
+						event
+					});
+				}
+				// Only log non-streaming events to reduce noise (assistant.delta events are too frequent)
+				if (event.type !== 'assistant.delta' && event.type !== 'assistant.thinking.delta' && event.type !== 'assistant.block.delta') {
+					logger.info(`Forwarded agent_event to renderer: task=${taskId}, type=${event.type}`);
+				}
+			}));
 
 			// Log stderr for debugging
 			this.mcpProcess.stderr.on('data', (data: Buffer) => {
@@ -191,6 +208,12 @@ export class VybeMcpMainService extends Disposable {
 		);
 		logger.info(`Sending command: ${command} (task_id: ${taskId})`);
 		logger.info(`Command JSON: ${commandJson.substring(0, 200)}...`);
+
+		console.log(`[VybeMcpMainService] sendCommand: ${command}`, {
+			taskId,
+			paramsKeys: Object.keys(params || {}),
+			model_id: params?.model_id || 'none'
+		});
 
 		// Write command to MCP's stdin
 		return new Promise((resolve, reject) => {

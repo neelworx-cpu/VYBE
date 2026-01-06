@@ -46,15 +46,17 @@ export type RawToolParamsObj = {
 
 export type RawToolCallObj = {
 	name: string;
-	rawParams: RawToolParamsObj;
+	rawParams: RawToolParamsObj | string; // Can be string during streaming
+	paramDelta?: string; // NEW: Just the new characters this chunk (for streaming)
 	doneParams: string[];
 	id: string;
 	isDone: boolean;
+	index: number; // NEW: Track tool call index
 };
 
 // Callback types
-export type OnText = (p: { fullText: string; fullReasoning: string; delta?: string; toolCall?: RawToolCallObj }) => void;
-export type OnFinalMessage = (p: { fullText: string; fullReasoning: string; toolCall?: RawToolCallObj; anthropicReasoning: null; usage?: { inputTokens?: number; outputTokens?: number } }) => void;
+export type OnText = (p: { fullText: string; fullReasoning: string; delta?: string; toolCall?: RawToolCallObj; toolCalls?: RawToolCallObj[] }) => void;
+export type OnFinalMessage = (p: { fullText: string; fullReasoning: string; toolCall?: RawToolCallObj; toolCalls?: RawToolCallObj[]; anthropicReasoning: null; usage?: { inputTokens?: number; outputTokens?: number } }) => void;
 export type OnError = (p: { message: string; fullError: Error | null }) => void;
 export type OnAbort = () => void;
 export type AbortRef = { current: (() => void) | null };

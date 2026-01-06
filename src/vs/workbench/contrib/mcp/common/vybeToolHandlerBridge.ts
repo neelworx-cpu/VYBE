@@ -67,7 +67,9 @@ export class VybeToolHandlerBridge {
 							maxTokens: { type: 'number' }
 						}
 					},
-					stream: { type: 'boolean' }
+					stream: { type: 'boolean' },
+					task_id: { type: 'string', description: 'Task ID for real-time event emission' },
+					model_id: { type: 'string', description: 'Selected model ID (format: "provider:modelName" or cloud model ID)' }
 				},
 				required: ['messages']
 			} as IJSONSchema,
@@ -76,6 +78,8 @@ export class VybeToolHandlerBridge {
 					messages: Array<{ role: string; content: string }>;
 					options?: { temperature?: number; maxTokens?: number };
 					stream?: boolean;
+					task_id?: string; // NEW: Task ID for streaming events
+					model_id?: string; // NEW: Selected model ID (format: "provider:modelName" or cloud model ID)
 				};
 				return handleVybeSendLLMMessage(this.llmService, this.storageService, args, token);
 			}
@@ -94,12 +98,12 @@ export class VybeToolHandlerBridge {
 				properties: {
 					providerName: {
 						type: 'string',
-						enum: ['ollama', 'vLLM', 'lmStudio']
+						enum: ['ollama', 'lmStudio']
 					}
 				}
 			} as IJSONSchema,
 			handler: async (params: unknown, token: CancellationToken) => {
-				const args = params as { providerName?: 'ollama' | 'vLLM' | 'lmStudio' };
+				const args = params as { providerName?: 'ollama' | 'lmStudio' };
 				return handleVybeListModels(this.modelService, args, token);
 			}
 		};
