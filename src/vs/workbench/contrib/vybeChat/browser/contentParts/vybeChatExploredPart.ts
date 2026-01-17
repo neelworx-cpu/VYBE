@@ -4,9 +4,11 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { VybeChatContentPart } from './vybeChatContentPart.js';
-import type { IVybeChatListedContent, IVybeChatDirectoryContent } from './vybeChatContentPart.js';
+import type { IVybeChatListedContent, IVybeChatDirectoryContent, IVybeChatGreppedContent } from './vybeChatContentPart.js';
 import { VybeChatReadingFilesPart, IVybeChatReadingFilesContent } from './vybeChatReadingFilesPart.js';
 import { VybeChatSearchedPart, IVybeChatSearchedContent } from './vybeChatSearchedPart.js';
+import { VybeChatGreppedPart } from './vybeChatGreppedPart.js';
+import { VybeChatListedPart } from './vybeChatListedPart.js';
 import { IEditorService } from '../../../../services/editor/common/editorService.js';
 import { IFileService } from '../../../../../platform/files/common/files.js';
 import { INotificationService } from '../../../../../platform/notification/common/notification.js';
@@ -17,14 +19,14 @@ const $ = dom.$;
 /**
  * Action types in an explored block.
  */
-export type ExploredActionType = 'read' | 'searched' | 'listed' | 'directory';
+export type ExploredActionType = 'read' | 'searched' | 'grepped' | 'listed' | 'directory';
 
 /**
  * Data for a single action in an explored block.
  */
 export interface ExploredAction {
 	type: ExploredActionType;
-	data: IVybeChatReadingFilesContent | IVybeChatSearchedContent | IVybeChatListedContent | IVybeChatDirectoryContent;
+	data: IVybeChatReadingFilesContent | IVybeChatSearchedContent | IVybeChatGreppedContent | IVybeChatListedContent | IVybeChatDirectoryContent;
 }
 
 /**
@@ -92,12 +94,12 @@ export class VybeChatExploredPart extends VybeChatContentPart {
 			style: 'padding: 0px;'
 		});
 
-		// Collapsible container
-		const collapsibleContainer = $('.collapsible-clean', {
+		// Collapsible container - use composer-summary-title-container class (matches Cursor)
+		const collapsibleContainer = $('.collapsible-clean.composer-summary-title-container', {
 			style: `
 				display: flex;
 				flex-direction: column;
-				gap: 2px;
+				gap: 0px;
 				overflow-anchor: none;
 			`
 		});
@@ -122,7 +124,7 @@ export class VybeChatExploredPart extends VybeChatContentPart {
 			style: 'display: flex; gap: 4px; overflow: hidden;'
 		});
 
-		// Header text
+		// Header text - use composer-summary-title-container class (matches Cursor)
 		const headerText = $('.collapsible-header-text', {
 			style: `
 				flex: 0 1 auto;
@@ -130,15 +132,15 @@ export class VybeChatExploredPart extends VybeChatContentPart {
 				display: flex;
 				align-items: center;
 				overflow: hidden;
-				gap: 4px;
-				color: var(--vscode-foreground);
+				gap: 2px;
+				color: var(--cursor-text-secondary);
 				transition: opacity 0.1s ease-in;
 				font-size: 12px;
 			`
 		});
 
-		// Text wrapper
-		const textWrapper = $('span', {
+		// Text wrapper - use composer-summary-title class (matches Cursor)
+		const textWrapper = $('span.composer-summary-title.truncate-one-line', {
 			style: `
 				flex: 0 1 auto;
 				min-width: 0px;
@@ -146,11 +148,6 @@ export class VybeChatExploredPart extends VybeChatContentPart {
 				white-space: nowrap;
 				text-overflow: ellipsis;
 			`
-		});
-
-		// Inner text container
-		const textInner = $('div', {
-			style: 'display: flex; align-items: center; overflow: hidden;'
 		});
 
 		// "Explored" text
@@ -159,55 +156,47 @@ export class VybeChatExploredPart extends VybeChatContentPart {
 				color: var(--cursor-text-secondary);
 				white-space: nowrap;
 				flex-shrink: 0;
+				margin-right: 4px;
 			`
 		});
 		exploredText.textContent = 'Explored';
 
-		// Counts text
-		const countsText = this.generateCountsText();
-		const countsSpan = $('span', {
-			style: `
-				margin-left: 4px;
-				overflow: hidden;
-				text-overflow: ellipsis;
-				white-space: nowrap;
-				min-width: 0px;
-			`
-		});
-		countsSpan.textContent = countsText;
+		// Counts text - use tool-summary-hover-target structure (matches Cursor)
+		const countsContainer = this.generateCountsHTML();
 
-		// Chevron icon (collapsed state)
+		// Chevron icon - matches Cursor styling
 		const chevronIcon = $('div.codicon.codicon-chevron-right', {
 			style: `
 				color: var(--vscode-foreground);
-				line-height: 12px;
-				width: 12px;
-				height: 12px;
+				line-height: 14px;
+				width: 21px;
+				height: auto;
 				display: flex;
-				justify-content: center;
+				justify-content: flex-start;
 				align-items: center;
-				transform-origin: 50% 50%;
-				transition: transform 0.15s ease-in-out;
+				transform-origin: 45% 55%;
+				transition: transform 0.15s ease-in-out, opacity 0.2s ease-in-out, color 0.1s ease-in;
 				flex-shrink: 0;
 				cursor: pointer;
-				opacity: 0.55;
+				opacity: 0.6;
 				transform: rotate(0deg);
-				font-size: 12px;
-				margin-left: 4px;
+				font-size: 18px;
 			`
 		});
 
 		// Build header hierarchy
-		textInner.appendChild(exploredText);
-		textInner.appendChild(countsSpan);
-		textWrapper.appendChild(textInner);
+		textWrapper.appendChild(exploredText);
+		if (countsContainer) {
+			textWrapper.appendChild(countsContainer);
+		}
 		headerText.appendChild(textWrapper);
 		headerText.appendChild(chevronIcon);
 		headerContent.appendChild(headerText);
 		this.headerElement.appendChild(headerContent);
 
 		// Collapsible children (action blocks) - collapsed by default
-		const collapsibleChildren = $('.collapsible-clean-children', {
+		// Use composer-summary-title-container-children class (matches Cursor)
+		const collapsibleChildren = $('.collapsible-clean-children.composer-summary-title-container-children', {
 			style: `
 				padding-left: 0px;
 				overflow-anchor: none;
@@ -252,11 +241,15 @@ export class VybeChatExploredPart extends VybeChatContentPart {
 		return outerContainer;
 	}
 
-	private generateCountsText(): string {
-		const counts: string[] = [];
+	/**
+	 * Generate counts HTML structure matching Cursor's format.
+	 * Returns a container with tool-summary-hover-target spans.
+	 */
+	private generateCountsHTML(): HTMLElement | null {
 		let directoryCount = 0;
 		let fileCount = 0;
 		let searchCount = 0;
+		let grepCount = 0;
 		let listCount = 0;
 
 		this.actions.forEach(action => {
@@ -272,124 +265,279 @@ export class VybeChatExploredPart extends VybeChatContentPart {
 				case 'searched':
 					searchCount++;
 					break;
+				case 'grepped':
+					grepCount++;
+					break;
 				case 'listed':
 					listCount++;
 					break;
 			}
 		});
 
-		if (directoryCount > 0) {
-			counts.push(`${directoryCount} ${directoryCount === 1 ? 'directory' : 'directories'}`);
-		}
+		// Create container for all count spans
+		const container = document.createDocumentFragment();
+
+		// Add file count
 		if (fileCount > 0) {
-			counts.push(`${fileCount} ${fileCount === 1 ? 'file' : 'files'}`);
-		}
-		if (searchCount > 0) {
-			counts.push(`${searchCount} ${searchCount === 1 ? 'search' : 'searches'}`);
-		}
-		if (listCount > 0) {
-			counts.push(`${listCount} ${listCount === 1 ? 'list' : 'lists'}`);
+			const fileSpan = $('span.tool-summary-hover-target', {
+				style: 'margin-left: 0px;'
+			});
+			const restSpan = $('span.truncate-one-line.composer-run-title-rest');
+			restSpan.textContent = fileCount.toString();
+			const objectSpan = $('span.truncate-one-line.composer-run-title-object');
+			objectSpan.textContent = ` ${fileCount === 1 ? 'file' : 'files'}`;
+			fileSpan.appendChild(restSpan);
+			fileSpan.appendChild(objectSpan);
+			container.appendChild(fileSpan);
+
+			// Add comma if more counts follow
+			if (searchCount > 0 || listCount > 0 || directoryCount > 0) {
+				const commaSpan = $('span.composer-summary-comma');
+				commaSpan.textContent = ' ';
+				container.appendChild(commaSpan);
+			}
 		}
 
-		return counts.length > 0 ? counts.join(', ') : '';
+		// Add search count
+		if (searchCount > 0) {
+			const searchSpan = $('span.tool-summary-hover-target', {
+				style: 'margin-left: 0px;'
+			});
+			const restSpan = $('span.truncate-one-line.composer-run-title-rest');
+			restSpan.textContent = searchCount.toString();
+			const objectSpan = $('span.truncate-one-line.composer-run-title-object');
+			objectSpan.textContent = ` ${searchCount === 1 ? 'search' : 'searches'}`;
+			searchSpan.appendChild(restSpan);
+			searchSpan.appendChild(objectSpan);
+			container.appendChild(searchSpan);
+
+			// Add comma if more counts follow
+			if (grepCount > 0 || listCount > 0 || directoryCount > 0) {
+				const commaSpan = $('span.composer-summary-comma');
+				commaSpan.textContent = ' ';
+				container.appendChild(commaSpan);
+			}
+		}
+
+		// Add grep count
+		if (grepCount > 0) {
+			const grepSpan = $('span.tool-summary-hover-target', {
+				style: 'margin-left: 0px;'
+			});
+			const restSpan = $('span.truncate-one-line.composer-run-title-rest');
+			restSpan.textContent = grepCount.toString();
+			const objectSpan = $('span.truncate-one-line.composer-run-title-object');
+			objectSpan.textContent = ` ${grepCount === 1 ? 'grep' : 'greps'}`;
+			grepSpan.appendChild(restSpan);
+			grepSpan.appendChild(objectSpan);
+			container.appendChild(grepSpan);
+
+			// Add comma if more counts follow
+			if (listCount > 0 || directoryCount > 0) {
+				const commaSpan = $('span.composer-summary-comma');
+				commaSpan.textContent = ' ';
+				container.appendChild(commaSpan);
+			}
+		}
+
+		// Add list count
+		if (listCount > 0) {
+			const listSpan = $('span.tool-summary-hover-target', {
+				style: 'margin-left: 0px;'
+			});
+			const restSpan = $('span.truncate-one-line.composer-run-title-rest');
+			restSpan.textContent = listCount.toString();
+			const objectSpan = $('span.truncate-one-line.composer-run-title-object');
+			objectSpan.textContent = ` ${listCount === 1 ? 'list' : 'lists'}`;
+			listSpan.appendChild(restSpan);
+			listSpan.appendChild(objectSpan);
+			container.appendChild(listSpan);
+
+			// Add comma if more counts follow
+			if (directoryCount > 0) {
+				const commaSpan = $('span.composer-summary-comma');
+				commaSpan.textContent = ' ';
+				container.appendChild(commaSpan);
+			}
+		}
+
+		// Add directory count
+		if (directoryCount > 0) {
+			const dirSpan = $('span.tool-summary-hover-target', {
+				style: 'margin-left: 0px;'
+			});
+			const restSpan = $('span.truncate-one-line.composer-run-title-rest');
+			restSpan.textContent = directoryCount.toString();
+			const objectSpan = $('span.truncate-one-line.composer-run-title-object');
+			objectSpan.textContent = ` ${directoryCount === 1 ? 'directory' : 'directories'}`;
+			dirSpan.appendChild(restSpan);
+			dirSpan.appendChild(objectSpan);
+			container.appendChild(dirSpan);
+		}
+
+		// Return a wrapper div if we have content, null otherwise
+		if (container.childNodes.length > 0) {
+			const wrapper = $('span');
+			wrapper.appendChild(container);
+			return wrapper;
+		}
+
+		return null;
 	}
 
 	private createActionBlock(action: ExploredAction, index: number): HTMLElement | null {
-		// Consistent spacing for all action blocks (same as Read spacing)
-		const actionContainer = $('div', {
+		// Wrap action in composer-rendered-message composer-grouped-toolformer-message (matches Cursor)
+		const messageWrapper = $('div', {
+			className: 'composer-rendered-message hide-if-empty composer-message-blur composer-grouped-toolformer-message',
 			style: `
-				margin-top: 0px;
+				display: block;
+				outline: none;
 				padding: 0px;
+				background-color: var(--composer-pane-background);
+				opacity: 1;
+				z-index: 99;
 			`
+		});
+
+		const transparentWrapper = $('div', {
+			style: 'background-color: transparent;'
 		});
 
 		switch (action.type) {
 			case 'read':
 				if (action.data.kind === 'readingFiles') {
 					const readPart = new VybeChatReadingFilesPart(action.data, this.editorService, this.fileService, this.notificationService);
-					actionContainer.appendChild(readPart.domNode);
-					this.actionContainers.set(index, actionContainer);
-					return actionContainer;
+					transparentWrapper.appendChild(readPart.domNode);
+					messageWrapper.appendChild(transparentWrapper);
+					this.actionContainers.set(index, messageWrapper);
+					return messageWrapper;
 				}
 				break;
 
 			case 'searched':
 				if (action.data.kind === 'searched') {
 					const searchedPart = new VybeChatSearchedPart(action.data, this.editorService, this.fileService, this.notificationService);
-					actionContainer.appendChild(searchedPart.domNode);
-					this.actionContainers.set(index, actionContainer);
-					return actionContainer;
+					transparentWrapper.appendChild(searchedPart.domNode);
+					messageWrapper.appendChild(transparentWrapper);
+					this.actionContainers.set(index, messageWrapper);
+					return messageWrapper;
 				}
 				break;
 
-			case 'listed':
+			case 'grepped':
+				if (action.data.kind === 'grepped') {
+					const greppedPart = new VybeChatGreppedPart(action.data);
+					transparentWrapper.appendChild(greppedPart.domNode);
+					messageWrapper.appendChild(transparentWrapper);
+					this.actionContainers.set(index, messageWrapper);
+					return messageWrapper;
+				}
+				break;
+
+			case 'listed': {
+				// Use the same structure as read/searched - create a proper content part
+				const listedPart = new VybeChatListedPart(action.data as IVybeChatListedContent);
+				transparentWrapper.appendChild(listedPart.domNode);
+				messageWrapper.appendChild(transparentWrapper);
+				this.actionContainers.set(index, messageWrapper);
+				return messageWrapper;
+			}
+
 			case 'directory': {
-				// Simple block for listed/directory
-				const simpleBlock = $('div', {
-					style: `
-						display: flex;
-						flex-direction: row;
-						align-items: center;
-						gap: 4px;
-						padding: 0px;
-					`
-				});
+					// Directory - simple block for now
+					const toolFormerMessage = $('.composer-tool-former-message', {
+						style: 'padding: 0px;'
+					});
 
-				const headerText = $('.collapsible-header-text', {
-					style: `
-						flex: 0 1 auto;
-						min-width: 0px;
-						display: flex;
-						align-items: center;
-						overflow: hidden;
-						gap: 4px;
-						color: var(--vscode-foreground);
-						font-size: 12px;
-					`
-				});
+					const collapsibleClean = $('.collapsible-clean', {
+						style: `
+							display: flex;
+							flex-direction: column;
+							gap: 2px;
+							overflow-anchor: none;
+						`
+					});
 
-				const textWrapper = $('span', {
-					style: `
-						flex: 0 1 auto;
-						min-width: 0px;
-						overflow: hidden;
-						white-space: nowrap;
-						text-overflow: ellipsis;
-					`
-				});
+					const header = $('div', {
+						style: `
+							display: flex;
+							flex-direction: row;
+							align-items: center;
+							gap: 4px;
+							cursor: pointer;
+							width: 100%;
+							max-width: 100%;
+							box-sizing: border-box;
+							overflow: hidden;
+						`
+					});
 
-				const textInner = $('div', {
-					style: 'display: flex; align-items: center; overflow: hidden;'
-				});
+					const headerContent = $('div', {
+						style: 'display: flex; gap: 4px; overflow: hidden;'
+					});
 
-				const actionText = $('span', {
-					style: `
-						color: var(--cursor-text-secondary);
-						white-space: nowrap;
-						flex-shrink: 0;
-					`
-				});
-				actionText.textContent = action.type === 'listed' ? 'Listed' : 'Directory';
+					const headerText = $('.collapsible-header-text', {
+						style: `
+							flex: 0 1 auto;
+							min-width: 0px;
+							display: flex;
+							align-items: center;
+							overflow: hidden;
+							gap: 4px;
+							color: var(--vscode-foreground);
+							transition: opacity 0.1s ease-in;
+							font-size: 12px;
+						`
+					});
 
-				const nameSpan = $('span', {
-					style: `
-						margin-left: 4px;
-						overflow: hidden;
-						text-overflow: ellipsis;
-						white-space: nowrap;
-						min-width: 0px;
-					`
-				});
-				nameSpan.textContent = (action.data as { name: string }).name;
+					const textWrapper = $('span', {
+						style: `
+							flex: 0 1 auto;
+							min-width: 0px;
+							overflow: hidden;
+							white-space: nowrap;
+							text-overflow: ellipsis;
+						`
+					});
 
-				textInner.appendChild(actionText);
-				textInner.appendChild(nameSpan);
-				textWrapper.appendChild(textInner);
-				headerText.appendChild(textWrapper);
-				simpleBlock.appendChild(headerText);
-				actionContainer.appendChild(simpleBlock);
-				this.actionContainers.set(index, actionContainer);
-				return actionContainer;
+					const textInner = $('div', {
+						style: 'display: flex; align-items: center; overflow: hidden;'
+					});
+
+					const actionText = $('span', {
+						style: `
+							color: var(--cursor-text-secondary);
+							white-space: nowrap;
+							flex-shrink: 0;
+						`
+					});
+					actionText.textContent = 'Directory';
+
+					const nameSpan = $('span.edit-header-filename', {
+						style: `
+							margin-left: 4px;
+							overflow: hidden;
+							text-overflow: ellipsis;
+							white-space: nowrap;
+							min-width: 0px;
+							color: var(--vscode-foreground);
+							opacity: 0.4;
+						`
+					});
+					nameSpan.textContent = (action.data as { name: string }).name;
+
+					textInner.appendChild(actionText);
+					textInner.appendChild(nameSpan);
+					textWrapper.appendChild(textInner);
+					headerText.appendChild(textWrapper);
+					headerContent.appendChild(headerText);
+					header.appendChild(headerContent);
+					collapsibleClean.appendChild(header);
+					toolFormerMessage.appendChild(collapsibleClean);
+					transparentWrapper.appendChild(toolFormerMessage);
+					messageWrapper.appendChild(transparentWrapper);
+					this.actionContainers.set(index, messageWrapper);
+					return messageWrapper;
 			}
 		}
 
@@ -408,14 +556,16 @@ export class VybeChatExploredPart extends VybeChatContentPart {
 
 		if (data.actions) {
 			this.actions = data.actions;
-			// Update counts text
-			const countsText = this.generateCountsText();
-			// Find the counts span (second span after "Explored")
-			const textInner = this.container?.querySelector('.collapsible-header-text span span div');
-			if (textInner && textInner.children.length > 1) {
-				const countsSpan = textInner.children[1] as HTMLElement;
-				if (countsSpan) {
-					countsSpan.textContent = countsText;
+			// Update counts HTML structure
+			const countsHTML = this.generateCountsHTML();
+			// Find the counts container (second child after "Explored" text in composer-summary-title)
+			const summaryTitle = this.container?.querySelector('.composer-summary-title');
+			if (summaryTitle && summaryTitle.children.length > 1) {
+				const oldCountsContainer = summaryTitle.children[1];
+				if (oldCountsContainer && countsHTML) {
+					oldCountsContainer.replaceWith(countsHTML);
+				} else if (countsHTML) {
+					summaryTitle.appendChild(countsHTML);
 				}
 			}
 			// Re-render action blocks if expanded

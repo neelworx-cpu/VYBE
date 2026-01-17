@@ -12,6 +12,25 @@ import { IInstantiationService } from '../../../../../platform/instantiation/com
 
 const $ = dom.$;
 
+// Inject keyframes once per page
+let thinkingKeyframesInjected = false;
+function injectThinkingShineKeyframes(): void {
+	if (thinkingKeyframesInjected) {
+		return;
+	}
+	thinkingKeyframesInjected = true;
+
+	const activeWindow = dom.getActiveWindow();
+	const style = activeWindow.document.createElement('style');
+	style.textContent = `
+		@keyframes tool-shine {
+			0% { background-position: 200% center; }
+			100% { background-position: -200% center; }
+		}
+	`;
+	activeWindow.document.head.appendChild(style);
+}
+
 /**
  * Renders collapsible thinking content in AI responses.
  * Shows AI's reasoning process before the final response.
@@ -54,6 +73,9 @@ export class VybeChatThinkingPart extends VybeChatContentPart {
 	}
 
 	protected createDomNode(): HTMLElement {
+		// Inject keyframes animation once per page
+		injectThinkingShineKeyframes();
+
 		// Main container - NO horizontal padding (AI response area already has 18px)
 		const outerContainer = $('.vybe-chat-thinking-part', {
 			'data-message-role': 'ai',
@@ -134,18 +156,33 @@ export class VybeChatThinkingPart extends VybeChatContentPart {
 			`
 		});
 
-		// Inner text container
-		const textInner = $('div', {
-			style: 'display: flex; align-items: center; overflow: hidden;'
+		// Inner flex container for "Thought" + "for Xs" - apply animation when streaming
+		const innerFlexBaseStyle = 'display: flex; align-items: center; overflow: hidden;';
+		const innerFlexAnimationStyle = this.isStreaming ? `
+			animation: tool-shine 2s linear infinite;
+			background-image: linear-gradient(
+				90deg,
+				rgba(200, 200, 200, 0.6) 0%,
+				rgba(200, 200, 200, 0.6) 25%,
+				rgba(255, 255, 255, 1) 50%,
+				rgba(200, 200, 200, 0.6) 75%,
+				rgba(200, 200, 200, 0.6) 100%
+			);
+			background-size: 200% 100%;
+			-webkit-background-clip: text;
+			background-clip: text;
+		` : '';
+
+		const innerFlex = $('div', {
+			style: innerFlexBaseStyle + innerFlexAnimationStyle
 		});
 
 		// "Thinking..." or "Thought" text
 		this.thoughtTextElement = $('span', {
 			style: `
-				color: var(--vscode-foreground);
-				opacity: 0.6;
 				white-space: nowrap;
 				flex-shrink: 0;
+				${this.isStreaming ? '-webkit-text-fill-color: transparent;' : 'color: var(--vscode-foreground); opacity: 0.6;'}
 			`
 		});
 		this.thoughtTextElement.textContent = this.isStreaming ? 'Thinking' : 'Thought';
@@ -153,13 +190,14 @@ export class VybeChatThinkingPart extends VybeChatContentPart {
 		// Duration text
 		this.durationTextElement = $('span', {
 			style: `
-				color: var(--vscode-foreground);
-				opacity: 0.4;
 				margin-left: 4px;
 				white-space: nowrap;
+				${this.isStreaming ? '-webkit-text-fill-color: transparent;' : 'color: var(--vscode-foreground); opacity: 0.4;'}
 			`
 		});
-		this.durationTextElement.textContent = this.duration > 0 ? `for ${Math.round(this.duration / 1000)}s` : '';
+		// Minimum display of 1 second - "for 0s" looks wrong
+		const displaySeconds = Math.max(1, Math.round(this.duration / 1000));
+		this.durationTextElement.textContent = this.duration > 0 ? `for ${displaySeconds}s` : '';
 
 		// Icon: Loading spinner (when streaming) or Chevron (when complete)
 		if (this.isStreaming) {
@@ -180,32 +218,32 @@ export class VybeChatThinkingPart extends VybeChatContentPart {
 				`
 			});
 		} else {
-			// Chevron icon (collapsed state)
+			// Chevron icon (collapsed state) - match Cursor exactly
 			this.iconElement = $('div.codicon.codicon-chevron-right.chevron-right', {
 				style: `
 					color: var(--vscode-foreground);
-					line-height: 12px;
-					width: 12px;
-					height: 12px;
+					line-height: 14px;
+					width: 21px;
+					height: 14px;
 					display: flex;
-					justify-content: center;
+					justify-content: flex-start;
 					align-items: center;
-					transform-origin: 50% 50%;
+					transform-origin: 45% 55%;
 					transition: transform 0.15s ease-in-out, opacity 0.2s ease-in-out, color 0.1s ease-in;
 					flex-shrink: 0;
 					cursor: pointer;
-					opacity: 0.55;
+					opacity: 0.6;
 					transform: rotate(0deg);
-					font-size: 12px;
+					font-size: 18px;
 					margin-left: 4px;
 				`
 			});
 		}
 
-		// Build header hierarchy
-		textInner.appendChild(this.thoughtTextElement);
-		textInner.appendChild(this.durationTextElement);
-		textWrapper.appendChild(textInner);
+		// Build header hierarchy with inner flex container
+		innerFlex.appendChild(this.thoughtTextElement);
+		innerFlex.appendChild(this.durationTextElement);
+		textWrapper.appendChild(innerFlex);
 		headerText.appendChild(textWrapper);
 		headerText.appendChild(this.iconElement);
 		headerContent.appendChild(headerText);
@@ -419,7 +457,6 @@ export class VybeChatThinkingPart extends VybeChatContentPart {
 		}
 
 		// Pre-process content to restrict markdown elements
-		// Even if content is empty, render it (empty state is valid during initial streaming)
 		const processedContent = this.preprocessThinkingContent(this.currentContent || '');
 
 		// Render markdown
@@ -711,25 +748,21 @@ export class VybeChatThinkingPart extends VybeChatContentPart {
 		const contentChanged = this.targetContent !== newText;
 
 		// Update state
-		this.targetContent = newText; // Target for streaming
+		this.targetContent = newText;
+		this.currentContent = newText;
 		this.duration = newContent.duration || this.duration;
 		this.isStreaming = isNowStreaming;
 
-		// Update currentContent to match target (real-time streaming from MCP events)
-		this.currentContent = newText;
-
-		// Stop any existing animation (we're rendering directly from MCP events)
+		// Stop any existing animation
 		if (this.streamingIntervalId) {
 			clearTimeout(this.streamingIntervalId);
 			this.streamingIntervalId = null;
 		}
 
-		// Always re-render if content changed OR if we're streaming (to show updates in real-time)
-		// CRITICAL: Render immediately during streaming to show content as it arrives
+		// Render immediately if content changed
 		if (contentChanged || isNowStreaming) {
 			const markdownContainer = this.contentElement?.querySelector('.anysphere-markdown-container-root');
 			if (markdownContainer) {
-				// Render immediately - don't batch during streaming (we want real-time updates)
 				this.renderThinkingContent(markdownContainer as HTMLElement);
 			}
 		}
@@ -739,30 +772,79 @@ export class VybeChatThinkingPart extends VybeChatContentPart {
 			this.thoughtTextElement.textContent = this.isStreaming ? 'Thinking' : 'Thought';
 		}
 
-		// Update duration text
+		// Update duration text (minimum 1 second display)
 		if (this.durationTextElement && this.duration > 0) {
-			this.durationTextElement.textContent = `for ${Math.round(this.duration / 1000)}s`;
+			const displaySeconds = Math.max(1, Math.round(this.duration / 1000));
+			this.durationTextElement.textContent = `for ${displaySeconds}s`;
+		}
+
+		// Update animation on inner flex container (flows across "Thought" + "for Xs")
+		const innerFlex = this.thoughtTextElement?.parentElement as HTMLElement;
+		if (innerFlex) {
+			const baseContainerStyle = 'display: flex; align-items: center; overflow: hidden;';
+			if (this.isStreaming) {
+				// Streaming - apply shine animation to container
+				innerFlex.setAttribute('style', baseContainerStyle + `
+					animation: tool-shine 2s linear infinite;
+					background-image: linear-gradient(
+						90deg,
+						rgba(200, 200, 200, 0.6) 0%,
+						rgba(200, 200, 200, 0.6) 25%,
+						rgba(255, 255, 255, 1) 50%,
+						rgba(200, 200, 200, 0.6) 75%,
+						rgba(200, 200, 200, 0.6) 100%
+					);
+					background-size: 200% 100%;
+					-webkit-background-clip: text;
+					background-clip: text;
+				`);
+				// Update text colors to transparent (shows gradient from parent)
+				if (this.thoughtTextElement) {
+					this.thoughtTextElement.style.webkitTextFillColor = 'transparent';
+					this.thoughtTextElement.style.color = '';
+					this.thoughtTextElement.style.opacity = '';
+				}
+				if (this.durationTextElement) {
+					this.durationTextElement.style.webkitTextFillColor = 'transparent';
+					this.durationTextElement.style.color = '';
+					this.durationTextElement.style.opacity = '';
+				}
+			} else {
+				// Complete - remove animation from container
+				innerFlex.setAttribute('style', baseContainerStyle);
+				// Update text colors to static
+				if (this.thoughtTextElement) {
+					this.thoughtTextElement.style.webkitTextFillColor = '';
+					this.thoughtTextElement.style.color = 'var(--vscode-foreground)';
+					this.thoughtTextElement.style.opacity = '0.6';
+				}
+				if (this.durationTextElement) {
+					this.durationTextElement.style.webkitTextFillColor = '';
+					this.durationTextElement.style.color = 'var(--vscode-foreground)';
+					this.durationTextElement.style.opacity = '0.4';
+				}
+			}
 		}
 
 		// Handle streaming → complete transition (loading spinner → chevron)
 		if (wasStreaming && !isNowStreaming && this.iconElement) {
-			// Replace loading spinner with chevron
+			// Replace loading spinner with chevron - match Cursor exactly
 			const newChevron = $('div.codicon.codicon-chevron-right.chevron-right', {
 				style: `
 					color: var(--vscode-foreground);
-					line-height: 12px;
-					width: 12px;
-					height: 12px;
+					line-height: 14px;
+					width: 21px;
+					height: 14px;
 					display: flex;
-					justify-content: center;
+					justify-content: flex-start;
 					align-items: center;
-					transform-origin: 50% 50%;
+					transform-origin: 45% 55%;
 					transition: transform 0.15s ease-in-out, opacity 0.2s ease-in-out, color 0.1s ease-in;
 					flex-shrink: 0;
 					cursor: pointer;
-					opacity: 0.55;
+					opacity: 0.6;
 					transform: rotate(0deg);
-					font-size: 12px;
+					font-size: 18px;
 					margin-left: 4px;
 				`
 			});
@@ -796,7 +878,8 @@ export class VybeChatThinkingPart extends VybeChatContentPart {
 
 		// Clean up requestAnimationFrame
 		if (this.rafId !== null) {
-			cancelAnimationFrame(this.rafId);
+			const activeWindow = dom.getActiveWindow();
+			activeWindow.cancelAnimationFrame(this.rafId);
 			this.rafId = null;
 		}
 

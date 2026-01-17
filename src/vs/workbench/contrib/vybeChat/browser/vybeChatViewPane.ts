@@ -12,7 +12,7 @@ import './contentParts/media/vybeChatTextEdit.css';
 import './contentParts/media/vybeChatTerminal.css';
 import './contentParts/media/vybeChatPhaseIndicator.css';
 import { ViewPane, IViewPaneOptions } from '../../../browser/parts/views/viewPane.js';
-import { addDisposableListener } from '../../../../base/browser/dom.js';
+import { addDisposableListener, DragAndDropObserver, getWindow, getActiveWindow } from '../../../../base/browser/dom.js';
 import { IKeybindingService } from '../../../../platform/keybinding/common/keybinding.js';
 import { IContextMenuService } from '../../../../platform/contextview/browser/contextView.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
@@ -28,6 +28,7 @@ import { MessageComposer } from './components/composer/messageComposer.js';
 import { ContextDropdown } from './components/composer/contextDropdown.js';
 import { UsageDropdown } from './components/composer/usageDropdown.js';
 import { MessagePage, MessagePageOptions } from './components/chatArea/messagePage.js';
+import type { IVybeChatTodoContent, IVybeChatTodoItemContent, IVybeChatToolContent } from './contentParts/vybeChatContentPart.js';
 import { IModelService } from '../../../../editor/common/services/model.js';
 import { ILanguageService } from '../../../../editor/common/languages/language.js';
 import { ISpeechService } from '../../../contrib/speech/common/speechService.js';
@@ -37,20 +38,18 @@ import { IEditorService } from '../../../services/editor/common/editorService.js
 import { IChatRequestVariableEntry, IChatRequestFileEntry, IChatRequestStringVariableEntry } from '../../chat/common/chatVariableEntries.js';
 import { ThemeIcon } from '../../../../base/common/themables.js';
 import { Codicon } from '../../../../base/common/codicons.js';
-import { IFileService } from '../../../../platform/files/common/files.js';
+import { IFileService, FileKind } from '../../../../platform/files/common/files.js';
 import { INotificationService } from '../../../../platform/notification/common/notification.js';
 import { URI } from '../../../../base/common/uri.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import { CodeDataTransfers, containsDragType, extractEditorsDropData } from '../../../../platform/dnd/browser/dnd.js';
 import { DataTransfers } from '../../../../base/browser/dnd.js';
-import { DragAndDropObserver } from '../../../../base/browser/dom.js';
-import { FileKind } from '../../../../platform/files/common/files.js';
 import { getIconClasses } from '../../../../editor/common/services/getIconClasses.js';
 import { basename, dirname, relativePath } from '../../../../base/common/resources.js';
-import { IVybeChatMcpExecutionService } from '../common/vybeChatMcpExecutionService.js';
+import { IVybeAgentService } from '../../vybeAgent/common/vybeAgentService.js';
+import { IVybeLLMModelService } from '../../vybeLLM/common/vybeLLMModelService.js';
 import { IDisposable } from '../../../../base/common/lifecycle.js';
-import { StreamingEventHandler } from './streaming_event_handler.js';
-import type { StreamingEvent } from '../common/streaming_event_types.js';
+// LangGraph native streaming - direct event handling
 
 /**
  * VYBE Chat View Pane
@@ -69,7 +68,27 @@ export class VybeChatViewPane extends ViewPane {
 	private messageIndex: number = 0;
 	private currentStreamingMessageId: string | null = null;
 	private autoScrollDisabled: boolean = false;
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	private wheelCheckTimeout: any = null;
+
+	// Track incomplete todos across message pages
+	private incompleteTodos: IVybeChatTodoContent | null = null;
+
+	/**
+	 * Track todos for persistence across message pages.
+	 * Called whenever content updates to check for incomplete todos.
+	 */
+	private trackTodosForPersistence(messagePage: MessagePage): void {
+		// Check for incomplete todos in the current page
+		const incompleteTodos = messagePage.getIncompleteTodos();
+		if (incompleteTodos) {
+			// Track incomplete todos - they will attach to next message page if still incomplete
+			this.incompleteTodos = incompleteTodos;
+		} else {
+			// All todos completed - clear tracking
+			this.incompleteTodos = null;
+		}
+	}
 
 	constructor(
 		options: IViewPaneOptions,
@@ -91,7 +110,8 @@ export class VybeChatViewPane extends ViewPane {
 		@IFileService private readonly _fileService: IFileService,
 		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
 		@INotificationService private readonly _notificationService: INotificationService,
-		@IVybeChatMcpExecutionService private readonly _mcpExecutionService: IVybeChatMcpExecutionService,
+		@IVybeAgentService private readonly _agentService: IVybeAgentService,
+		@IVybeLLMModelService private readonly _llmModelService: IVybeLLMModelService,
 	) {
 		super(
 			{
@@ -146,6 +166,7 @@ export class VybeChatViewPane extends ViewPane {
 		container.style.overflow = 'hidden';
 
 		// Expose pane instance for testing
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 		(container as any).__vybePane = this;
 
 		// Chat messages area - scroll container with HIDDEN scrollbar
@@ -211,7 +232,159 @@ export class VybeChatViewPane extends ViewPane {
 
 		// VYBE-PATCH-START: test-helpers
 		// Expose composer globally for testing
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 		(globalThis as any).__vybeComposer = this.composer;
+		// Helper function to test warning popup
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		(globalThis as any).testComposerWarning = (type: 'error' | 'warning' | 'info' = 'error') => {
+			if (this.composer) {
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any
+				(this.composer as any).testWarning(type);
+			} else {
+				console.warn('Composer not available');
+			}
+		};
+		// Test function for TODO component
+		// Capture 'this' in closure so it works when called from console
+		const self = this;
+
+		// Test function for sticky TODO container (attached to human message)
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		(globalThis as any).__vybeTestStickyTODO = () => {
+			// Get the last message page
+			const pages = Array.from(self.messagePages.values());
+			const lastPage = pages[pages.length - 1];
+
+			if (!lastPage) {
+				console.warn('No message page found. Send a message first.');
+				return;
+			}
+
+			// Create incomplete todos (some pending, some in-progress, but not all completed)
+			const testTodoData: IVybeChatTodoContent = {
+				kind: 'todo',
+				id: `test-sticky-todo-${Date.now()}`,
+				items: [
+					{
+						id: 'todo-1',
+						text: 'Create vybePromptConfig.ts with L1/L2/L3 budget tier definitions',
+						status: 'completed',
+						order: 1
+					},
+					{
+						id: 'todo-2',
+						text: 'Create vybeMiddlewareStack.ts with LangChain built-in and custom middleware',
+						status: 'in-progress',
+						order: 2
+					},
+					{
+						id: 'todo-3',
+						text: 'Create vybeDynamicPrompt.ts using dynamicSystemPromptMiddleware pattern',
+						status: 'pending',
+						order: 3
+					},
+					{
+						id: 'todo-4',
+						text: 'Update agentModeDropdown.ts descriptions and wire level to IPC',
+						status: 'pending',
+						order: 4
+					}
+				],
+				isExpanded: true,
+				isAttachedToHuman: true, // Set to true to test attachment
+				currentRunningTodo: undefined
+			};
+
+			// Attach directly to human message (for testing)
+			const part = lastPage.attachTodoToHumanMessage(testTodoData);
+			if (part) {
+				console.log('✅ TODO component attached to human message!', part);
+				console.log('📋 This simulates what happens when incomplete todos persist to the next message page.');
+			} else {
+				console.error('❌ Failed to attach TODO component to human message');
+			}
+		};
+
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		(globalThis as any).__vybeTestTODO = () => {
+			// Get the last message page (or current streaming one)
+			const pages = Array.from(self.messagePages.values());
+			const lastPage = pages[pages.length - 1];
+
+			if (!lastPage) {
+				console.warn('No message page found. Send a message first.');
+				return;
+			}
+
+			// Create test todo data with at least 2 items
+			const testTodoData: IVybeChatTodoContent = {
+				kind: 'todo',
+				id: `test-todo-${Date.now()}`,
+				items: [
+					{
+						id: 'todo-1',
+						text: 'Create vybePromptConfig.ts with L1/L2/L3 budget tier definitions',
+						status: 'completed',
+						order: 1
+					},
+					{
+						id: 'todo-2',
+						text: 'Create vybeMiddlewareStack.ts with LangChain built-in and custom middleware',
+						status: 'in-progress',
+						order: 2
+					},
+					{
+						id: 'todo-3',
+						text: 'Create vybeDynamicPrompt.ts using dynamicSystemPromptMiddleware pattern',
+						status: 'pending',
+						order: 3
+					},
+					{
+						id: 'todo-4',
+						text: 'Update agentModeDropdown.ts descriptions and wire level to IPC',
+						status: 'pending',
+						order: 4
+					},
+					{
+						id: 'todo-5',
+						text: 'Update vybeLangGraphService.ts with middleware stack and budget tracking',
+						status: 'pending',
+						order: 5
+					},
+					{
+						id: 'todo-6',
+						text: 'Add IPC channel for passing selected level from UI to agent',
+						status: 'pending',
+						order: 6
+					}
+				],
+				isExpanded: true, // Start expanded
+				isAttachedToHuman: false,
+				currentRunningTodo: undefined // Set this to test "Running to-do" display
+			};
+
+			// Add to message page
+			const part = lastPage.addContentPart(testTodoData);
+			if (part) {
+				console.log('✅ TODO component added successfully!', part);
+
+				// Also add a test todo item indicator
+				const testTodoItemData: IVybeChatTodoItemContent = {
+					kind: 'todoItem',
+					id: `test-todo-item-${Date.now()}`,
+					toolCallId: `test-tool-call-${Date.now()}`,
+					status: 'started',
+					text: 'Create vybeMiddlewareStack.ts with LangChain built-in and custom middleware'
+				};
+
+				const itemPart = lastPage.addContentPart(testTodoItemData);
+				if (itemPart) {
+					console.log('✅ TODO item indicator added successfully!', itemPart);
+				}
+			} else {
+				console.error('❌ Failed to add TODO component');
+			}
+		};
 		// VYBE-PATCH-END: test-helpers
 
 		// Set up drag and drop for the composer
@@ -300,6 +473,8 @@ export class VybeChatViewPane extends ViewPane {
 	}
 
 	private async handleSendMessage(message: string): Promise<void> {
+		// Don't reset todo tracking here - let it persist across message pages
+		// The tracking will be updated as todos are completed via trackTodosForPersistence
 		if (!this.chatArea || !message.trim()) {
 			return;
 		}
@@ -346,6 +521,7 @@ export class VybeChatViewPane extends ViewPane {
 					this.composer.switchToSendButton();
 				}
 			},
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			onComposerSend: (content: string, pills: any[], images: any[], agentMode: any, modelState: any) => {
 				// Update the message page with new content
 				const page = this.messagePages.get(messageId);
@@ -357,6 +533,9 @@ export class VybeChatViewPane extends ViewPane {
 			onContentUpdate: () => {
 				// Smart scroll when content changes (streaming, new elements, etc.)
 				this.scrollToShowLatestContent();
+
+				// Track todos and todoItem parts for cross-page persistence
+				this.trackTodosForPersistence(messagePage);
 			}
 		};
 
@@ -370,12 +549,30 @@ export class VybeChatViewPane extends ViewPane {
 			this._clipboardService,
 			this._editorService,
 			this._fileService,
-			this._notificationService
+			this._notificationService,
+			this.workspaceContextService
 		));
 		this.messagePages.set(messageId, messagePage);
 
+		// Check if there are incomplete todos from previous page that need to be attached
+		// Attach to human message in the next chat pair if todos are still incomplete
+		if (this.incompleteTodos) {
+			// Check if todos are still incomplete (not all completed)
+			const incompleteCount = this.incompleteTodos.items.filter(item => item.status !== 'completed').length;
+			if (incompleteCount > 0) {
+				// Attach todos to the human message in this new page
+				messagePage.attachTodoToHumanMessage(this.incompleteTodos);
+				// Keep tracking - they're attached but we still need to track for next page if still incomplete
+				// The tracking will be updated as todos are completed
+			} else {
+				// All completed - clear tracking
+				this.incompleteTodos = null;
+			}
+		}
+
 		// Scroll to show new message (smooth scroll within chat area only)
-		requestAnimationFrame(() => {
+		const targetWindow = this.chatArea ? getWindow(this.chatArea) : getActiveWindow();
+		targetWindow.requestAnimationFrame(() => {
 			if (this.chatArea) {
 				// Calculate the position of the message page within the chat area
 				const messageElement = messagePage.getElement();
@@ -391,7 +588,7 @@ export class VybeChatViewPane extends ViewPane {
 		// Convert context pills to AI service format
 		await this.convertContextPillsToVariableEntries(contextPills);
 
-		// Phase 4.1: Use MCP execution service instead of direct LLM call
+		// Use LangGraph agent service
 		// Get workspace folder for repoId
 		const workspaceFolder = this.workspaceContextService.getWorkspace().folders[0];
 		if (!workspaceFolder) {
@@ -430,10 +627,6 @@ export class VybeChatViewPane extends ViewPane {
 			const modelState = this.composer?.getModelState();
 			const selectedModelId = modelState?.selectedModelId;
 
-			// Debug: Log model selection
-			console.log('[VYBE Chat] Selected model ID:', selectedModelId || 'none (will fail)');
-			console.log('[VYBE Chat] Model state:', modelState);
-
 			// Generate taskId first (we'll use it for event subscription)
 			const taskId = `task-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
@@ -441,134 +634,787 @@ export class VybeChatViewPane extends ViewPane {
 			let eventSubscription: IDisposable | null = null;
 			let hasReceivedEvents = false;
 
-			// Phase 7: Create StreamingEventHandler for normalized events
-			const eventHandler = new StreamingEventHandler(messagePage, options.onContentUpdate);
+			// Track when tool parts are created to ensure minimum display time for "Reading" state
+			const toolCreationTimes = new Map<string, number>();
+			const TOOL_MIN_DISPLAY_MS = 1500; // Minimum time to show "Reading" before transitioning to "Read" (1.5 seconds)
 
-			eventSubscription = this._mcpExecutionService.subscribeToTaskEvents(taskId, (event: any) => {
+			// Track when tools complete to add delay before next tool call starts
+			let lastToolCompletionTime = 0;
+			const TOOL_COMPLETION_DELAY_MS = 500; // Delay after tool completes before next tool call can start (500ms)
+
+			// Track tool parts by toolType:target to prevent duplicates
+			// Key: "toolType:target", Value: toolId
+			const toolPartsByTarget = new Map<string, string>();
+
+			// LangGraph native streaming - direct event handling
+			// Events: token, tool.result, complete
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			eventSubscription = this._agentService.onDidEmitEvent((event: any) => {
+				const eventTaskId = event?.task_id || '';
+				const taskIdMatches = eventTaskId === taskId || eventTaskId.startsWith(taskId) || taskId.startsWith(eventTaskId);
+
+				if (!event?.type || !taskIdMatches) {
+					return;
+				}
+
 				hasReceivedEvents = true;
+				// Removed verbose logging
 
-				try {
-					const eventTaskId = event?.task_id || '';
-					const taskIdMatches = eventTaskId === taskId || eventTaskId.startsWith(taskId) || taskId.startsWith(eventTaskId);
+				switch (event.type) {
+					case 'token': {
+						// Handle token events - can contain text, thinking, or tool calls
+						const payload = event.payload || {};
 
-					// Removed verbose logging - use targeted logs in markdown part instead
+						// Removed verbose logging
 
-					if (event && event.type && taskIdMatches) {
-						eventHandler.handleEvent(event as StreamingEvent);
-					} else if (event?.type === 'assistant.delta') {
-						console.warn('[VYBE Chat] assistant.delta event filtered out:', {
-							eventTaskId,
-							expectedTaskId: taskId,
-							taskIdMatches,
-							hasType: !!event.type
-						});
+						// Handle thinking content
+						if (payload.thinking) {
+							// Removed verbose logging
+							// Remove phase indicator when content starts arriving
+							messagePage.removePhaseIndicator();
+							messagePage.appendThinkingChunk(payload.thinking);
+							if (options.onContentUpdate) {
+								options.onContentUpdate();
+							}
+						}
+
+						// Handle text content
+						if (payload.content) {
+							// Removed verbose logging
+							// Remove phase indicator when content starts arriving
+							messagePage.removePhaseIndicator();
+							messagePage.finalizeThinking();
+							messagePage.appendText(payload.content);
+							// CRITICAL: Trigger UI update after appending text
+							if (options.onContentUpdate) {
+								options.onContentUpdate();
+							}
+						}
+
+						// Handle tool calls
+						if (payload.tool_call) {
+							const tc = payload.tool_call;
+							const toolId = tc.id || `tool_${Date.now()}`;
+							const toolName = tc.name || 'unknown';
+							let toolArgs: Record<string, unknown> = {};
+							try {
+								toolArgs = typeof tc.args === 'string' ? JSON.parse(tc.args) : tc.args;
+							} catch (e) {
+								console.warn('[VYBE Chat] Failed to parse tool args:', e);
+							}
+
+							// Removed verbose logging
+
+							// Helper function to process the tool call
+							const processToolCall = () => {
+								// Finalize current markdown block before adding tool UI
+								// This ensures markdown before and after tools are in separate groups
+								messagePage.finalizeCurrentMarkdown();
+
+								// Remove phase indicator when tool call starts
+								messagePage.removePhaseIndicator();
+
+								// Map tool name to unified tool type
+								let toolType: 'read' | 'list' | 'grep' | 'search' | 'search_web' | 'todos' | null = null;
+								let target = '';
+								let filePath: string | undefined = undefined;
+								let lineRange: { start: number; end: number } | undefined = undefined;
+
+								if (toolName === 'read_file') {
+									toolType = 'read';
+									// Try multiple possible parameter names (check in order of likelihood)
+									// eslint-disable-next-line @typescript-eslint/no-explicit-any
+									const toolArgsAny = toolArgs as any;
+									const fullFilePath = toolArgsAny?.target_file
+										|| toolArgsAny?.path
+										|| toolArgsAny?.file_path
+										|| toolArgsAny?.file
+										|| '';
+
+
+									// Extract filename from path (handle both / and \ separators)
+									if (fullFilePath) {
+										// Remove leading/trailing slashes and split
+										const cleanPath = fullFilePath.replace(/^[/\\]+|[/\\]+$/g, '');
+										const pathParts = cleanPath.split(/[/\\]/);
+										target = pathParts[pathParts.length - 1] || cleanPath || 'file';
+										filePath = fullFilePath; // Store full path for opening files
+
+										// If target is still empty or just "file", try to extract from full path differently
+										if (!target || target === 'file' || target === fullFilePath) {
+											// Try to get just the filename part
+											const match = fullFilePath.match(/([^/\\]+)$/);
+											if (match && match[1]) {
+												target = match[1];
+											} else {
+												target = fullFilePath || 'file';
+											}
+										}
+									} else {
+										console.warn(`[VYBE Chat] ⚠️ No file path found in tool args for read_file. Full toolArgs:`, JSON.stringify(toolArgs));
+										target = 'file'; // Fallback
+									}
+
+									// Extract line range if provided
+									const startLine = toolArgsAny?.startLine ?? toolArgsAny?.offset;
+									const endLine = toolArgsAny?.endLine ?? (toolArgsAny?.offset !== undefined && toolArgsAny?.limit !== undefined
+										? toolArgsAny.offset + toolArgsAny.limit - 1
+										: undefined);
+									if (startLine !== undefined && endLine !== undefined) {
+										lineRange = { start: startLine, end: endLine };
+									}
+
+									// Removed verbose logging
+
+									// CRITICAL: If target is still empty or generic, log error
+									if (!target || target === 'file') {
+										console.error(`[VYBE Chat] ❌ Failed to extract filename! target="${target}", fullFilePath="${fullFilePath}", toolArgs:`, JSON.stringify(toolArgs));
+									}
+								} else if (toolName === 'list_dir') {
+									toolType = 'list';
+									// eslint-disable-next-line @typescript-eslint/no-explicit-any
+									const toolArgsAny = toolArgs as any;
+									target = toolArgsAny?.path || toolArgsAny?.target_directory || '.';
+								} else if (toolName === 'grep') {
+									toolType = 'grep';
+									// eslint-disable-next-line @typescript-eslint/no-explicit-any
+									target = (toolArgs as any)?.pattern || '';
+								} else if (toolName === 'search' || toolName === 'codebase_search') {
+									toolType = 'search';
+									// eslint-disable-next-line @typescript-eslint/no-explicit-any
+									const toolArgsAny = toolArgs as any;
+									target = toolArgsAny?.query || toolArgsAny?.pattern || '';
+								} else if (toolName === 'search_web' || toolName === 'web_search') {
+									toolType = 'search_web';
+									// eslint-disable-next-line @typescript-eslint/no-explicit-any
+									target = (toolArgs as any)?.query || '';
+								} else if (toolName === 'get_todos' || toolName === 'list_todos' || toolName === 'check_todos') {
+									toolType = 'todos';
+									target = 'todos';
+								}
+
+								// Create unified tool content part
+								if (toolType) {
+									// Removed verbose logging
+
+									// Log if target is empty (for debugging)
+									if (!target || target === 'file') {
+										console.warn(`[VYBE Chat] ⚠️ Empty target for tool: ${toolName}, using fallback`);
+									}
+
+									// Check for duplicate tool parts with same toolType:target
+									const targetKey = `${toolType}:${target}`;
+									const existingToolId = toolPartsByTarget.get(targetKey);
+
+									if (existingToolId) {
+										// Duplicate detected - update existing part instead of creating new one
+										console.log(`[VYBE Chat] 🔄 Duplicate tool detected: ${toolType} "${target}" (existing id: ${existingToolId}, new id: ${toolId})`);
+										// Map the new toolId to the existing one for tool.result handling
+										toolPartsByTarget.set(toolId, existingToolId);
+									} else {
+										// Create new tool part
+										const toolContentData: IVybeChatToolContent = {
+											kind: 'tool',
+											id: toolId,
+											toolType: toolType,
+											target: target || 'file', // Fallback to 'file' if empty
+											filePath: filePath, // Full path for opening files (read operations only)
+											lineRange: lineRange,
+											isStreaming: true
+										};
+
+										const part = messagePage.addContentPart(toolContentData, toolId);
+										const partCreated = !!part;
+										// Removed verbose logging
+
+										if (!partCreated) {
+											console.error(`[VYBE Chat] ⚠️ Failed to create tool part for: ${toolName} (id: ${toolId})`);
+										} else {
+											// Record creation time for minimum display duration
+											toolCreationTimes.set(toolId, Date.now());
+											// Track this tool part for duplicate detection
+											toolPartsByTarget.set(targetKey, toolId);
+											// Removed verbose logging
+										}
+									}
+								} else {
+									console.warn(`[VYBE Chat] Unknown tool name: ${toolName}, not creating UI component`);
+								}
+							};
+
+							// Check if we need to delay before processing this tool call
+							// This ensures previous tool UI is visible and AI has time to process results
+							const timeSinceLastCompletion = Date.now() - lastToolCompletionTime;
+							if (timeSinceLastCompletion < TOOL_COMPLETION_DELAY_MS) {
+								const delay = TOOL_COMPLETION_DELAY_MS - timeSinceLastCompletion;
+								setTimeout(processToolCall, delay);
+							} else {
+								// No delay needed, process immediately
+								processToolCall();
+							}
+						}
+
+						if (options.onContentUpdate) {
+							options.onContentUpdate();
+						}
+						break;
 					}
-				} catch (error) {
-					console.error('[VYBE Chat] Error handling event:', error, event);
+
+					case 'tool.result': {
+						// Update tool content part to complete state
+						let toolId = event.payload?.tool_id;
+						const toolName = event.payload?.tool_name;
+						const toolResult = event.payload?.result;
+						// Removed verbose logging
+
+						// Check if this toolId was mapped to an existing one (duplicate detection)
+						const mappedToolId = toolPartsByTarget.get(toolId);
+						if (mappedToolId && mappedToolId !== toolId) {
+							console.log(`[VYBE Chat] 🔄 Using mapped tool ID: ${toolId} -> ${mappedToolId}`);
+							toolId = mappedToolId;
+						}
+
+						// Detect errors from result string
+						let toolError: { code: string; message: string } | undefined;
+						if (typeof toolResult === 'string' && toolResult.trim().startsWith('Error:')) {
+							const errorMessage = toolResult.trim().replace(/^Error:\s*/i, '');
+							toolError = {
+								code: 'TOOL_ERROR',
+								message: errorMessage
+							};
+							console.log(`[VYBE Chat] ❌ Tool error detected: ${errorMessage}`);
+						}
+
+						// Parse results based on tool type (only if no error)
+						let fileList: Array<{ name: string; type: 'file' | 'directory'; path: string }> | undefined;
+						let searchResults: Array<{ file: string; path: string; lineRange?: { start: number; end: number } }> | undefined;
+						let grepResults: Array<{ file: string; path: string; matchCount: number }> | undefined;
+						let webSearchContent: string | undefined;
+						let todoItems: Array<{ id: string; text: string; status: 'pending' | 'in-progress' | 'completed' }> | undefined;
+
+						if (toolName === 'list_dir' && !toolError) {
+							// Check if fileList is directly provided in payload
+							if (event.payload?.fileList && Array.isArray(event.payload.fileList)) {
+								// eslint-disable-next-line @typescript-eslint/no-explicit-any
+								fileList = event.payload.fileList.map((entry: any) => ({
+									name: entry.name || '',
+									type: entry.type === 'directory' ? 'directory' : 'file',
+									path: entry.name || entry.path || ''
+								}));
+								console.log(`[VYBE Chat] 📁 Got ${fileList?.length ?? 0} files from fileList payload`);
+							} else if (toolResult) {
+								// Fallback: try to parse from result string
+								try {
+									// eslint-disable-next-line @typescript-eslint/no-explicit-any
+									let parsed: any;
+									if (typeof toolResult === 'string') {
+										parsed = JSON.parse(toolResult);
+									} else {
+										parsed = toolResult;
+									}
+
+									// Handle array of DirectoryEntry objects
+									if (Array.isArray(parsed)) {
+										// eslint-disable-next-line @typescript-eslint/no-explicit-any
+										fileList = parsed.map((entry: any) => ({
+											name: entry.name || '',
+											type: entry.type === 'directory' ? 'directory' : 'file',
+											path: entry.name || entry.path || ''
+										}));
+										console.log(`[VYBE Chat] 📁 Parsed ${fileList.length} files from list_dir result`);
+									}
+								} catch (error) {
+									console.warn(`[VYBE Chat] ⚠️ Failed to parse list_dir result:`, error, `Result: ${typeof toolResult === 'string' ? toolResult.substring(0, 200) : toolResult}`);
+								}
+							}
+						}
+
+						// Parse search results for codebase search
+						if ((toolName === 'search' || toolName === 'codebase_search') && !toolError) {
+							// eslint-disable-next-line @typescript-eslint/no-explicit-any
+							let parsedSearchResults: any[] = [];
+
+							// Check if backend sent structured searchResults (preferred)
+							if (event.payload?.searchResults && Array.isArray(event.payload.searchResults)) {
+								parsedSearchResults = event.payload.searchResults;
+								console.log(`[VYBE Chat] 🔍 ✅ Using backend searchResults: ${parsedSearchResults.length} results`);
+							} else {
+								try {
+									// eslint-disable-next-line @typescript-eslint/no-explicit-any
+									let parsed: any;
+									if (typeof toolResult === 'string') {
+										parsed = JSON.parse(toolResult);
+									} else {
+										parsed = toolResult;
+									}
+
+									if (parsed && parsed.results && Array.isArray(parsed.results)) {
+										parsedSearchResults = parsed.results;
+										console.log(`[VYBE Chat] 🔍 ✅ Parsed search results from JSON: ${parsedSearchResults.length} results`);
+									}
+								} catch (error) {
+									console.warn(`[VYBE Chat] 🔍 ⚠️ Failed to parse codebase_search result:`, error);
+								}
+							}
+
+							// Format results for UI
+							if (parsedSearchResults.length > 0) {
+								// eslint-disable-next-line @typescript-eslint/no-explicit-any
+								searchResults = parsedSearchResults.map((r: any) => ({
+									file: r.file || r.path?.split('/').pop() || '',
+									path: r.path || r.file || '',
+									lineRange: r.lineRange ? {
+										start: r.lineRange.start || r.lineRange.startLineNumber || 1,
+										end: r.lineRange.end || r.lineRange.endLineNumber || r.lineRange.start || 1,
+									} : undefined,
+								}));
+								console.log(`[VYBE Chat] 🔍 ✅ Formatted ${searchResults.length} search results for UI`);
+							} else {
+								searchResults = [];
+								console.log(`[VYBE Chat] 🔍 ℹ️ No search results found`);
+							}
+						}
+
+						// Parse grep results - check for structured data from backend first
+						if (toolName === 'grep' && !toolError) {
+							// Initialize to empty array - will be populated if parsing succeeds
+							grepResults = [];
+
+							console.log(`[VYBE Chat] 🔍 Parsing grep result:`, {
+								hasPayloadGrepResults: !!event.payload?.grepResults,
+								payloadGrepResultsLength: event.payload?.grepResults?.length,
+								hasTotalMatches: event.payload?.totalMatches !== undefined,
+								hasTruncated: event.payload?.truncated !== undefined,
+								toolResultType: typeof toolResult,
+								toolResultPreview: typeof toolResult === 'string' ? toolResult.substring(0, 200) : (toolResult ? 'object' : 'null')
+							});
+
+							// Check if backend sent structured grepResults (preferred - ALWAYS use this if available)
+							if (event.payload?.grepResults && Array.isArray(event.payload.grepResults)) {
+								// Validate array structure
+								// eslint-disable-next-line @typescript-eslint/no-explicit-any
+								const validResults = event.payload.grepResults.filter((r: any) =>
+									r && typeof r === 'object' &&
+									typeof r.file === 'string' &&
+									typeof r.path === 'string' &&
+									typeof r.matchCount === 'number'
+								);
+
+								if (validResults.length > 0) {
+									grepResults = validResults;
+									console.log(`[VYBE Chat] 🔍 ✅ Using backend grepResults: ${validResults.length} files (validated ${validResults.length}/${event.payload.grepResults.length})`);
+								} else if (event.payload.grepResults.length === 0) {
+									// Empty array is valid (no matches found)
+									grepResults = [];
+									console.log(`[VYBE Chat] 🔍 ℹ️ Backend returned empty grepResults (0 matches)`);
+								} else {
+									// Invalid structure - log warning but try to use it anyway
+									console.warn(`[VYBE Chat] 🔍 ⚠️ Backend grepResults has invalid structure, attempting to use anyway`);
+									grepResults = event.payload.grepResults;
+								}
+							} else if (typeof toolResult === 'string') {
+								// Only parse string if backend didn't provide structured data
+								// Try JSON parsing first (VS Code search service returns JSON)
+								// eslint-disable-next-line @typescript-eslint/no-explicit-any
+								let parsed: any = null;
+								try {
+									// Check if it looks like JSON
+									if (toolResult.trim().startsWith('{') || toolResult.trim().startsWith('[')) {
+										// Try to parse, but handle truncated JSON gracefully
+										// If JSON is truncated, try to extract what we can
+										let jsonStr = toolResult.trim();
+
+										// If it's truncated JSON, try to close it properly
+										if (jsonStr.startsWith('{') && !jsonStr.endsWith('}')) {
+											// Try to find the last complete match object
+											// Look for the pattern: }, (end of a match object)
+											const lastCompleteMatch = jsonStr.lastIndexOf('},');
+											if (lastCompleteMatch > 0) {
+												// Extract up to the last complete match and close the array and object
+												jsonStr = jsonStr.substring(0, lastCompleteMatch + 1) + ']}';
+											} else if (jsonStr.includes('"matches":[')) {
+												// At least try to close the matches array
+												// Remove trailing comma if present
+												jsonStr = jsonStr.replace(/,\s*$/, '') + ']}';
+											}
+										}
+
+										parsed = JSON.parse(jsonStr);
+										// Removed verbose logging
+									}
+								} catch (jsonError) {
+									console.log(`[VYBE Chat] 🔍 JSON parse failed:`, jsonError);
+									console.log(`[VYBE Chat] 🔍 Will try string format`);
+								}
+
+								if (parsed && parsed.matches && Array.isArray(parsed.matches)) {
+									// Group matches by file and count
+									const fileMap = new Map<string, number>();
+									for (const match of parsed.matches) {
+										const filePath = match.file || match.path || '';
+										if (filePath) {
+											fileMap.set(filePath, (fileMap.get(filePath) || 0) + 1);
+										}
+									}
+
+									if (fileMap.size > 0) {
+										grepResults = Array.from(fileMap.entries()).map(([path, count]) => {
+											const pathParts = path.split(/[/\\]/);
+											return {
+												file: pathParts[pathParts.length - 1] || path,
+												path: path,
+												matchCount: count
+											};
+										});
+										console.log(`[VYBE Chat] 🔍 ✅ Parsed ${grepResults.length} grep result files from JSON format`);
+									} else if (parsed.matches.length === 0) {
+										// Empty matches array - this is valid, not an error
+										grepResults = [];
+										console.log(`[VYBE Chat] 🔍 ℹ️ Grep returned 0 matches (empty matches array)`);
+									} else {
+										// Matches exist but no file paths found
+										grepResults = [];
+										console.warn(`[VYBE Chat] 🔍 ⚠️ Parsed JSON but couldn't extract file paths. Sample matches:`, parsed.matches?.slice(0, 3));
+									}
+
+									// Extract totalMatches and truncated from parsed result if not already set
+									if (parsed.totalMatches !== undefined && !event.payload?.totalMatches) {
+										event.payload = event.payload || {};
+										event.payload.totalMatches = parsed.totalMatches;
+									}
+									if (parsed.truncated !== undefined && !event.payload?.truncated) {
+										event.payload = event.payload || {};
+										event.payload.truncated = parsed.truncated;
+									}
+								} else {
+									// Fallback: Parse plain string format "file:line:content\nfile:line:content..."
+									// This is the format returned by fileService.grep() (not VS Code search service)
+									console.log(`[VYBE Chat] 🔍 Attempting to parse string format`);
+									try {
+										const lines = toolResult.split('\n').filter(line => line.trim());
+										const fileMap = new Map<string, number>();
+
+										for (const line of lines) {
+											// Format: "file:line:content"
+											const match = line.match(/^(.+?):(\d+):(.+)$/);
+											if (match) {
+												const filePath = match[1];
+												fileMap.set(filePath, (fileMap.get(filePath) || 0) + 1);
+											}
+										}
+
+										if (fileMap.size > 0) {
+											grepResults = Array.from(fileMap.entries()).map(([path, count]) => {
+												const pathParts = path.split(/[/\\]/);
+												return {
+													file: pathParts[pathParts.length - 1] || path,
+													path: path,
+													matchCount: count
+												};
+											});
+											console.log(`[VYBE Chat] 🔍 ✅ Parsed ${grepResults.length} grep result files from string format:`, grepResults);
+										}
+									} catch (error) {
+										const errorMsg = error instanceof Error ? error.message : String(error);
+										console.warn(`[VYBE Chat] ⚠️ Failed to parse grep result from string:`, errorMsg);
+										// Ensure grepResults is set even on error
+										if (!grepResults || grepResults.length === 0) {
+											grepResults = [];
+										}
+									}
+								}
+
+								// Final fallback: ensure grepResults is always an array
+								if (!Array.isArray(grepResults)) {
+									console.warn(`[VYBE Chat] 🔍 ⚠️ grepResults is not an array after parsing, setting to empty array`);
+									grepResults = [];
+								}
+							} else if (toolResult && typeof toolResult === 'object') {
+								// Already an object, check for matches
+								const objResult = toolResult as any;
+								console.log(`[VYBE Chat] 🔍 Parsing object result:`, {
+									hasMatches: !!objResult.matches,
+									matchCount: objResult.matches?.length || 0,
+									totalMatches: objResult.totalMatches,
+									truncated: objResult.truncated
+								});
+
+								if (objResult.matches && Array.isArray(objResult.matches)) {
+									const fileMap = new Map<string, number>();
+									for (const match of objResult.matches) {
+										const filePath = match.file || match.path || '';
+										if (filePath) {
+											fileMap.set(filePath, (fileMap.get(filePath) || 0) + 1);
+										}
+									}
+
+									if (fileMap.size > 0) {
+										grepResults = Array.from(fileMap.entries()).map(([path, count]) => {
+											const pathParts = path.split(/[/\\]/);
+											return {
+												file: pathParts[pathParts.length - 1] || path,
+												path: path,
+												matchCount: count
+											};
+										});
+										console.log(`[VYBE Chat] 🔍 ✅ Parsed ${grepResults.length} grep result files from object format`);
+									} else if (objResult.matches.length === 0) {
+										grepResults = [];
+										console.log(`[VYBE Chat] 🔍 ℹ️ Grep returned 0 matches (empty matches array from object)`);
+									}
+
+									// Extract totalMatches and truncated from object result if not already set
+									if (objResult.totalMatches !== undefined && !event.payload?.totalMatches) {
+										event.payload = event.payload || {};
+										event.payload.totalMatches = objResult.totalMatches;
+									}
+									if (objResult.truncated !== undefined && !event.payload?.truncated) {
+										event.payload = event.payload || {};
+										event.payload.truncated = objResult.truncated;
+									}
+								}
+							}
+
+							// Ensure grepResults is always an array for grep tool calls
+							if (!grepResults) {
+								grepResults = [];
+								console.log(`[VYBE Chat] 🔍 ℹ️ No grep results parsed, setting empty array`);
+							}
+						}
+
+						// Parse web search content
+						if ((toolName === 'search_web' || toolName === 'web_search') && !toolError) {
+							if (typeof toolResult === 'string') {
+								webSearchContent = toolResult;
+							} else if (toolResult && typeof toolResult === 'object') {
+								// Try to extract markdown content from result
+								webSearchContent = (toolResult as any).content || (toolResult as any).markdown || JSON.stringify(toolResult, null, 2);
+							}
+							console.log(`[VYBE Chat] 🌐 Parsed web search content (${webSearchContent?.length || 0} chars)`);
+						}
+
+						// Parse todo items
+						if ((toolName === 'get_todos' || toolName === 'list_todos' || toolName === 'check_todos') && !toolError) {
+							try {
+								let parsed: any;
+								if (typeof toolResult === 'string') {
+									parsed = JSON.parse(toolResult);
+								} else {
+									parsed = toolResult;
+								}
+
+								if (parsed.todos && Array.isArray(parsed.todos)) {
+									todoItems = parsed.todos.map((t: any) => ({
+										id: t.id || '',
+										text: t.text || t.content || '',
+										status: (t.status === 'in_progress' ? 'in-progress' : t.status) || 'pending'
+									}));
+									console.log(`[VYBE Chat] ✅ Parsed ${todoItems?.length || 0} todo items`);
+								}
+							} catch (error) {
+								console.warn(`[VYBE Chat] ⚠️ Failed to parse todos result:`, error);
+							}
+						}
+
+						// Helper to actually update the tool part
+						const doUpdate = () => {
+							if (toolId) {
+								const updateData: any = {
+									isStreaming: false
+								};
+								if (fileList) {
+									updateData.fileList = fileList;
+								}
+								if (searchResults) {
+									updateData.searchResults = searchResults;
+								}
+								// Always set grepResults (even if empty array) for grep tool calls
+								if (toolName === 'grep') {
+									// Ensure grepResults is always an array
+									updateData.grepResults = Array.isArray(grepResults) ? grepResults : [];
+
+									// Also pass totalMatches and truncated if available from backend
+									if (event.payload?.totalMatches !== undefined && typeof event.payload.totalMatches === 'number') {
+										updateData.totalMatches = event.payload.totalMatches;
+									}
+									if (event.payload?.truncated !== undefined && typeof event.payload.truncated === 'boolean') {
+										updateData.truncated = event.payload.truncated;
+									}
+
+									console.log(`[VYBE Chat] 🔧 Passing ${updateData.grepResults.length} grep results to tool part (totalMatches: ${updateData.totalMatches || 'N/A'}, truncated: ${updateData.truncated || false})`);
+									if (updateData.grepResults.length > 0) {
+										console.log(`[VYBE Chat] 🔧 Sample grep results (first 5):`, updateData.grepResults.slice(0, 5).map((r: any) => `${r.file} (${r.matchCount})`).join(', '));
+									}
+								}
+								if (webSearchContent) {
+									updateData.webSearchContent = webSearchContent;
+								}
+								if (todoItems) {
+									updateData.todoItems = todoItems;
+								}
+								if (toolError) {
+									updateData.error = toolError;
+								}
+
+								const updated = messagePage.updateContentPartById(toolId, updateData);
+								if (!updated) {
+									// Debug: list all tool parts to see what IDs we have
+									const toolParts = messagePage.getContentPartsData().filter(d => d.kind === 'tool');
+									console.log(`[VYBE Chat] 🔧 Available tool parts:`, toolParts.map(t => (t as any).id));
+								}
+								// Clean up creation time tracking
+								toolCreationTimes.delete(toolId);
+
+								// Record completion time for sequencing next tool call
+								lastToolCompletionTime = Date.now();
+							}
+							if (options.onContentUpdate) {
+								options.onContentUpdate();
+							}
+						};
+
+						// Check if we need to delay to ensure minimum display time
+						if (toolId) {
+							const creationTime = toolCreationTimes.get(toolId);
+							if (creationTime) {
+								const elapsed = Date.now() - creationTime;
+								if (elapsed < TOOL_MIN_DISPLAY_MS) {
+									// Delay the update to ensure "Reading" shows for minimum time
+									const delay = TOOL_MIN_DISPLAY_MS - elapsed;
+									console.log(`[VYBE Chat] 🔧 Delaying tool completion by ${delay}ms for visibility`);
+									setTimeout(doUpdate, delay);
+									break;
+								}
+							}
+						}
+
+						// No delay needed, update immediately
+						doUpdate();
+						break;
+					}
+
+					case 'agent.iteration': {
+						// New loop iteration starting - finalize current markdown to ensure separation
+						console.log('[VYBE Chat] New agent iteration - finalizing current markdown');
+						messagePage.finalizeCurrentMarkdown();
+						if (options.onContentUpdate) {
+							options.onContentUpdate();
+						}
+						break;
+					}
+
+					case 'complete': {
+						// Task complete - finalize the message
+						messagePage.finalize();
+						messagePage.setComplete();
+						if (options.onContentUpdate) {
+							options.onContentUpdate();
+						}
+						break;
+					}
+
+					case 'agent.phase': {
+						// Handle agent phase changes - add/remove phase indicator as content part
+						const phase = event.payload?.phase;
+
+						if (phase === 'planning') {
+							// Remove any existing phase indicators first (to prevent duplicates)
+							messagePage.removePhaseIndicator();
+							// Add phase indicator as content part when agent is planning
+							messagePage.addContentPart({
+								kind: 'phaseIndicator',
+								id: `phase-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+								phase: 'planning',
+								isStreaming: true
+							});
+							if (options.onContentUpdate) {
+								options.onContentUpdate();
+							}
+						} else {
+							// Remove phase indicator when moving to next phase
+							messagePage.removePhaseIndicator();
+							if (options.onContentUpdate) {
+								options.onContentUpdate();
+							}
+						}
+						break;
+					}
+
+					case 'error': {
+						// Handle errors
+						const errorMessage = event.payload?.message || 'An error occurred';
+						const errorCode = event.payload?.code;
+						console.error('[VYBE Chat] Error event:', errorMessage, errorCode);
+						// Remove phase indicator when error occurs
+						messagePage.removePhaseIndicator();
+						messagePage.showError(errorMessage, errorCode);
+						messagePage.setComplete();
+						if (options.onContentUpdate) {
+							options.onContentUpdate();
+						}
+						break;
+					}
+
+					default: {
+						// Unknown event type - log but don't crash
+						console.warn('[VYBE Chat] Unhandled event type:', event.type);
+						break;
+					}
 				}
 			});
 
-			// Start the task (non-blocking - events will stream in)
-			const taskPromise = this._mcpExecutionService.solveTask({
+			// Start the task and wait for completion
+			// Ensure API keys are set before starting the stream (for cloud providers)
+			if (selectedModelId && (selectedModelId.startsWith('gemini') || selectedModelId.startsWith('gpt-') || selectedModelId.startsWith('claude'))) {
+				try {
+					// Refresh models will ensure API keys are fetched and set
+					await this._llmModelService.refreshModels();
+				} catch (error) {
+					console.warn('[VYBE Chat] Failed to refresh models/ensure API keys:', error);
+					// Continue anyway - the stream will fail with a clear error message
+				}
+			}
+
+			// Start the task (returns immediately with taskId)
+			await this._agentService.solveTask({
 				goal: message,
 				repoId: workspaceFolder.uri.toString(),
 				files: files.length > 0 ? files : undefined,
 				mode: selectedMode,
 				agentLevel: selectedLevel,
-				taskId: taskId, // Pass taskId so events match
+				taskId: taskId,
 				modelId: selectedModelId
 			});
 
-			// Wait for task to complete (but events are already streaming)
-			const result = await taskPromise;
+			// Wait for complete event instead of promise resolution
+			// The solveTask promise resolves immediately, but we need events to complete
+			await new Promise<void>((resolve) => {
+				if (eventSubscription) {
+					// Create a one-time listener for complete event
+					const completeListener = this._agentService.onDidEmitEvent((event: any) => {
+						if (event?.type === 'complete' && event?.task_id === taskId) {
+							completeListener.dispose();
+							resolve();
+						}
+					});
+				} else {
+					// Fallback: resolve after a delay if no subscription
+					setTimeout(resolve, 10000);
+				}
+			});
 
-			// Clean up event subscription
+			// Clean up event subscription AFTER task completes
 			if (eventSubscription) {
 				eventSubscription.dispose();
 				eventSubscription = null;
 			}
 
-			// Phase 7: Dispose event handler
-			eventHandler.dispose();
+			// Note: Event handler disposed automatically when subscription is disposed
 
-			// If we received streaming events, content parts are already updated
-			// CRITICAL: When streaming is active, IGNORE result completely to prevent JSON blob rendering
-			if (hasReceivedEvents) {
-				// GUARD: hasReceivedEvents === true means streaming events were received. Legacy paths MUST be inert.
-				// Finalize streaming content parts
-				// Phase 7: Content parts are already updated via StreamingEventHandler events
-				// The handler will call messagePage.finalize() on assistant.final event
-				// DO NOT render result.summary or result.content - events are the source of truth
-				// Note: Finalization is handled by StreamingEventHandler via the assistant.final event
-			} else {
-				// LEGACY FALLBACK: Only executed when hasReceivedEvents === false (no streaming events received).
-				// No events received - fallback to old behavior (build from result)
-				const newContentParts: any[] = [];
-
-				// 1. Summary as markdown (always present, normalizer ensures this)
-				newContentParts.push({
-					kind: 'markdown',
-					content: result.summary || 'Task completed',
-					isStreaming: false
-				});
-
-			// 2. Plan rendering (mode-dependent)
-			if (result.plan && result.plan.length > 0) {
-				// Generate plan markdown content
-				const planMarkdown = result.plan.map((step, index) => {
-					const statusEmoji = step.status === 'completed' ? '✅' : step.status === 'failed' ? '❌' : '⏳';
-					const desc = step.description ? `\n${step.description}` : '';
-					return `${statusEmoji} **${step.title}**${desc}`;
-				}).join('\n\n');
-
-				// Only use planDocument in plan mode
-				if (selectedMode === 'plan') {
-					const planTitle = `Plan: ${result.goal}`;
-					const planSummary = `${result.plan.length} step${result.plan.length > 1 ? 's' : ''} planned`;
-
-					newContentParts.push({
-						kind: 'planDocument',
-						id: `plan-${result.taskId}`,
-						filename: `task-${result.taskId}.plan.md`,
-						title: planTitle,
-						summary: planSummary,
-						content: `# ${planTitle}\n\n${planMarkdown}`,
-						isExpanded: false,
-						isStreaming: false
-					});
-				} else {
-					// In agent/ask mode, render plan as regular markdown
-					newContentParts.push({
-						kind: 'markdown',
-						content: `## Plan\n\n${planMarkdown}`,
-						isStreaming: false
-					});
-				}
-			}
-
-			// 3. Artifacts as basic list (markdown for now)
-			if (result.artifacts && result.artifacts.length > 0) {
-				const artifactsMarkdown = `## Artifacts\n\n${result.artifacts.map((artifact, index) => {
-					const typeLabel = artifact.type === 'diff' ? '🔀 Diff' :
-					                 artifact.type === 'file' ? '📄 File' :
-					                 artifact.type === 'command' ? '💻 Command' :
-					                 '📝 Note';
-					const pathInfo = artifact.path ? `\n**Path:** \`${artifact.path}\`` : '';
-					const metadataInfo = artifact.metadata && Object.keys(artifact.metadata).length > 0
-						? `\n**Metadata:** ${JSON.stringify(artifact.metadata, null, 2)}`
-						: '';
-					return `${typeLabel} **${artifact.type}**${pathInfo}${metadataInfo}`;
-				}).join('\n\n')}`;
-
-				newContentParts.push({
-					kind: 'markdown',
-					content: artifactsMarkdown,
-					isStreaming: false
-				});
-			}
-
-				// Update content parts (always has at least summary)
-				messagePage.updateContentParts(newContentParts);
+			// Content parts are already updated via direct event handling
+			// Events are the source of truth - no need to render result object
+			if (!hasReceivedEvents) {
+				console.warn('[VYBE Chat] No streaming events received - this should not happen with LangGraph');
 			}
 
 			// Stop streaming state
@@ -598,7 +1444,7 @@ export class VybeChatViewPane extends ViewPane {
 				this.composer.switchToSendButton();
 			}
 			// Show notification
-			this._notificationService.error(`MCP Execution Error: ${errorMessage}`);
+			this._notificationService.error(`Agent Error: ${errorMessage}`);
 		}
 
 		// Update onStop (Phase 4.1: no cancellation yet)
@@ -921,8 +1767,9 @@ export class VybeChatViewPane extends ViewPane {
 		// Only scroll if content extends beyond viewport (with 10px threshold to prevent micro-scrolls)
 		if (distanceFromBottom > 10) {
 			// Cancel any pending scroll update
+			const targetWindow = this.chatArea ? getWindow(this.chatArea) : getActiveWindow();
 			if (this.scrollRafId !== null) {
-				cancelAnimationFrame(this.scrollRafId);
+				targetWindow.cancelAnimationFrame(this.scrollRafId);
 			}
 			if (this.scrollTimeout !== null) {
 				clearTimeout(this.scrollTimeout);
@@ -932,7 +1779,7 @@ export class VybeChatViewPane extends ViewPane {
 			// This prevents jumping when code blocks grow character-by-character
 			this.scrollTimeout = setTimeout(() => {
 				// Schedule scroll update (batched via RAF)
-				this.scrollRafId = requestAnimationFrame(() => {
+				this.scrollRafId = targetWindow.requestAnimationFrame(() => {
 					if (this.chatArea && !this.autoScrollDisabled) {
 						const beforeScroll = this.chatArea.scrollTop;
 						const newScrollHeight = this.chatArea.scrollHeight;

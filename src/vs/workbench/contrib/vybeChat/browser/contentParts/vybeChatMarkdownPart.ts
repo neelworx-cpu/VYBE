@@ -5,10 +5,14 @@
 
 import { VybeChatContentPart, IVybeChatMarkdownContent } from './vybeChatContentPart.js';
 import { VybeChatCodeBlockPart } from './vybeChatCodeBlockPart.js';
-import { $, getWindow } from '../../../../../base/browser/dom.js';
+import { $, getWindow, addDisposableListener } from '../../../../../base/browser/dom.js';
 import { MarkdownString } from '../../../../../base/common/htmlContent.js';
 import { IMarkdownRendererService } from '../../../../../platform/markdown/browser/markdownRenderer.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
+import { IEditorService } from '../../../../services/editor/common/editorService.js';
+import { IWorkspaceContextService } from '../../../../../platform/workspace/common/workspace.js';
+import { URI } from '../../../../../base/common/uri.js';
+import * as path from '../../../../../base/common/path.js';
 
 /**
  * Renders markdown content in AI responses.
@@ -32,18 +36,26 @@ export class VybeChatMarkdownPart extends VybeChatContentPart {
 	 * Set this to true when using the new streaming architecture.
 	 */
 	private disableCodeBlockExtraction: boolean = false;
+	private editorService?: IEditorService;
+	private workspaceContextService?: IWorkspaceContextService;
 
 	constructor(
 		content: IVybeChatMarkdownContent,
 		private readonly markdownRendererService: IMarkdownRendererService,
 		private readonly instantiationService: IInstantiationService,
-		options?: { disableCodeBlockExtraction?: boolean }
+		options?: {
+			disableCodeBlockExtraction?: boolean;
+			editorService?: IEditorService;
+			workspaceContextService?: IWorkspaceContextService;
+		}
 	) {
 		super('markdown');
 		this.targetContent = content.content;
 		this.isStreaming = content.isStreaming ?? false;
 		this.currentContent = this.isStreaming ? '' : content.content; // Start empty if streaming
 		this.disableCodeBlockExtraction = options?.disableCodeBlockExtraction ?? false;
+		this.editorService = options?.editorService;
+		this.workspaceContextService = options?.workspaceContextService;
 	}
 
 	/**
@@ -136,13 +148,6 @@ export class VybeChatMarkdownPart extends VybeChatContentPart {
 
 		// DIAGNOSTIC: Check if content has code block markers
 		const hasMarkers = markdown.includes('```');
-		if (hasMarkers && this.codeBlockMap.size > 0) {
-			console.log('[CodeBlock] extractCodeBlocks - content has markers but extracting', {
-				contentLength: markdown.length,
-				existingBlocks: this.codeBlockMap.size,
-				markerCount: (markdown.match(/```/g) || []).length
-			});
-		}
 
 		const lines = markdown.split('\n');
 		let inBlock = false;
@@ -223,12 +228,27 @@ export class VybeChatMarkdownPart extends VybeChatContentPart {
 	}
 
 	/**
+	 * Strip markdown checkboxes and convert to regular bullets.
+	 * VYBE: Checkboxes are disabled - use write_todos tool instead.
+	 */
+	private stripCheckboxes(content: string): string {
+		// Convert "- [ ] text" and "- [x] text" to "- text"
+		return content.replace(/^(\s*)-\s+\[[ xX]\]\s+/gm, '$1- ');
+	}
+
+	/**
 	 * Render markdown content using VS Code's markdown renderer.
 	 */
 	private renderMarkdown(content: string): void {
+		// Removed verbose logging
+
 		if (!this.markdownContainer) {
+			console.error(`[MarkdownPart] renderMarkdown: No markdownContainer!`);
 			return;
 		}
+
+		// VYBE: Strip any checkbox syntax before rendering
+		content = this.stripCheckboxes(content);
 
 		// CRITICAL: Guard against empty content when we have existing code blocks
 		// If content is empty but we have code blocks, preserve them by using currentContent
@@ -283,8 +303,14 @@ export class VybeChatMarkdownPart extends VybeChatContentPart {
 
 			const renderedMarkdown = this.markdownRendererService.render(markdownString, {});
 
+			console.log(`[MarkdownPart] renderMarkdown (simple): renderedMarkdown=${!!renderedMarkdown}, element=${!!renderedMarkdown?.element}`);
+
 			if (renderedMarkdown?.element) {
 				this.markdownContainer.appendChild(renderedMarkdown.element);
+				// Make inline code with file paths clickable
+				this.makeInlineCodeClickable(renderedMarkdown.element);
+			} else {
+				console.error(`[MarkdownPart] renderMarkdown (simple): No element to append!`);
 			}
 
 			if (this.onStreamingUpdate) {
@@ -294,18 +320,6 @@ export class VybeChatMarkdownPart extends VybeChatContentPart {
 		}
 
 		// LEGACY: Code block extraction for backward compatibility
-		// DIAGNOSTIC: Log when rendering with code blocks
-		const hasCodeBlockMarkers = content.includes('```');
-		if (hasCodeBlockMarkers || this.codeBlockMap.size > 0) {
-			console.log('[MarkdownPart] renderMarkdown - code block check', {
-				contentLength: content.length,
-				hasMarkers: hasCodeBlockMarkers,
-				existingCodeBlocks: this.codeBlockMap.size,
-				isStreaming: this.isStreaming,
-				contentPreview: content.substring(0, 200)
-			});
-		}
-
 		// Extract code blocks from new content
 		const newCodeBlocks = this.extractCodeBlocks(content);
 
@@ -440,7 +454,13 @@ export class VybeChatMarkdownPart extends VybeChatContentPart {
 		});
 
 		// Append the rendered content
-		this.markdownContainer.appendChild(result.element);
+		if (result?.element) {
+			this.markdownContainer.appendChild(result.element);
+			// Make inline code with file paths clickable
+			this.makeInlineCodeClickable(result.element);
+		} else {
+			console.error(`[MarkdownPart] renderMarkdown (full): No element to append!`);
+		}
 
 		// Register disposables
 		this._register(result);
@@ -495,7 +515,7 @@ export class VybeChatMarkdownPart extends VybeChatContentPart {
 
 	/**
 	 * Update content when streaming new data.
-	 * Uses requestAnimationFrame to batch updates and reduce flicker.
+	 * Renders immediately without animation.
 	 */
 	updateContent(newContent: IVybeChatMarkdownContent): void {
 		const newText = newContent.content || ''; // Ensure content is never undefined
@@ -504,15 +524,6 @@ export class VybeChatMarkdownPart extends VybeChatContentPart {
 		// DIAGNOSTIC: Log content when transitioning from streaming to non-streaming
 		const justStoppingStream = this.isStreaming && !isNowStreaming;
 		if (justStoppingStream) {
-			const hasCodeBlocks = newText.includes('```');
-			const currentHasCodeBlocks = this.currentContent.includes('```');
-			console.log('[MarkdownPart] updateContent - stopping stream', {
-				newTextLength: newText.length,
-				currentLength: this.currentContent.length,
-				newTextHasCodeBlocks: hasCodeBlocks,
-				currentHasCodeBlocks: currentHasCodeBlocks,
-				contentMatches: newText === this.currentContent
-			});
 		}
 
 		// CRITICAL: If content hasn't changed and we're just transitioning from streaming to non-streaming,
@@ -539,71 +550,28 @@ export class VybeChatMarkdownPart extends VybeChatContentPart {
 			return;
 		}
 
-		// Log only when skipping re-render (important for debugging)
-		// Removed verbose updateContent logs to reduce noise during streaming
-
-		// Update state
+		// Update state (but NOT currentContent yet - renderMarkdown needs to compare against old value)
 		this.targetContent = newText;
 		this.isStreaming = isNowStreaming;
 
-		// If not streaming, show complete text immediately
-		if (!isNowStreaming) {
-			// Cancel any pending animation frame
-			if (this.rafId !== null) {
-				const targetWindow = this.markdownContainer ? getWindow(this.markdownContainer) : getWindow(undefined);
-				targetWindow.cancelAnimationFrame(this.rafId);
-				this.rafId = null;
-			}
+		// Cancel any pending animation frame
+		if (this.rafId !== null) {
+			const targetWindow = this.markdownContainer ? getWindow(this.markdownContainer) : getWindow(undefined);
+			targetWindow.cancelAnimationFrame(this.rafId);
+			this.rafId = null;
+		}
 
-			// Don't update currentContent here - renderMarkdown will update it after rendering
-			if (this.streamingIntervalId) {
-				clearTimeout(this.streamingIntervalId);
-				this.streamingIntervalId = null;
-			}
-			this.renderMarkdown(newText);
-		} else {
-			// Streaming mode - render immediately (real-time streaming)
-			// Don't update currentContent here - renderMarkdown will update it after rendering
+		if (this.streamingIntervalId) {
+			clearTimeout(this.streamingIntervalId);
+			this.streamingIntervalId = null;
+		}
 
-			// Clear any existing animation
-			if (this.streamingIntervalId) {
-				clearTimeout(this.streamingIntervalId);
-				this.streamingIntervalId = null;
-			}
+		// Render immediately (renderMarkdown will update this.currentContent after rendering)
+		this.renderMarkdown(newText);
 
-			// For the first render, render immediately to ensure content appears
-			// After that, use requestAnimationFrame to batch rapid updates
-			const isFirstRender = !this.markdownContainer || this.markdownContainer.children.length === 0;
-
-			if (isFirstRender) {
-				this.renderMarkdown(newText);
-				if (this.onStreamingUpdate) {
-					this.onStreamingUpdate();
-				}
-			} else if (this.rafId === null) {
-				const targetWindow = this.markdownContainer ? getWindow(this.markdownContainer) : getWindow(undefined);
-				// Capture newText in closure to prevent stale content
-				const textToRender = newText;
-				this.rafId = targetWindow.requestAnimationFrame(() => {
-					// CRITICAL: Only render if content is not empty or if we don't have code blocks
-					// This prevents clearing content when a RAF callback fires with stale/empty content
-					if (textToRender || this.codeBlockMap.size === 0) {
-						this.renderMarkdown(textToRender);
-					} else {
-						console.warn('[MarkdownPart] Skipping RAF render - empty content but code blocks exist', {
-							codeBlocks: this.codeBlockMap.size,
-							currentContentLength: this.currentContent.length
-						});
-					}
-
-					// Notify parent for scrolling (batched via RAF to prevent scroll jumping)
-					if (this.onStreamingUpdate) {
-						this.onStreamingUpdate();
-					}
-
-					this.rafId = null;
-				});
-			}
+		// Notify parent for scroll handling
+		if (this.onStreamingUpdate) {
+			this.onStreamingUpdate();
 		}
 	}
 
@@ -634,6 +602,81 @@ export class VybeChatMarkdownPart extends VybeChatContentPart {
 
 		super.dispose();
 		this.markdownContainer = undefined;
+	}
+
+	/**
+	 * Make inline code elements that look like file paths clickable.
+	 * This mimics Cursor's behavior where `filename.ext` in markdown opens the file.
+	 */
+	private makeInlineCodeClickable(container: HTMLElement): void {
+		if (!this.editorService) {
+			return; // No editor service, can't open files
+		}
+
+		// Find all inline code elements (not in pre - those are code blocks)
+		const codeElements = container.querySelectorAll('code:not(pre code)');
+
+		codeElements.forEach((codeEl) => {
+			const text = codeEl.textContent?.trim();
+			if (!text) {
+				return;
+			}
+
+			// Check if it looks like a file path
+			// Patterns: has extension OR has path separator
+			const looksLikeFilePath =
+				/\.[a-zA-Z0-9]{1,10}$/.test(text) || // Has file extension
+				text.includes('/') || // Unix path separator
+				text.includes('\\'); // Windows path separator
+
+			if (!looksLikeFilePath) {
+				return;
+			}
+
+			// Make it clickable
+			const htmlCodeEl = codeEl as HTMLElement;
+			htmlCodeEl.style.cursor = 'pointer';
+			htmlCodeEl.style.transition = 'color 0.2s ease';
+			htmlCodeEl.title = `Click to open ${text}`;
+
+			// Add hover effect
+			this._register(addDisposableListener(htmlCodeEl, 'mouseenter', () => {
+				htmlCodeEl.style.color = '#3ecf8e'; // VYBE green
+			}));
+
+			this._register(addDisposableListener(htmlCodeEl, 'mouseleave', () => {
+				htmlCodeEl.style.color = ''; // Reset to default
+			}));
+
+			// Add click handler
+			this._register(addDisposableListener(htmlCodeEl, 'click', async (e) => {
+				e.preventDefault();
+				e.stopPropagation();
+
+				try {
+					let fileUri: URI;
+
+					// Check if path is absolute
+					if (path.isAbsolute(text)) {
+						fileUri = URI.file(text);
+					} else {
+						// Resolve relative path against workspace root
+						const workspaceFolder = this.workspaceContextService?.getWorkspace().folders[0];
+						if (workspaceFolder) {
+							fileUri = URI.joinPath(workspaceFolder.uri, text);
+						} else {
+							// Fallback: try as-is
+							fileUri = URI.file(text);
+						}
+					}
+
+					console.log(`[MarkdownPart] Opening file from inline code: ${fileUri.fsPath}`);
+					await this.editorService!.openEditor({ resource: fileUri });
+				} catch (error) {
+					console.error(`[MarkdownPart] Failed to open file: ${text}`, error);
+				}
+			}));
+		});
 	}
 }
 

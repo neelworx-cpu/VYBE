@@ -33,7 +33,7 @@ export interface IVybeChatContentPart extends Disposable {
 	 * Update this content part with new data.
 	 * Called when streaming updates arrive.
 	 */
-	updateContent?(data: any): void;
+	updateContent?(data: unknown): void;
 
 	/**
 	 * Callback for streaming updates.
@@ -64,17 +64,24 @@ export type VybeChatContentPartKind =
 	// Phase 5: File Operations
 	| 'readingFiles'   // Files being read by AI
 	| 'searched'       // Search results
+	| 'grepped'        // Grep pattern searches
 	| 'listed'         // Listed items/directories
 	| 'directory'      // Directory operations
 	| 'explored'       // Grouped multiple actions
 	// Phase 6: Planning
-	| 'planDocument';  // AI-generated plan document
+	| 'planDocument'  // AI-generated plan document
+	| 'todo'          // Todo list summary (collapsed/expanded)
+	| 'todoItem'      // Individual todo item indicator ("Started to-do")
+	| 'phaseIndicator' // "Planning next steps" indicator (appears when agent is planning)
+	// Phase 7: Unified Tool UI
+	| 'tool';         // Unified tool UI component (read, list, grep, search)
 
 /**
  * Data for markdown content parts.
  */
 export interface IVybeChatMarkdownContent {
 	kind: 'markdown';
+	id?: string;  // Unique block ID - allows multiple markdown parts in sequence
 	content: string;  // Markdown text (final or target for streaming)
 	isStreaming?: boolean; // Whether content is currently streaming
 }
@@ -130,6 +137,7 @@ export interface IVybeChatTerminalContent {
 	permission?: string;       // Permission level (e.g., "Ask Every Time", "Always Allow")
 	isStreaming?: boolean;     // Whether output is currently streaming
 	exitCode?: number;         // Command exit code
+	toolCallId?: string;       // Tool call ID for LangGraph HITL integration
 }
 
 /**
@@ -208,6 +216,16 @@ export interface IVybeChatSearchedContent {
 }
 
 /**
+ * Data for grepped content parts.
+ */
+export interface IVybeChatGreppedContent {
+	kind: 'grepped';
+	id?: string;
+	pattern: string;
+	isStreaming?: boolean;
+}
+
+/**
  * Data for listed content parts.
  */
 export interface IVybeChatListedContent {
@@ -234,8 +252,8 @@ export interface IVybeChatExploredContent {
 	kind: 'explored';
 	id?: string; // Unique ID for tracking and updates
 	actions: Array<{
-		type: 'read' | 'searched' | 'listed' | 'directory';
-		data: IVybeChatReadingFilesContent | IVybeChatSearchedContent | IVybeChatListedContent | IVybeChatDirectoryContent;
+		type: 'read' | 'searched' | 'grepped' | 'listed' | 'directory';
+		data: IVybeChatReadingFilesContent | IVybeChatSearchedContent | IVybeChatGreppedContent | IVybeChatListedContent | IVybeChatDirectoryContent;
 	}>;
 	isStreaming?: boolean;
 }
@@ -260,6 +278,75 @@ export interface IVybeChatPlanDocumentContent {
 }
 
 /**
+ * Todo item data structure
+ */
+export interface ITodoItem {
+	id: string;
+	text: string;
+	status: 'pending' | 'in-progress' | 'completed';
+	order: number;
+}
+
+/**
+ * Data for todo list summary content parts.
+ * Appears in AI response area (can become sticky) or attached to human message.
+ */
+export interface IVybeChatTodoContent {
+	kind: 'todo';
+	id?: string; // Unique ID for tracking and updates
+	items: ITodoItem[]; // Todo items (minimum 2 required)
+	isExpanded?: boolean; // Whether todo list is expanded (default: true when first created)
+	isSticky?: boolean; // Whether component is sticky (scrolled past human message)
+	isAttachedToHuman?: boolean; // Whether attached to human message (always expanded)
+	currentRunningTodo?: string; // Text of currently running todo (for collapsed header)
+}
+
+/**
+ * Data for individual todo item indicator content parts.
+ * Appears in AI response area when a todo starts/completes.
+ */
+export interface IVybeChatTodoItemContent {
+	kind: 'todoItem';
+	id?: string; // Unique ID for tracking
+	toolCallId?: string; // Tool call ID from LangGraph
+	status: 'started' | 'completed'; // Todo item status
+	text: string; // Todo item text
+}
+
+/**
+ * Data for phase indicator content parts.
+ * Shows "Planning next steps" when agent enters planning phase.
+ */
+export interface IVybeChatPhaseIndicatorContent {
+	kind: 'phaseIndicator';
+	id?: string; // Unique ID for tracking
+	phase: 'planning' | 'acting' | 'reflecting' | 'finalizing'; // Agent phase
+	isStreaming?: boolean; // Whether phase is active (shows shine animation)
+}
+
+/**
+ * Data for unified tool UI content parts.
+ * Handles all tool types: read, list, grep, search.
+ */
+export interface IVybeChatToolContent {
+	kind: 'tool';
+	id: string; // Tool call ID (required for tracking)
+	toolType: 'read' | 'list' | 'grep' | 'search' | 'search_web' | 'todos'; // Type of tool
+	target: string; // Display name (filename, directory, pattern)
+	filePath?: string; // Full file path for opening files (for read operations)
+	lineRange?: { start: number; end: number }; // For read operations (optional)
+	isStreaming: boolean; // Whether tool is executing
+	error?: { code: string; message: string }; // Error if tool failed
+	fileList?: Array<{ name: string; type: 'file' | 'directory'; path: string }>; // For list operations: parsed directory entries
+	searchResults?: Array<{ file: string; path: string; lineRange?: { start: number; end: number } }>; // For search operations: codebase search results
+	grepResults?: Array<{ file: string; path: string; matchCount: number }>; // For grep operations: grouped results with match counts
+	webSearchContent?: string; // For web search: markdown content
+	todoItems?: Array<{ id: string; text: string; status: 'pending' | 'in-progress' | 'completed' }>; // For todos: todo items list
+	totalMatches?: number;  // Total number of matches across all files (for truncation indicator)
+	truncated?: boolean;    // Whether results were truncated
+}
+
+/**
  * Union type of all content data.
  * This is what gets passed to content parts for rendering.
  */
@@ -273,10 +360,15 @@ export type IVybeChatContentData =
 	| IVybeChatErrorContent
 	| IVybeChatReadingFilesContent
 	| IVybeChatSearchedContent
+	| IVybeChatGreppedContent
 	| IVybeChatExploredContent
 	| IVybeChatListedContent
 	| IVybeChatDirectoryContent
-	| IVybeChatPlanDocumentContent;
+	| IVybeChatPlanDocumentContent
+	| IVybeChatTodoContent
+	| IVybeChatTodoItemContent
+	| IVybeChatPhaseIndicatorContent
+	| IVybeChatToolContent;
 
 /**
  * Base class for content parts.

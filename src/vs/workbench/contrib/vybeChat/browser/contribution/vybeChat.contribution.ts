@@ -37,5 +37,4 @@ import './vybeDiffDecorations.contribution.js';
 // Register checkpoint service
 import './vybeCheckpointService.contribution.js';
 
-// Register MCP execution service (Phase 4.1)
-import '../../common/vybeChatMcpExecutionService.contribution.js';
+// Note: MCP execution service removed - now using LangChain/LangGraph

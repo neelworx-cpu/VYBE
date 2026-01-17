@@ -9,119 +9,123 @@
  */
 
 export type StreamingEvent =
-  | AssistantDeltaEvent
-  | AssistantThinkingDeltaEvent
-  | AssistantBlockStartEvent
-  | AssistantBlockDeltaEvent
-  | AssistantBlockEndEvent
-  | ToolCallEvent
-  | ToolResultEvent
-  | AssistantFinalEvent
-  | AgentPhaseEvent
-  | StreamingErrorEvent
-  | BlockCreateEvent
-  | BlockAppendEvent
-  | BlockFinalizeEvent
-  | MessageCompleteEvent
-  // New simplified events (Production Architecture)
-  | ThinkingDeltaEvent
-  | ContentDeltaEvent
-  | NewToolCallEvent
-  | NewToolResultEvent
-  | NewMessageCompleteEvent;
+	| AssistantDeltaEvent
+	| AssistantThinkingDeltaEvent
+	| AssistantBlockStartEvent
+	| AssistantBlockDeltaEvent
+	| AssistantBlockEndEvent
+	| ToolCallEvent
+	| ToolResultEvent
+	| AssistantFinalEvent
+	| AgentPhaseEvent
+	| StreamingErrorEvent
+	| BlockCreateEvent
+	| BlockAppendEvent
+	| BlockFinalizeEvent
+	| MessageCompleteEvent
+	// New simplified events (Production Architecture)
+	| ThinkingDeltaEvent
+	| ContentDeltaEvent
+	| NewToolCallEvent
+	| NewToolResultEvent
+	| NewMessageCompleteEvent
+	// TODO tracking events (LangChain Deep Agents TodoListMiddleware)
+	| TodoUpdateEvent
+	| TodoItemStartedEvent
+	| TodoItemCompletedEvent;
 
 export interface AssistantDeltaEvent {
-  type: 'assistant.delta';
-  task_id: string;
-  payload: {
-    text: string; // Plain text token(s)
-  };
+	type: 'assistant.delta';
+	task_id: string;
+	payload: {
+		text: string; // Plain text token(s)
+	};
 }
 
 export interface AssistantThinkingDeltaEvent {
-  type: 'assistant.thinking.delta';
-  task_id: string;
-  payload: {
-    text: string; // Thinking content token(s)
-  };
+	type: 'assistant.thinking.delta';
+	task_id: string;
+	payload: {
+		text: string; // Thinking content token(s)
+	};
 }
 
 export interface AssistantBlockStartEvent {
-  type: 'assistant.block.start';
-  task_id: string;
-  payload: {
-    block_id: string; // Unique ID for this block
-    block_type: 'code' | 'markdown';
-    language?: string; // For code blocks
-  };
+	type: 'assistant.block.start';
+	task_id: string;
+	payload: {
+		block_id: string; // Unique ID for this block
+		block_type: 'code' | 'markdown';
+		language?: string; // For code blocks
+	};
 }
 
 export interface AssistantBlockDeltaEvent {
-  type: 'assistant.block.delta';
-  task_id: string;
-  payload: {
-    block_id: string;
-    text: string; // Content token(s) for this block
-  };
+	type: 'assistant.block.delta';
+	task_id: string;
+	payload: {
+		block_id: string;
+		text: string; // Content token(s) for this block
+	};
 }
 
 export interface AssistantBlockEndEvent {
-  type: 'assistant.block.end';
-  task_id: string;
-  payload: {
-    block_id: string;
-  };
+	type: 'assistant.block.end';
+	task_id: string;
+	payload: {
+		block_id: string;
+	};
 }
 
 export interface ToolCallEvent {
-  type: 'tool.call';
-  task_id: string;
-  payload: {
-    tool_id: string;
-    tool_name: string;
-    arguments: Record<string, unknown>; // Complete, parsed JSON
-  };
+	type: 'tool.call';
+	task_id: string;
+	payload: {
+		tool_id: string;
+		tool_name: string;
+		arguments: Record<string, unknown>; // Complete, parsed JSON
+	};
 }
 
 export interface ToolResultEvent {
-  type: 'tool.result';
-  task_id: string;
-  payload: {
-    tool_id: string;
-    result: unknown;
-    error?: string;
-  };
+	type: 'tool.result';
+	task_id: string;
+	payload: {
+		tool_id: string;
+		result: unknown;
+		error?: string;
+	};
 }
 
 export interface AssistantFinalEvent {
-  type: 'assistant.final';
-  task_id: string;
-  payload: {
-    full_text: string; // Complete, reconciled text
-    usage?: {
-      input_tokens?: number;
-      output_tokens?: number;
-    };
-  };
+	type: 'assistant.final';
+	task_id: string;
+	payload: {
+		full_text: string; // Complete, reconciled text
+		usage?: {
+			input_tokens?: number;
+			output_tokens?: number;
+		};
+	};
 }
 
 export interface AgentPhaseEvent {
-  type: 'agent.phase';
-  task_id: string;
-  payload: {
-    phase: 'planning' | 'acting' | 'reflecting' | 'finalizing';
-    label?: string; // Short UI label, not chain-of-thought
-    visibility?: 'dev' | 'debug' | 'user'; // Default: 'debug'
-  };
+	type: 'agent.phase';
+	task_id: string;
+	payload: {
+		phase: 'planning' | 'acting' | 'reflecting' | 'finalizing';
+		label?: string; // Short UI label, not chain-of-thought
+		visibility?: 'dev' | 'debug' | 'user'; // Default: 'debug'
+	};
 }
 
 export interface StreamingErrorEvent {
-  type: 'error';
-  task_id: string;
-  payload: {
-    message: string;
-    code?: string;
-  };
+	type: 'error';
+	task_id: string;
+	payload: {
+		message: string;
+		code?: string;
+	};
 }
 
 /**
@@ -129,49 +133,49 @@ export interface StreamingErrorEvent {
  * These events represent structured content blocks, not raw markdown.
  */
 export interface ContentBlock {
-  id: string;
-  type: 'text' | 'code' | 'thinking' | 'tool_call' | 'tool_result';
-  content: string;
-  isStreaming: boolean;
-  language?: string;
-  tool?: string;
-  args?: Record<string, unknown>;
-  result?: unknown;
-  status?: 'pending' | 'running' | 'done' | 'error';
+	id: string;
+	type: 'text' | 'code' | 'thinking' | 'tool_call' | 'tool_result';
+	content: string;
+	isStreaming: boolean;
+	language?: string;
+	tool?: string;
+	args?: Record<string, unknown>;
+	result?: unknown;
+	status?: 'pending' | 'running' | 'done' | 'error';
 }
 
 export interface BlockCreateEvent {
-  type: 'block.create';
-  task_id: string;
-  payload: {
-    block: ContentBlock;
-  };
+	type: 'block.create';
+	task_id: string;
+	payload: {
+		block: ContentBlock;
+	};
 }
 
 export interface BlockAppendEvent {
-  type: 'block.append';
-  task_id: string;
-  payload: {
-    blockId: string;
-    delta: string;
-  };
+	type: 'block.append';
+	task_id: string;
+	payload: {
+		blockId: string;
+		delta: string;
+	};
 }
 
 export interface BlockFinalizeEvent {
-  type: 'block.finalize';
-  task_id: string;
-  payload: {
-    blockId: string;
-    content: string;
-  };
+	type: 'block.finalize';
+	task_id: string;
+	payload: {
+		blockId: string;
+		content: string;
+	};
 }
 
 export interface MessageCompleteEvent {
-  type: 'message.complete';
-  task_id: string;
-  payload: {
-    messageId: string;
-  };
+	type: 'message.complete';
+	task_id: string;
+	payload: {
+		messageId: string;
+	};
 }
 
 // ============================================================================
@@ -182,71 +186,124 @@ export interface MessageCompleteEvent {
  * Thinking delta from Ollama's native thinking field
  */
 export interface ThinkingDeltaEvent {
-  type: 'thinking.delta';
-  task_id: string;
-  payload: {
-    delta: string;
-  };
+	type: 'thinking.delta';
+	task_id: string;
+	payload: {
+		delta: string;
+	};
 }
 
 /**
  * Content delta from Ollama's native content field
  */
 export interface ContentDeltaEvent {
-  type: 'content.delta';
-  task_id: string;
-  payload: {
-    delta: string;
-  };
+	type: 'content.delta';
+	task_id: string;
+	payload: {
+		delta: string;
+	};
 }
 
 /**
  * Tool call with display tool detection
  */
 export interface NewToolCallEvent {
-  type: 'tool.call';
-  task_id: string;
-  payload: {
-    id: string;
-    name: string;
-    args: Record<string, unknown>;
-    isDisplayTool: boolean;
-  };
+	type: 'tool.call';
+	task_id: string;
+	payload: {
+		id: string;
+		name: string;
+		args: Record<string, unknown>;
+		isDisplayTool: boolean;
+	};
 }
 
 /**
  * Tool result
  */
 export interface NewToolResultEvent {
-  type: 'tool.result';
-  task_id: string;
-  payload: {
-    id: string;
-    result: unknown;
-    error?: string;
-  };
+	type: 'tool.result';
+	task_id: string;
+	payload: {
+		id: string;
+		result: unknown;
+		error?: string;
+	};
 }
 
 /**
  * New message complete event (empty payload)
  */
 export interface NewMessageCompleteEvent {
-  type: 'message.complete';
-  task_id: string;
-  payload: Record<string, never>;
+	type: 'message.complete';
+	task_id: string;
+	payload: Record<string, never>;
 }
 
 /**
  * New error event
  */
 export interface NewErrorEvent {
-  type: 'error';
-  task_id: string;
-  payload: {
-    message: string;
-    code?: string;
-  };
+	type: 'error';
+	task_id: string;
+	payload: {
+		message: string;
+		code?: string;
+	};
 }
 
+// ============================================================================
+// TODO TRACKING EVENTS (LangChain Deep Agents TodoListMiddleware)
+// ============================================================================
 
+/**
+ * Todo item structure
+ */
+export interface TodoItem {
+	id: string;
+	content: string;
+	status: 'pending' | 'in_progress' | 'completed';
+	order?: number;
+}
+
+/**
+ * Todo list update event - emitted when agent creates or updates todos
+ */
+export interface TodoUpdateEvent {
+	type: 'todo.update';
+	task_id: string;
+	timestamp?: number;
+	payload: {
+		todos: TodoItem[];
+		toolCallId: string;
+	};
+}
+
+/**
+ * Todo item started event - emitted when agent begins work on a todo
+ */
+export interface TodoItemStartedEvent {
+	type: 'todo.item.started';
+	task_id: string;
+	timestamp?: number;
+	payload: {
+		todoId: string;
+		todoText: string;
+		toolCallId?: string;
+	};
+}
+
+/**
+ * Todo item completed event - emitted when agent completes a todo
+ */
+export interface TodoItemCompletedEvent {
+	type: 'todo.item.completed';
+	task_id: string;
+	timestamp?: number;
+	payload: {
+		todoId: string;
+		todoText: string;
+		toolCallId?: string;
+	};
+}
 
