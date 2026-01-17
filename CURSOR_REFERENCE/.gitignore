@@ -1,0 +1,6 @@
+# Don't commit Cursor's compiled code (for reference only)
+cursor.ts
+cursor.css
+
+
+
