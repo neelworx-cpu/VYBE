@@ -5,34 +5,88 @@
 
 /**
  * VYBE LLM Model Service
- * Aggregates models from ALL providers (local + cloud) and provides unified model list
+ * Aggregates models from frontier cloud providers and provides unified model list
  *
- * Local providers: Ollama, LM Studio (fetched directly)
- * Cloud providers: Gemini, OpenRouter (fetched via MCP server)
+ * Supported providers: Gemini, OpenAI, Anthropic, Azure (via LangChain)
  */
 
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
-import { IVybeLLMMessageService } from './vybeLLMMessageService.js';
-import type { VybeLLMProviderName, OllamaModelResponse, OpenaiCompatibleModelResponse } from './vybeLLMMessageTypes.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
-import { isNative } from '../../../../base/common/platform.js';
-import { ipcRenderer } from '../../../../base/parts/sandbox/electron-browser/globals.js';
-
-// Extended provider names to include cloud providers
-export type VybeProviderName = VybeLLMProviderName | 'gemini' | 'openrouter' | 'openai' | 'anthropic';
+// Provider names for all supported LLM providers (frontier cloud models only)
+export type VybeProviderName = 'gemini' | 'openai' | 'anthropic' | 'azure';
 
 // Storage key for enabled models
 const ENABLED_MODELS_STORAGE_KEY = 'vybe.llm.enabledModels';
 
-export interface VybeModel {
-	id: string; // Format: "provider:modelName" (e.g., "ollama:llama2", "gemini-2.0-flash")
-	label: string; // Display name (e.g., "Llama 2", "Gemini 2.0 Flash")
+// ============================================================================
+// STATIC CLOUD MODELS - Curated list of cloud models
+// LangGraph calls providers directly via @langchain/* packages
+// ============================================================================
+const STATIC_CLOUD_MODELS: Array<{
+	id: string;
+	label: string;
 	provider: VybeProviderName;
-	providerLabel: string; // "Ollama", "Gemini", "OpenRouter"
-	isLocal: boolean;
+	providerLabel: string;
+	description: string;
+	hasThinking: boolean;
+}> = [
+		// Gemini Models - via @langchain/google-genai
+		// Gemini 2.5 (dynamic reasoning)
+		{ id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', provider: 'gemini', providerLabel: 'Gemini', description: 'Powerful, medium cost, heavy tasks.', hasThinking: true },
+		{ id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', provider: 'gemini', providerLabel: 'Gemini', description: 'Fast, low cost, simple tasks.', hasThinking: false },
+		// Gemini 3 Pro variants
+		{ id: 'gemini-3-pro-preview-high', label: 'Gemini 3 Pro High', provider: 'gemini', providerLabel: 'Gemini', description: "Google's latest flagship model, great for daily use.", hasThinking: true },
+		{ id: 'gemini-3-pro-preview-low', label: 'Gemini 3 Pro Low', provider: 'gemini', providerLabel: 'Gemini', description: "Google's latest flagship model, great for daily use.", hasThinking: true },
+		// Gemini 3 Flash variants
+		{ id: 'gemini-3-flash-preview-high', label: 'Gemini 3 Flash High', provider: 'gemini', providerLabel: 'Gemini', description: "Google's latest flagship model, great for daily use.", hasThinking: true },
+		{ id: 'gemini-3-flash-preview-medium', label: 'Gemini 3 Flash Medium', provider: 'gemini', providerLabel: 'Gemini', description: "Google's latest flagship model, great for daily use.", hasThinking: true },
+		{ id: 'gemini-3-flash-preview-low', label: 'Gemini 3 Flash Low', provider: 'gemini', providerLabel: 'Gemini', description: "Google's latest flagship model, great for daily use.", hasThinking: true },
+
+		// Azure OpenAI Models (via @langchain/openai AzureChatOpenAI)
+		{ id: 'azure/gpt-5.2', label: 'GPT-5.2 (Azure)', provider: 'azure', providerLabel: 'Azure OpenAI', description: 'Latest GPT-5.2 model', hasThinking: false },
+		{ id: 'azure/gpt-5.1', label: 'GPT-5.1 (Azure)', provider: 'azure', providerLabel: 'Azure OpenAI', description: 'GPT-5.1 model', hasThinking: false },
+
+		// OpenAI Direct API Models (via @langchain/openai ChatOpenAI)
+		// GPT 5.2 variants (supports xhigh)
+		{ id: 'openai/gpt-5.2-xhigh', label: 'GPT 5.2 XHigh', provider: 'openai', providerLabel: 'OpenAI', description: "OpenAI's latest flagship model. Good for planning, debugging, coding and more.", hasThinking: true },
+		{ id: 'openai/gpt-5.2-high', label: 'GPT 5.2 High', provider: 'openai', providerLabel: 'OpenAI', description: "OpenAI's latest flagship model. Good for planning, debugging, coding and more.", hasThinking: true },
+		{ id: 'openai/gpt-5.2-medium', label: 'GPT 5.2 Medium', provider: 'openai', providerLabel: 'OpenAI', description: "OpenAI's latest flagship model. Good for planning, debugging, coding and more.", hasThinking: true },
+		{ id: 'openai/gpt-5.2-low', label: 'GPT 5.2 Low', provider: 'openai', providerLabel: 'OpenAI', description: "OpenAI's latest flagship model. Good for planning, debugging, coding and more.", hasThinking: true },
+		// GPT 5.1 variants (no xhigh)
+		{ id: 'openai/gpt-5.1-high', label: 'GPT 5.1 High', provider: 'openai', providerLabel: 'OpenAI', description: "OpenAI's flagship model. Good for planning, debugging, coding and more.", hasThinking: true },
+		{ id: 'openai/gpt-5.1-medium', label: 'GPT 5.1 Medium', provider: 'openai', providerLabel: 'OpenAI', description: "OpenAI's flagship model. Good for planning, debugging, coding and more.", hasThinking: true },
+		{ id: 'openai/gpt-5.1-low', label: 'GPT 5.1 Low', provider: 'openai', providerLabel: 'OpenAI', description: "OpenAI's flagship model. Good for planning, debugging, coding and more.", hasThinking: true },
+		// Legacy models (keep for compatibility)
+		{ id: 'openai/o3', label: 'o3', provider: 'openai', providerLabel: 'OpenAI', description: 'Advanced reasoning model', hasThinking: true },
+		{ id: 'openai/o3-mini', label: 'o3-mini', provider: 'openai', providerLabel: 'OpenAI', description: 'Fast reasoning model', hasThinking: true },
+		{ id: 'openai/codex-5.1-max', label: 'Codex 5.1 Max', provider: 'openai', providerLabel: 'OpenAI', description: 'Maximum capability code model', hasThinking: false },
+		{ id: 'openai/codex-5.1', label: 'Codex 5.1', provider: 'openai', providerLabel: 'OpenAI', description: 'Advanced code generation', hasThinking: false },
+		{ id: 'openai/codex-5.1-mini', label: 'Codex 5.1 Mini', provider: 'openai', providerLabel: 'OpenAI', description: 'Fast code model', hasThinking: false },
+
+		// Anthropic Claude 4.5 Models (via @langchain/anthropic ChatAnthropic)
+		// Opus 4.5 - Regular (high effort, no thinking)
+		{ id: 'anthropic/claude-opus-4.5', label: 'Opus 4.5', provider: 'anthropic', providerLabel: 'Anthropic', description: "Anthropic's smartest model, great for difficult tasks (high effort)", hasThinking: false },
+		// Opus 4.5 - Thinking (high effort with extended thinking)
+		{ id: 'anthropic/claude-opus-4.5-thinking', label: 'Opus 4.5 (Thinking)', provider: 'anthropic', providerLabel: 'Anthropic', description: "Anthropic's smartest model with extended thinking (high effort)", hasThinking: true },
+		// Sonnet 4.5 - Regular (high effort, no thinking)
+		{ id: 'anthropic/claude-sonnet-4.5', label: 'Sonnet 4.5', provider: 'anthropic', providerLabel: 'Anthropic', description: "Anthropic's latest model, great for daily use (high effort)", hasThinking: false },
+		// Sonnet 4.5 - Thinking (high effort with extended thinking)
+		{ id: 'anthropic/claude-sonnet-4.5-thinking', label: 'Sonnet 4.5 (Thinking)', provider: 'anthropic', providerLabel: 'Anthropic', description: "Anthropic's latest model with extended thinking (high effort)", hasThinking: true },
+		// Haiku 4.5 - Regular (high effort, no thinking)
+		{ id: 'anthropic/claude-haiku-4.5', label: 'Haiku 4.5', provider: 'anthropic', providerLabel: 'Anthropic', description: "Anthropic's lightest model, cheaper and faster (high effort)", hasThinking: false },
+		// Haiku 4.5 - Thinking (high effort with extended thinking)
+		{ id: 'anthropic/claude-haiku-4.5-thinking', label: 'Haiku 4.5 (Thinking)', provider: 'anthropic', providerLabel: 'Anthropic', description: "Anthropic's lightest model with extended thinking (high effort)", hasThinking: true },
+	];
+
+export interface VybeModel {
+	id: string; // Format: "provider:modelName" (e.g., "gemini-2.5-pro", "openai/gpt-5.2")
+	label: string; // Display name (e.g., "Gemini 2.5 Pro", "GPT-5.2")
+	provider: VybeProviderName;
+	providerLabel: string; // "Gemini", "OpenAI", "Anthropic", "Azure"
+	isLocal: boolean; // Always false for frontier cloud models
 	hasThinking?: boolean; // For reasoning support
 	description?: string;
 	enabled: boolean; // Can be enabled/disabled in settings
@@ -59,14 +113,10 @@ export class VybeLLMModelService extends Disposable implements IVybeLLMModelServ
 	private modelsCache: VybeModel[] = [];
 	private enabledModels: Set<string> = new Set();
 	private isLoading = false;
-	private apiKeyCache: Map<string, { key: string; timestamp: number }> = new Map();
-	private readonly API_KEY_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes - cache API keys much longer
-	private apiKeyFetchInProgress: Map<string, Promise<void>> = new Map(); // Prevent concurrent fetches
 	private lastRefreshTime: number = 0;
 	private readonly CACHE_TTL_MS = 60000; // 1 minute cache
 
 	constructor(
-		@IVybeLLMMessageService private readonly llmService: IVybeLLMMessageService,
 		@ILogService private readonly logService: ILogService,
 		@IStorageService private readonly storageService: IStorageService,
 	) {
@@ -167,31 +217,19 @@ export class VybeLLMModelService extends Disposable implements IVybeLLMModelServ
 		this.isLoading = true;
 		const allModels: VybeModel[] = [];
 
-		// Fetch from LOCAL providers in parallel (Ollama, LM Studio)
-		const localProviders: VybeLLMProviderName[] = ['ollama', 'lmStudio'];
-		const localFetchPromises = localProviders.map(async (provider) => {
-			try {
-				this.logService.debug(`[VybeLLMModelService] Fetching models from ${provider}...`);
-				const models = await this.llmService.listModels(provider);
-				this.logService.debug(`[VybeLLMModelService] Found ${models.length} models from ${provider}`);
-				const vybeModels = models.map(model => this.convertLocalModelToVybeModel(model, provider));
-				allModels.push(...vybeModels);
-			} catch (error) {
-				const errorMessage = error instanceof Error ? error.message : String(error);
-				this.logService.debug(`[VybeLLMModelService] Failed to fetch models from ${provider}: ${errorMessage}`);
-			}
-		});
-
-		// Fetch from CLOUD providers via MCP server
-		const cloudFetchPromise = this.fetchCloudModels();
-
-		// Wait for all fetches
-		await Promise.allSettled([...localFetchPromises, cloudFetchPromise.then(models => allModels.push(...models))]);
+		// Fetch frontier cloud models only (GPT, Claude, Gemini)
+		const cloudModels = await this.fetchCloudModels();
+		allModels.push(...cloudModels);
 
 		// Apply enabled state from storage
+		// All models are cloud models, enabled by default
 		for (const model of allModels) {
-			// If no enabled models stored yet, enable all by default
 			if (this.enabledModels.size === 0) {
+				// First run: enable all by default
+				model.enabled = true;
+				this.enabledModels.add(model.id);
+			} else if (!this.enabledModels.has(model.id)) {
+				// New models: auto-enable them so they appear in dropdown
 				model.enabled = true;
 				this.enabledModels.add(model.id);
 			} else {
@@ -208,283 +246,27 @@ export class VybeLLMModelService extends Disposable implements IVybeLLMModelServ
 		this.lastRefreshTime = Date.now();
 		this.isLoading = false;
 
-		const localCount = allModels.filter(m => m.isLocal).length;
-		const cloudCount = allModels.filter(m => !m.isLocal).length;
-		this.logService.info(`[VybeLLMModelService] Model refresh complete: ${allModels.length} total (${localCount} local, ${cloudCount} cloud)`);
+		this.logService.info(`[VybeLLMModelService] Model refresh complete: ${allModels.length} frontier cloud models`);
 
 		this._onDidModelsChange.fire();
 	}
 
 	/**
-	 * Fetch cloud models from MCP server (Gemini, OpenRouter, etc.)
+	 * Get cloud models from static curated list
 	 */
 	private async fetchCloudModels(): Promise<VybeModel[]> {
-		try {
-			// Try to fetch from MCP server via IPC
-			// This requires the MCP server to be running with the list_models tool
-			if (!isNative || !ipcRenderer) {
-				this.logService.debug('[VybeLLMModelService] Not in native Electron environment, skipping MCP tool call');
-				return [];
-			}
+		this.logService.debug(`[VybeLLMModelService] Using ${STATIC_CLOUD_MODELS.length} static cloud models`);
 
-			// Step 1: Fetch Gemini API key from Supabase Edge Function and set it in MCP
-			await this.ensureApiKeysSet();
-
-			this.logService.debug('[VybeLLMModelService] Calling MCP tool: list_models');
-
-			const result = await ipcRenderer.invoke('vscode:vybeMcpCallTool', {
-				toolName: 'list_models',
-				params: { provider: 'all', refresh: false }
-			}) as { models?: any[]; providers?: any[]; totalCount?: number };
-
-			this.logService.debug(`[VybeLLMModelService] MCP tool result:`, {
-				hasModels: !!result?.models,
-				modelCount: result?.models?.length || 0,
-				totalCount: result?.totalCount
-			});
-
-			if (result && result.models && Array.isArray(result.models)) {
-				const cloudModels = result.models
-					.filter((m: any) => m.provider !== 'ollama' && m.provider !== 'lmStudio') // Local models already fetched
-					.map((m: any) => this.convertCloudModelToVybeModel(m));
-
-				this.logService.info(`[VybeLLMModelService] Fetched ${cloudModels.length} cloud models from MCP`);
-				return cloudModels;
-			} else {
-				this.logService.warn('[VybeLLMModelService] MCP tool returned invalid result:', result);
-			}
-		} catch (error) {
-			const errorMessage = error instanceof Error ? error.message : String(error);
-			this.logService.error(`[VybeLLMModelService] Failed to fetch cloud models from MCP: ${errorMessage}`);
-			if (error instanceof Error && error.stack) {
-				this.logService.error(error.stack);
-			}
-		}
-
-		// Fallback: return empty (cloud models not available)
-		return [];
-	}
-
-	/**
-	 * Ensure API keys are set in MCP process by fetching from Supabase Edge Function
-	 * Uses caching and prevents concurrent fetches to avoid rate limiting
-	 */
-	private async ensureApiKeysSet(): Promise<void> {
-		if (!isNative || !ipcRenderer) {
-			return;
-		}
-
-		const provider = 'gemini';
-		const now = Date.now();
-
-		// Check cache first - if valid, use it immediately
-		const cached = this.apiKeyCache.get(provider);
-		if (cached && (now - cached.timestamp) < this.API_KEY_CACHE_TTL_MS) {
-			this.logService.debug('[VybeLLMModelService] Using cached API key for Gemini');
-			// Still set it in MCP (in case MCP restarted), but don't fetch from Edge Function
-			try {
-				await ipcRenderer.invoke('vscode:vybeMcpCallTool', {
-					toolName: 'set_api_key',
-					params: {
-						provider: 'gemini',
-						api_key: cached.key,
-					},
-				});
-			} catch (error) {
-				// If setting fails, clear cache (but don't refetch immediately to avoid rate limits)
-				this.logService.debug('[VybeLLMModelService] Failed to set cached key');
-			}
-			return;
-		}
-
-		// Check if a fetch is already in progress - wait for it instead of starting a new one
-		const existingFetch = this.apiKeyFetchInProgress.get(provider);
-		if (existingFetch) {
-			this.logService.debug('[VybeLLMModelService] API key fetch already in progress, waiting...');
-			try {
-				await existingFetch;
-				// After waiting, check cache again (the other fetch might have populated it)
-				const newCached = this.apiKeyCache.get(provider);
-				if (newCached) {
-					this.logService.debug('[VybeLLMModelService] Using API key from concurrent fetch');
-					return;
-				}
-			} catch (error) {
-				// If the other fetch failed, we'll try our own
-				this.logService.debug('[VybeLLMModelService] Concurrent fetch failed, will try our own');
-			}
-		}
-
-		// Create a promise for this fetch and store it to prevent concurrent fetches
-		const fetchPromise = (async () => {
-			try {
-				// Fetch Gemini API key from Supabase Edge Function via main process (no CORS restrictions)
-				this.logService.debug('[VybeLLMModelService] Fetching Gemini API key from Edge Function via main process');
-
-				const result = await ipcRenderer.invoke('vscode:vybeFetchApiKey', {
-					provider: 'gemini'
-				}) as { apiKey?: string; error?: string };
-
-			// Handle 429 rate limit errors
-			if (result?.error && result.error.includes('429')) {
-				this.logService.warn('[VybeLLMModelService] Rate limited (429) when fetching API key. Using cached key if available.');
-				// If we have a cached key, use it even if expired
-				if (cached) {
-					this.logService.debug('[VybeLLMModelService] Using expired cached key due to rate limit');
-					try {
-						await ipcRenderer.invoke('vscode:vybeMcpCallTool', {
-							toolName: 'set_api_key',
-							params: {
-								provider: 'gemini',
-								api_key: cached.key,
-							},
-						});
-					} catch (error) {
-						// Ignore errors when setting expired cached key
-					}
-				}
-				return;
-			}
-
-			if (!result?.apiKey) {
-				this.logService.warn(`[VybeLLMModelService] No API key returned from Edge Function`);
-				// If we have a cached key, use it
-				if (cached) {
-					this.logService.debug('[VybeLLMModelService] Using expired cached key as fallback');
-					try {
-						await ipcRenderer.invoke('vscode:vybeMcpCallTool', {
-							toolName: 'set_api_key',
-							params: {
-								provider: 'gemini',
-								api_key: cached.key,
-							},
-						});
-					} catch (error) {
-						// Ignore errors
-					}
-				}
-				return;
-			}
-
-			const apiKey = result.apiKey;
-
-			// Cache the API key
-			this.apiKeyCache.set(provider, { key: apiKey, timestamp: now });
-
-			// Set the API key in MCP process via set_api_key command
-			this.logService.debug('[VybeLLMModelService] Setting Gemini API key in MCP process');
-
-			await ipcRenderer.invoke('vscode:vybeMcpCallTool', {
-				toolName: 'set_api_key',
-				params: {
-					provider: 'gemini',
-					api_key: apiKey,
-				},
-			});
-
-				this.logService.info('[VybeLLMModelService] Gemini API key set in MCP process');
-			} catch (error) {
-			const errorMessage = error instanceof Error ? error.message : String(error);
-			const errorStack = error instanceof Error ? error.stack : undefined;
-
-			// Check if it's a 429 error
-			if (errorMessage.includes('429') || errorMessage.includes('Too Many Requests')) {
-				this.logService.warn(`[VybeLLMModelService] Rate limited (429) when fetching API key: ${errorMessage}`);
-				// Use cached key if available
-				if (cached) {
-					this.logService.debug('[VybeLLMModelService] Using cached key due to rate limit error');
-					try {
-						await ipcRenderer.invoke('vscode:vybeMcpCallTool', {
-							toolName: 'set_api_key',
-							params: {
-								provider: 'gemini',
-								api_key: cached.key,
-							},
-						});
-					} catch (error) {
-						// Ignore errors
-					}
-				}
-			} else {
-				this.logService.warn(`[VybeLLMModelService] Failed to set API keys: ${errorMessage}`);
-				if (errorStack) {
-					this.logService.warn(`[VybeLLMModelService] Error stack: ${errorStack}`);
-				}
-			}
-				// Don't throw - continue even if API key fetch fails (models might still work if key was set before)
-			} finally {
-				// Remove from in-progress map
-				this.apiKeyFetchInProgress.delete(provider);
-			}
-		})();
-
-		// Store the promise to prevent concurrent fetches
-		this.apiKeyFetchInProgress.set(provider, fetchPromise);
-
-		// Wait for the fetch to complete
-		await fetchPromise;
-	}
-
-	/**
-	 * Convert cloud model response to VybeModel
-	 */
-	private convertCloudModelToVybeModel(model: {
-		id: string;
-		displayName?: string;
-		provider: string;
-		description?: string;
-		supportsReasoning?: boolean;
-	}): VybeModel {
-		const providerLabels: Record<string, string> = {
-			gemini: 'Gemini',
-			openrouter: 'OpenRouter',
-			openai: 'OpenAI',
-			anthropic: 'Anthropic',
-		};
-
-		return {
-			id: model.id,
-			label: model.displayName || model.id,
-			provider: model.provider as VybeProviderName,
-			providerLabel: providerLabels[model.provider] || model.provider,
+		return STATIC_CLOUD_MODELS.map(m => ({
+			id: m.id,
+			label: m.label,
+			provider: m.provider,
+			providerLabel: m.providerLabel,
 			isLocal: false,
-			hasThinking: model.supportsReasoning,
-			description: model.description,
+			hasThinking: m.hasThinking,
+			description: m.description,
 			enabled: true,
-		};
-	}
-
-	/**
-	 * Convert local model response to VybeModel
-	 */
-	private convertLocalModelToVybeModel(
-		model: OllamaModelResponse | OpenaiCompatibleModelResponse,
-		provider: VybeLLMProviderName
-	): VybeModel {
-		if ('name' in model) {
-			// Ollama model - strip tag (e.g., "llama2:latest" -> "llama2")
-			const modelName = model.name;
-			const baseName = modelName.split(':')[0]; // Remove tag part
-			return {
-				id: `ollama:${modelName}`, // Keep full name with tag for ID (needed for API calls)
-				label: baseName, // Show just base name in UI
-				provider: 'ollama',
-				providerLabel: 'Ollama',
-				isLocal: true,
-				hasThinking: baseName.includes('qwen') || baseName.includes('deepseek'),
-				enabled: true, // Will be updated by refreshModels
-			};
-		} else {
-			// OpenAI-compatible model (LM Studio)
-			return {
-				id: `${provider.toLowerCase()}:${model.id}`,
-				label: model.id,
-				provider,
-				providerLabel: 'LM Studio',
-				isLocal: true,
-				enabled: true, // Will be updated by refreshModels
-			};
-		}
+		}));
 	}
 }
 

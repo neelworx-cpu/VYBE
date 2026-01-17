@@ -6,15 +6,10 @@
 /**
  * VYBE LLM Contribution
  * Main entry point for all VYBE LLM contributions
+ * Note: LLM message service and commands removed - now using LangChain/LangGraph
  */
 
-// Register LLM message service
-import './vybeLLMMessageService.contribution.js';
-
-// Register LLM model service
+// Register LLM model service (still needed for model dropdown UI)
 import './vybeLLMModelService.contribution.js';
-
-// Register LLM commands
-import './vybeLLMCommands.contribution.js';
 
 
