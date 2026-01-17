@@ -5,7 +5,7 @@
 
 import { Disposable, DisposableStore } from '../../../../../../base/common/lifecycle.js';
 import { Emitter, Event } from '../../../../../../base/common/event.js';
-import { $, append, addDisposableListener, getWindow } from '../../../../../../base/browser/dom.js';
+import { $, append, addDisposableListener, getWindow, getDocument } from '../../../../../../base/browser/dom.js';
 import { AgentModeDropdown, type AgentMode } from './agentModeDropdown.js';
 import { ModelDropdown, type ModelDropdownState } from './modelDropdown.js';
 import { IVybeLLMModelService } from '../../../../vybeLLM/common/vybeLLMModelService.js';
@@ -17,9 +17,12 @@ import { ScrollbarVisibility } from '../../../../../../base/common/scrollable.js
 import { ImageAttachments } from './imageAttachments.js';
 import { FilesEditedToolbar } from './filesEditedToolbar.js';
 import { QuestionnaireToolbar } from './questionnaireToolbar.js';
+import { ComposerWarningPopup, type ComposerWarningOptions } from './composerWarningPopup.js';
 import { ISpeechService } from '../../../../../../workbench/contrib/speech/common/speechService.js';
 import { CancellationTokenSource } from '../../../../../../base/common/cancellation.js';
 import { IInstantiationService } from '../../../../../../platform/instantiation/common/instantiation.js';
+import { ICommandService } from '../../../../../../platform/commands/common/commands.js';
+import { IEditorService } from '../../../../../../workbench/services/editor/common/editorService.js';
 
 export class MessageComposer extends Disposable {
 	private readonly _onSend = this._register(new Emitter<string>());
@@ -81,6 +84,9 @@ export class MessageComposer extends Disposable {
 
 	// Questionnaire toolbar (separate component)
 	private questionnaireToolbar: QuestionnaireToolbar | null = null;
+
+	// Warning popup (for errors, warnings, info)
+	private warningPopup: ComposerWarningPopup | null = null;
 
 	// Context pills toolbar
 	private contextPillsToolbar: HTMLElement | null = null;
@@ -175,13 +181,14 @@ export class MessageComposer extends Disposable {
 		});
 
 		// Watch document.body
-		observer.observe(document.body, {
+		const targetDocument = getDocument(this.container);
+		observer.observe(targetDocument.body, {
 			attributes: true,
 			attributeFilter: ['class']
 		});
 
 		// Also watch .monaco-workbench element if it exists
-		const workbenchElement = document.querySelector('.monaco-workbench');
+		const workbenchElement = targetDocument.querySelector('.monaco-workbench');
 		if (workbenchElement) {
 			observer.observe(workbenchElement, {
 				attributes: true,
@@ -213,7 +220,8 @@ export class MessageComposer extends Disposable {
 		// Update agent dropdown background
 		if (this.agentDropdown) {
 			// Panel background
-			const panelBg = getComputedStyle(document.body).getPropertyValue('--vscode-editor-background').trim() || (isDarkTheme ? '#1e1f21' : '#ffffff');
+			const targetWindow = getWindow(this.container);
+			const panelBg = targetWindow.getComputedStyle(targetWindow.document.body).getPropertyValue('--vscode-editor-background').trim() || (isDarkTheme ? '#1e1f21' : '#ffffff');
 			this.agentDropdown.style.backgroundColor = panelBg;
 		}
 
@@ -223,11 +231,12 @@ export class MessageComposer extends Disposable {
 
 	private isDarkTheme(): boolean {
 		// Check multiple possible locations for theme info
-		const workbenchElement = document.querySelector('.monaco-workbench');
+		const targetDocument = getDocument(this.container);
+		const workbenchElement = targetDocument.querySelector('.monaco-workbench');
 
 		// Check body
-		const isDark = document.body.classList.contains('vs-dark') ||
-			document.body.classList.contains('hc-black') ||
+		const isDark = targetDocument.body.classList.contains('vs-dark') ||
+			targetDocument.body.classList.contains('hc-black') ||
 			// Also check workbench element
 			(workbenchElement?.classList.contains('vs-dark') ?? false) ||
 			(workbenchElement?.classList.contains('hc-black') ?? false);
@@ -321,8 +330,21 @@ export class MessageComposer extends Disposable {
 			composerOuter.appendChild(this.questionnaireToolbar.toolbar);
 		}
 
-		// Then append inputBox (toolbars will appear above due to absolute positioning with bottom: 100%)
-		composerOuter.appendChild(this.inputBox);
+		// Create wrapper for input box (matches structure from design)
+		const inputWrapper = $('.composer-input-blur-wrapper');
+		inputWrapper.style.position = 'relative';
+		inputWrapper.style.borderRadius = '6px';
+
+		// Add class to inputBox to match design
+		this.inputBox.classList.add('ai-input-full-input-box');
+		this.inputBox.classList.add('full-input-box');
+
+		// Move inputBox into wrapper
+		inputWrapper.appendChild(this.inputBox);
+		composerOuter.appendChild(inputWrapper);
+
+		// Initialize warning popup (positioned relative to wrapper)
+		this.warningPopup = this._register(new ComposerWarningPopup(inputWrapper));
 
 		return composerOuter;
 	}
@@ -417,7 +439,8 @@ export class MessageComposer extends Disposable {
 			const plainText = e.clipboardData?.getData('text/plain') || '';
 
 			// Use execCommand to insert text - this preserves undo history!
-			document.execCommand('insertText', false, plainText);
+			const targetDocument = getDocument(this.container);
+			targetDocument.execCommand('insertText', false, plainText);
 
 			// Trigger input event to update placeholder
 			this.updatePlaceholderVisibility();
@@ -438,15 +461,17 @@ export class MessageComposer extends Disposable {
 			// Cmd+Z (Mac) or Ctrl+Z (Windows) for undo
 			if (e.key === 'z' && (e.metaKey || e.ctrlKey) && !e.shiftKey) {
 				e.preventDefault();
-				document.execCommand('undo');
+				const targetDocument = getDocument(this.container);
+				targetDocument.execCommand('undo');
 				return;
 			}
 
 			// Cmd+Shift+Z (Mac) or Ctrl+Y (Windows) for redo
 			if ((e.key === 'z' && (e.metaKey || e.ctrlKey) && e.shiftKey) ||
-			    (e.key === 'y' && e.ctrlKey)) {
+				(e.key === 'y' && e.ctrlKey)) {
 				e.preventDefault();
-				document.execCommand('redo');
+				const targetDocument = getDocument(this.container);
+				targetDocument.execCommand('redo');
 				return;
 			}
 
@@ -580,7 +605,9 @@ export class MessageComposer extends Disposable {
 		this.agentDropdown.style.cursor = 'pointer';
 		this.agentDropdown.style.border = 'none';
 		// Default background - panel color
-		const panelBg = getComputedStyle(document.body).getPropertyValue('--vscode-editor-background').trim() || (isDarkTheme ? '#1e1f21' : '#ffffff');
+		const targetWindow = getWindow(this.container);
+		const targetDocument = getDocument(this.container);
+		const panelBg = targetWindow.getComputedStyle(targetDocument.body).getPropertyValue('--vscode-editor-background').trim() || (isDarkTheme ? '#1e1f21' : '#ffffff');
 		this.agentDropdown.style.backgroundColor = panelBg;
 		this.agentDropdown.style.transition = 'background-color 0.15s ease';
 
@@ -1132,7 +1159,8 @@ export class MessageComposer extends Disposable {
 			} else if (node.nodeType === Node.ELEMENT_NODE) {
 				// For block elements like <p>, <div>, add newline before and after
 				const elem = node as HTMLElement;
-				const display = window.getComputedStyle(elem).display;
+				const targetWindow = getWindow(this.container);
+				const display = targetWindow.getComputedStyle(elem).display;
 				if (display === 'block' && text && !text.endsWith('\n')) {
 					text += '\n';
 				}
@@ -1207,7 +1235,8 @@ export class MessageComposer extends Disposable {
 
 				// Add <br> after each line except the last
 				if (index < lines.length - 1) {
-					const br = document.createElement('br');
+					const targetDocument = getDocument(this.container);
+					const br = targetDocument.createElement('br');
 					this.textInput!.appendChild(br);
 				}
 			});
@@ -1217,7 +1246,8 @@ export class MessageComposer extends Disposable {
 			void this.textInput.scrollHeight;
 
 			// Wait for next frame to ensure layout is complete
-			requestAnimationFrame(() => {
+			const targetWindow = getWindow(this.container);
+			targetWindow.requestAnimationFrame(() => {
 				// Reapply readonly mode constraints if needed
 				if (wasReadonly && this.textInput) {
 					this.textInput.style.maxHeight = originalMaxHeight || '78px';
@@ -1249,10 +1279,12 @@ export class MessageComposer extends Disposable {
 			if (!this.isReadonly) {
 				this.textInput.focus();
 				// Move cursor to end
-				const range = document.createRange();
+				const targetWindow = getWindow(this.container);
+				const targetDocument = getDocument(this.container);
+				const range = targetDocument.createRange();
 				range.selectNodeContents(this.textInput);
 				range.collapse(false);
-				const selection = window.getSelection();
+				const selection = targetWindow.getSelection();
 				selection?.removeAllRanges();
 				selection?.addRange(range);
 			}
@@ -1501,10 +1533,12 @@ export class MessageComposer extends Disposable {
 			this.textInput.focus();
 
 			// Move cursor to end
-			const range = document.createRange();
+			const targetWindow = getWindow(this.container);
+			const targetDocument = getDocument(this.container);
+			const range = targetDocument.createRange();
 			range.selectNodeContents(this.textInput);
 			range.collapse(false);
-			const selection = window.getSelection();
+			const selection = targetWindow.getSelection();
 			selection?.removeAllRanges();
 			selection?.addRange(range);
 		}
@@ -1571,7 +1605,12 @@ export class MessageComposer extends Disposable {
 					// Service not available - continue without it
 				}
 			}
-			this.modelDropdown = this._register(new ModelDropdown(this.autoDropdownElement, modelService));
+			this.modelDropdown = this._register(new ModelDropdown(
+				this.autoDropdownElement,
+				modelService,
+				this._instantiationService?.invokeFunction(accessor => accessor.get(ICommandService)),
+				this._instantiationService?.invokeFunction(accessor => accessor.get(IEditorService))
+			));
 
 			// Listen for state changes
 			this._register(this.modelDropdown.onStateChange(state => {
@@ -1591,6 +1630,18 @@ export class MessageComposer extends Disposable {
 	private updateModelLabel(): void {
 		if (!this.autoLabelElement) {
 			return;
+		}
+
+		// Get parent container for icon placement
+		const labelContainer = this.autoLabelElement.parentElement;
+		if (!labelContainer) {
+			return;
+		}
+
+		// Remove existing thinking icon if present
+		const existingIcon = labelContainer.querySelector('.model-thinking-icon');
+		if (existingIcon) {
+			existingIcon.remove();
 		}
 
 		// Update label based on state
@@ -1619,6 +1670,7 @@ export class MessageComposer extends Disposable {
 						if (this.modelDropdown) {
 							(this.modelDropdown as any)._onStateChange.fire({ ...this.modelState });
 						}
+						// Do NOT add thinking icon in composer model selection (user requested)
 					} else {
 						this.autoLabelElement.textContent = 'No models';
 					}
@@ -1637,6 +1689,7 @@ export class MessageComposer extends Disposable {
 				}
 			} else {
 				this.autoLabelElement.textContent = selectedModel.label;
+				// Do NOT add thinking icon in composer model selection (user requested)
 			}
 		}
 
@@ -1645,6 +1698,7 @@ export class MessageComposer extends Disposable {
 			this.maxBadge.style.display = this.modelState.isMaxModeEnabled ? 'flex' : 'none';
 		}
 	}
+
 
 	private updateAgentLabel(mode: AgentMode): void {
 		// Update the agent dropdown label and icon to reflect the selected mode
@@ -2522,6 +2576,97 @@ export class MessageComposer extends Disposable {
 
 	public getInputBox(): HTMLElement | null {
 		return this.inputBox;
+	}
+
+	/**
+	 * Show a warning/error/info popup above the composer
+	 */
+	public showWarning(options: ComposerWarningOptions): void {
+		if (this.warningPopup) {
+			this.warningPopup.show(options);
+		}
+	}
+
+	/**
+	 * Hide the warning popup
+	 */
+	public hideWarning(): void {
+		if (this.warningPopup) {
+			this.warningPopup.hide();
+		}
+	}
+
+	/**
+	 * Test method for warning popup - can be called from console
+	 * Usage: (window as any).testComposerWarning?.('error' | 'warning' | 'info')
+	 */
+	public testWarning(type: 'error' | 'warning' | 'info' = 'error'): void {
+		const testMessages = {
+			error: {
+				title: 'Connection Error',
+				message: 'Connection failed. If the problem persists, please check your internet connection or VPN',
+				icon: 'error' as const,
+				buttons: [
+					{
+						label: 'Copy Request Details (test-id-12345)',
+						variant: 'tertiary' as const,
+						action: () => {
+							console.log('Copy button clicked');
+							this.hideWarning();
+						}
+					},
+					{
+						label: 'Try again',
+						variant: 'secondary' as const,
+						keybinding: '⌘⏎',
+						action: () => {
+							console.log('Try again button clicked');
+							this.hideWarning();
+						}
+					}
+				]
+			},
+			warning: {
+				title: 'Warning',
+				message: 'This action may have unintended side effects. Please review before proceeding.',
+				icon: 'warning' as const,
+				buttons: [
+					{
+						label: 'Cancel',
+						variant: 'tertiary' as const,
+						action: () => {
+							console.log('Cancel clicked');
+							this.hideWarning();
+						}
+					},
+					{
+						label: 'Continue',
+						variant: 'primary' as const,
+						action: () => {
+							console.log('Continue clicked');
+							this.hideWarning();
+						}
+					}
+				]
+			},
+			info: {
+				title: 'Information',
+				message: 'Operation completed successfully. All files have been saved.',
+				icon: 'info' as const,
+				buttons: [
+					{
+						label: 'OK',
+						variant: 'secondary' as const,
+						action: () => {
+							console.log('OK clicked');
+							this.hideWarning();
+						}
+					}
+				]
+			}
+		};
+
+		this.showWarning(testMessages[type]);
 	}
 
 	override dispose(): void {

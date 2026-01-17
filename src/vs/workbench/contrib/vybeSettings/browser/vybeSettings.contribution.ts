@@ -11,10 +11,7 @@ import { MenuRegistry, MenuId, registerAction2, Action2 } from '../../../../plat
 import { localize, localize2 } from '../../../../nls.js';
 import { IInstantiationService, ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
 import { IEditorService } from '../../../services/editor/common/editorService.js';
-import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
-import { CancellationToken } from '../../../../base/common/cancellation.js';
-import { getExtHostIndexingProxy } from '../../../api/browser/mainThreadIndexing.js';
 
 import { VybeSettingsEditor } from './vybeSettingsEditor.js';
 import { VybeSettingsEditorInput } from './vybeSettingsEditorInput.js';
@@ -89,38 +86,17 @@ registerAction2(class VybeLocalIndexE2ETestAction extends Action2 {
 	}
 
 	async run(accessor: ServicesAccessor): Promise<void> {
-		const workspaceService = accessor.get(IWorkspaceContextService);
 		const logService = accessor.get(ILogService);
-		const extHostIndexing = getExtHostIndexingProxy();
 
-		if (!extHostIndexing) {
-			const err = new Error('ExtHostIndexing proxy is not available');
-			logService.error('[vybe E2E] ExtHostIndexing proxy missing', err);
-			throw err;
-		}
-
-		const workspace = workspaceService.getWorkspace();
-		if (!workspace.folders.length) {
-			const err = new Error('No workspace folder roots to index');
-			logService.error('[vybe E2E] no folder roots', err.message);
-			throw err;
-		}
-
-		const workspaceId = workspace.id ?? workspace.folders[0].uri.fsPath ?? workspace.folders[0].uri.toString();
-		const roots = workspace.folders.map(f => f.uri.toJSON());
-
-		logService.info('[vybe E2E] starting', { workspaceId, rootCount: roots.length });
-
-		try {
-			await extHostIndexing.$devRunE2EIndexTest(workspaceId, roots, CancellationToken.None);
-		} catch (err) {
-			logService.error('[vybe E2E] runE2ETest failed', err);
-			throw err;
-		}
+		// This command relied on $devRunE2EIndexTest which was part of local indexing
+		// Local indexing has been removed - cloud indexing is now the only method
+		const err = new Error('This dev command is not available with cloud indexing. Local indexing has been removed.');
+		logService.warn('[vybe E2E] Local indexing dev command not available', err.message);
+		throw err;
 	}
 });
 
-// Dev-only command to query similar chunks using the local embeddings store.
+// Dev-only command to query similar chunks - not available with cloud indexing
 registerAction2(class VybeLocalIndexDevQuerySimilarChunksAction extends Action2 {
 	constructor() {
 		super({
@@ -131,41 +107,13 @@ registerAction2(class VybeLocalIndexDevQuerySimilarChunksAction extends Action2 
 	}
 
 	async run(accessor: ServicesAccessor): Promise<void> {
-		const workspaceService = accessor.get(IWorkspaceContextService);
 		const logService = accessor.get(ILogService);
-		const extHostIndexing = getExtHostIndexingProxy();
 
-		if (!extHostIndexing) {
-			const err = new Error('ExtHostIndexing proxy is not available');
-			logService.error('[vybe devQuerySimilarChunks] ExtHostIndexing proxy missing', err);
-			throw err;
-		}
-
-		const workspace = workspaceService.getWorkspace();
-		if (!workspace.folders.length) {
-			const err = new Error('No workspace folder roots to query');
-			logService.error('[vybe devQuerySimilarChunks] no folder roots', err.message);
-			throw err;
-		}
-
-		const workspaceId = workspace.id ?? workspace.folders[0].uri.fsPath ?? workspace.folders[0].uri.toString();
-		const query = 'navigation header';
-		const topK = 10;
-
-		logService.info('[vybe devQuerySimilarChunks] starting', { workspaceId, topK, query });
-
-		try {
-			const hits = await extHostIndexing.$querySimilarChunksInternal(workspaceId, query, topK);
-			logService.info('[vybe devQuerySimilarChunks] completed', {
-				workspaceId,
-				topK,
-				resultCount: hits.length,
-				hits
-			});
-		} catch (err) {
-			logService.error('[vybe devQuerySimilarChunks] failed', err);
-			throw err;
-		}
+		// This command relied on $querySimilarChunksInternal which was part of local indexing
+		// Local indexing has been removed - use the codebase_search tool for cloud-based search
+		const err = new Error('This dev command is not available with cloud indexing. Use codebase_search tool instead.');
+		logService.warn('[vybe devQuerySimilarChunks] Local indexing dev command not available', err.message);
+		throw err;
 	}
 });
 

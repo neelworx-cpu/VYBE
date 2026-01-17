@@ -119,3 +119,22 @@
 .monaco-workbench .sidebar.pane-composite-part > .title.has-composite-bar > .title-actions .monaco-action-bar .action-item {
 	max-width: 150px;
 }
+
+/* Clamp webviews/iframes inside the left Side Bar to prevent 1–3px overflow */
+.monaco-workbench .part.sidebar iframe.webview,
+.monaco-workbench .part.sidebar .webview {
+	width: 100% !important;
+	max-width: 100%;
+	box-sizing: border-box;
+	display: block;
+}
+
+/* Allow flex children in pane bodies to shrink rather than enforce min-content width */
+.monaco-workbench .part.sidebar .pane-body > * {
+	min-width: 0;
+}
+
+/* Prevent fractional-pixel bleed on the iframe edge */
+.monaco-workbench .part.sidebar iframe.webview {
+	overflow: clip;
+}

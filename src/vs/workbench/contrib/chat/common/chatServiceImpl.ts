@@ -45,7 +45,7 @@ import { IChatRequestVariableEntry } from './chatVariableEntries.js';
 import { ChatAgentLocation, ChatConfiguration, ChatModeKind } from './constants.js';
 import { ChatMessageRole, IChatMessage } from './languageModels.js';
 import { ILanguageModelToolsService } from './languageModelToolsService.js';
-import { CONFIG_ENABLE_LOCAL_EMBEDDINGS, CONFIG_ENABLE_LOCAL_INDEXING, CONFIG_ENABLE_LOCAL_SEMANTIC_SEARCH } from '../../../services/indexing/common/indexingConfiguration.js';
+import { CONFIG_CLOUD_INDEXING_ENABLED } from '../../../services/indexing/common/indexingConfiguration.js';
 
 const serializedChatKey = 'interactive.sessions';
 
@@ -133,14 +133,12 @@ export class ChatService extends Disposable implements IChatService {
 	}
 
 	private getVybeFeatureFlags() {
-		const localIndexing = !!this.configurationService.getValue<boolean>(CONFIG_ENABLE_LOCAL_INDEXING);
-		const semanticEnabled = localIndexing && !!this.configurationService.getValue<boolean>(CONFIG_ENABLE_LOCAL_SEMANTIC_SEARCH);
-		const embeddingsEnabled = localIndexing && !!this.configurationService.getValue<boolean>(CONFIG_ENABLE_LOCAL_EMBEDDINGS);
+		const cloudIndexing = !!this.configurationService.getValue<boolean>(CONFIG_CLOUD_INDEXING_ENABLED);
 		return {
-			enable_ide_context: localIndexing,
-			local_indexing_enabled: localIndexing,
-			semantic_enabled: semanticEnabled,
-			embeddings_enabled: embeddingsEnabled
+			enable_ide_context: cloudIndexing,
+			cloud_indexing_enabled: cloudIndexing,
+			semantic_enabled: cloudIndexing,
+			embeddings_enabled: cloudIndexing
 		};
 	}
 

@@ -207,8 +207,11 @@ export class OverlayWebview extends Disposable implements IOverlayWebview {
 
 		this._container.setTop(frameRect.top - containerRect.top - parentBorderTop);
 		this._container.setLeft(frameRect.left - containerRect.left - parentBorderLeft);
-		this._container.setWidth(dimension ? dimension.width : frameRect.width);
-		this._container.setHeight(dimension ? dimension.height : frameRect.height);
+		// Use client sizes to avoid including part borders/shadows that cause 1–3px overflow in the sidebar
+		const targetWidth = dimension ? dimension.width : element.clientWidth;
+		const targetHeight = dimension ? dimension.height : element.clientHeight;
+		this._container.setWidth(targetWidth);
+		this._container.setHeight(targetHeight);
 
 		if (clippingContainer) {
 			const { top, left, right, bottom } = computeClippingRect(frameRect, clippingContainer);

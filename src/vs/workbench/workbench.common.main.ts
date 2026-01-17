@@ -437,6 +437,9 @@ import './contrib/vybeChat/browser/contribution/vybeChat.contribution.js';
 // VYBE Settings
 import './contrib/vybeSettings/browser/vybeSettings.contribution.js';
 
+// VYBE Agent (in-IDE agent, replaces MCP subprocess)
+import './contrib/vybeAgent/browser/vybeAgent.contribution.js';
+
 // VYBE Indexing
 import './contrib/indexing/browser/indexing.contribution.js';
 

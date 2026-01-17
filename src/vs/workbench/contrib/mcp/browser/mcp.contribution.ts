@@ -43,9 +43,7 @@ import { McpServerEditor } from './mcpServerEditor.js';
 import { McpServerEditorInput } from './mcpServerEditorInput.js';
 import { McpServersViewsContribution } from './mcpServersView.js';
 import { MCPContextsInitialisation, McpWorkbenchService } from './mcpWorkbenchService.js';
-import { VybeMcpToolContribution } from '../common/vybeMcpToolContribution.js';
-import { VybeLocalIndexDevSmokeTest } from './vybeLocalIndexDevSmokeTest.js';
-import './contribution/vybeMcpToolApprovalService.contribution.js';
+// Note: VYBE MCP tools removed - now using LangChain/LangGraph
 
 registerSingleton(IMcpRegistry, McpRegistry, InstantiationType.Delayed);
 registerSingleton(IMcpService, McpService, InstantiationType.Delayed);
@@ -64,8 +62,7 @@ registerWorkbenchContribution2('mcpContextKeys', McpContextKeysController, Workb
 registerWorkbenchContribution2('mcpLanguageFeatures', McpLanguageFeatures, WorkbenchPhase.Eventually);
 registerWorkbenchContribution2('mcpResourceFilesystem', McpResourceFilesystem, WorkbenchPhase.BlockRestore);
 registerWorkbenchContribution2(McpLanguageModelToolContribution.ID, McpLanguageModelToolContribution, WorkbenchPhase.AfterRestored);
-registerWorkbenchContribution2(VybeMcpToolContribution.ID, VybeMcpToolContribution, WorkbenchPhase.AfterRestored);
-registerWorkbenchContribution2('vybeLocalIndexDevSmokeTest', VybeLocalIndexDevSmokeTest, WorkbenchPhase.Eventually);
+// Note: VybeMcpToolContribution and VybeLocalIndexDevSmokeTest removed - now using LangChain/LangGraph
 
 registerAction2(ListMcpServerCommand);
 registerAction2(McpServerOptionsCommand);

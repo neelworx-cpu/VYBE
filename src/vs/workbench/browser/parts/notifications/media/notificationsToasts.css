@@ -23,10 +23,15 @@
 
 .monaco-workbench > .notifications-toasts .notification-toast-container {
 	overflow: hidden; /* this ensures that the notification toast does not shine through */
+	max-width: 340px; /* Maximum width for notification toasts */
+	width: 340px; /* Fixed width to match max-width */
+	font-family: "Segoe WPC", "Segoe UI", sans-serif; /* Cursor notification font family */
 }
 
 .monaco-workbench > .notifications-toasts .notification-toast-container > .notification-toast {
-	margin: 4px; /* enables separation and drop shadows around toasts */
+	margin: 6px; /* 6px margin to match Cursor style */
+	width: calc(100% - 12px); /* Account for 6px margin on each side (6px * 2 = 12px) */
+	box-sizing: border-box; /* Include padding and border in width calculation */
 	transform: translate3d(0px, 100%, 0px); /* move the notification 50px to the bottom (to prevent bleed through) */
 	opacity: 0; /*  fade the toast in */
 	transition:	transform 300ms ease-out, opacity 300ms ease-out;

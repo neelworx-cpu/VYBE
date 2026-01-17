@@ -285,22 +285,19 @@ export function renderMarkdown(markdown: IMarkdownString, options: MarkdownRende
 		}));
 	}
 
-	// Remove/disable inputs
+	// Remove ALL inputs including checkboxes
+	// VYBE: Markdown checkboxes are disabled - use write_todos tool instead
 	// eslint-disable-next-line no-restricted-syntax
 	for (const input of [...outElement.getElementsByTagName('input')]) {
-		if (input.attributes.getNamedItem('type')?.value === 'checkbox') {
-			input.setAttribute('disabled', '');
-		} else {
-			if (options.sanitizerConfig?.replaceWithPlaintext) {
-				const replacement = convertTagToPlaintext(input);
-				if (replacement) {
-					input.parentElement?.replaceChild(replacement, input);
-				} else {
-					input.remove();
-				}
+		if (options.sanitizerConfig?.replaceWithPlaintext) {
+			const replacement = convertTagToPlaintext(input);
+			if (replacement) {
+				input.parentElement?.replaceChild(replacement, input);
 			} else {
 				input.remove();
 			}
+		} else {
+			input.remove();
 		}
 	}
 
@@ -528,7 +525,7 @@ function sanitizeRenderedMarkdown(
 
 export const allowedMarkdownHtmlTags = Object.freeze([
 	...domSanitize.basicMarkupHtmlTags,
-	'input', // Allow inputs for rendering checkboxes. Other types of inputs are removed and the inputs are always disabled
+	// VYBE: 'input' removed - checkboxes disabled, use write_todos tool instead
 ]);
 
 export const allowedMarkdownHtmlAttributes = Object.freeze<Array<string | domSanitize.SanitizeAttributeRule>>([

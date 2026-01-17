@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { $, addDisposableListener } from '../../../../../../base/browser/dom.js';
+import { $, addDisposableListener, getWindow, getActiveWindow, getDocument } from '../../../../../../base/browser/dom.js';
 import { Disposable } from '../../../../../../base/common/lifecycle.js';
 import { Emitter } from '../../../../../../base/common/event.js';
 import { MessageComposer, AgentMode, ModelDropdownState } from '../composer/messageComposer.js';
@@ -11,7 +11,7 @@ import { ContextDropdown } from '../composer/contextDropdown.js';
 import { UsageDropdown } from '../composer/usageDropdown.js';
 import { ISpeechService } from '../../../../../contrib/speech/common/speechService.js';
 import { IInstantiationService } from '../../../../../../platform/instantiation/common/instantiation.js';
-import { IVybeChatContentPart, IVybeChatContentData } from '../../contentParts/vybeChatContentPart.js';
+import type { IVybeChatContentPart, IVybeChatContentData, IVybeChatPlanDocumentContent, IVybeChatListedContent, IVybeChatDirectoryContent, IVybeChatGreppedContent, IVybeChatMarkdownContent, IVybeChatCodeBlockContent, IVybeChatThinkingContent, IVybeChatErrorContent, IVybeChatProgressContent, IVybeChatTodoContent, IVybeChatTodoItemContent, IVybeChatPhaseIndicatorContent, IVybeChatToolContent, VybeChatContentPartKind } from '../../contentParts/vybeChatContentPart.js';
 import { VybeChatMarkdownPart } from '../../contentParts/vybeChatMarkdownPart.js';
 import { VybeChatThinkingPart } from '../../contentParts/vybeChatThinkingPart.js';
 import { VybeChatCodeBlockPart } from '../../contentParts/vybeChatCodeBlockPart.js';
@@ -19,9 +19,14 @@ import { VybeChatTextEditPart } from '../../contentParts/vybeChatTextEditPart.js
 import { VybeChatTerminalPart } from '../../contentParts/vybeChatTerminalPart.js';
 import { VybeChatReadingFilesPart, IVybeChatReadingFilesContent } from '../../contentParts/vybeChatReadingFilesPart.js';
 import { VybeChatSearchedPart, IVybeChatSearchedContent } from '../../contentParts/vybeChatSearchedPart.js';
+import { VybeChatGreppedPart } from '../../contentParts/vybeChatGreppedPart.js';
 import { VybeChatExploredPart, IVybeChatExploredContent, ExploredAction } from '../../contentParts/vybeChatExploredPart.js';
+import { VybeChatListedPart } from '../../contentParts/vybeChatListedPart.js';
 import { VybeChatPlanDocumentPart } from '../../contentParts/vybeChatPlanDocumentPart.js';
-import type { IVybeChatPlanDocumentContent, IVybeChatListedContent, IVybeChatDirectoryContent, IVybeChatMarkdownContent, IVybeChatCodeBlockContent, IVybeChatThinkingContent, VybeChatContentPartKind } from '../../contentParts/vybeChatContentPart.js';
+import { VybeChatTodoPart } from '../../contentParts/vybeChatTodoPart.js';
+import { VybeChatTodoItemPart } from '../../contentParts/vybeChatTodoItemPart.js';
+import { VybeChatPhaseIndicatorPart } from '../../contentParts/vybeChatPhaseIndicatorPart.js';
+import { VybeChatToolPart } from '../../contentParts/vybeChatToolPart.js';
 import type { ContentBlock } from '../../../common/streaming_event_types.js';
 import { IMarkdownRendererService } from '../../../../../../platform/markdown/browser/markdownRenderer.js';
 import { IModelService } from '../../../../../../editor/common/services/model.js';
@@ -30,6 +35,7 @@ import { IClipboardService } from '../../../../../../platform/clipboard/common/c
 import { IEditorService } from '../../../../../services/editor/common/editorService.js';
 import { IFileService } from '../../../../../../platform/files/common/files.js';
 import { INotificationService } from '../../../../../../platform/notification/common/notification.js';
+import { IWorkspaceContextService } from '../../../../../../platform/workspace/common/workspace.js';
 
 export interface ContextPillData {
 	id: string;
@@ -80,9 +86,27 @@ export class MessagePage extends Disposable {
 	private contentParts: IVybeChatContentPart[] = [];
 	private contentPartsData: IVybeChatContentData[] = []; // Track original data for grouping
 
+	// Block-based markdown tracking - ensures each markdown block is independent
+	private markdownBlockCounter = 0; // Auto-incrementing counter for unique markdown block IDs
+	private currentMarkdownBlockId: string | null = null; // Current active markdown block ID
+
+	/**
+	 * Get content parts data (for checking existing parts)
+	 */
+	public getContentPartsData(): IVybeChatContentData[] {
+		return this.contentPartsData;
+	}
+
 	// NEW: Block-based content model (Production architecture)
 	private blocks: Map<string, ContentBlock> = new Map(); // Track blocks by ID
 	private blockToPartMap: Map<string, IVybeChatContentPart> = new Map(); // Map block ID to content part
+
+	// Phase 1: Unified message wrapper tracking (Cursor UI alignment)
+	private messagePartIndex: number = 0; // Auto-incrementing index for each content part
+	private partToWrapperMap: Map<IVybeChatContentPart, HTMLElement> = new Map(); // Map part to its wrapper element
+
+	// Phase 3: Message grouping - not currently used
+	// Message groups are only needed for "Explored" summaries, handled by VybeChatExploredPart
 
 	private markdownRendererService: IMarkdownRendererService | undefined;
 	private instantiationService: IInstantiationService | undefined;
@@ -92,6 +116,7 @@ export class MessagePage extends Disposable {
 	private editorService: IEditorService | undefined;
 	private fileService: IFileService | undefined;
 	private notificationService: INotificationService | undefined;
+	private workspaceContextService: IWorkspaceContextService | undefined;
 	private codeBlockIndex: number = 0;
 
 	private _onStop = this._register(new Emitter<void>());
@@ -107,7 +132,8 @@ export class MessagePage extends Disposable {
 		clipboardService?: IClipboardService,
 		editorService?: IEditorService,
 		fileService?: IFileService,
-		notificationService?: INotificationService
+		notificationService?: INotificationService,
+		workspaceContextService?: IWorkspaceContextService
 	) {
 		super();
 		this.options = options;
@@ -119,6 +145,7 @@ export class MessagePage extends Disposable {
 		this.editorService = editorService;
 		this.fileService = fileService;
 		this.notificationService = notificationService;
+		this.workspaceContextService = workspaceContextService;
 		this.pageElement = this.createPage(options);
 		parent.appendChild(this.pageElement);
 	}
@@ -206,7 +233,8 @@ export class MessagePage extends Disposable {
 
 			// Restore content immediately (composer cleared it after firing onSend)
 			// Use requestAnimationFrame to ensure clearInput has completed
-			requestAnimationFrame(() => {
+			const targetWindow = this.pageElement ? getWindow(this.pageElement) : getActiveWindow();
+			targetWindow.requestAnimationFrame(() => {
 				// Restore the content to the composer
 				if (this.options.content) {
 					this.composer.setInputText(this.options.content);
@@ -272,13 +300,14 @@ export class MessagePage extends Disposable {
 		page.appendChild(this.messageHeader);
 
 		// AI response area (scrollable within page, initially empty)
+		// NO padding here - each composer-rendered-message has its own padding (matches Cursor)
 		this.aiResponseArea = $('div');
 		this.aiResponseArea.className = 'vybe-chat-response-area';
 		this.aiResponseArea.setAttribute('data-response-for', options.messageId);
 		this.aiResponseArea.style.cssText = `
 			flex: 1;
 			overflow: auto;
-			padding: 0 18px 16px 18px;
+			padding: 0 0 16px 0;
 			box-sizing: border-box;
 		`;
 		page.appendChild(this.aiResponseArea);
@@ -309,7 +338,8 @@ export class MessagePage extends Disposable {
 					this.switchToReadonlyMode();
 				}
 			};
-			this._register(addDisposableListener(document, 'click', clickOutsideHandler));
+			const targetDocument = this.pageElement ? getDocument(this.pageElement) : getActiveWindow().document;
+			this._register(addDisposableListener(targetDocument, 'click', clickOutsideHandler));
 		}, 100);
 	}
 
@@ -333,6 +363,84 @@ export class MessagePage extends Disposable {
 
 	public getResponseArea(): HTMLElement {
 		return this.aiResponseArea;
+	}
+
+	public getMessageHeader(): HTMLElement {
+		return this.messageHeader;
+	}
+
+	/**
+	 * Get a content part by its kind.
+	 * Used by streaming coordinator to check typewriter status.
+	 */
+	public getContentPartByKind(kind: string): IVybeChatContentPart | undefined {
+		return this.contentParts.find(p => p.kind === kind);
+	}
+
+	/**
+	 * Attach a TODO component to the human message container.
+	 * This is used when todos from a previous message page need to persist to the next conversation.
+	 */
+	public attachTodoToHumanMessage(todoContent: IVybeChatTodoContent): IVybeChatContentPart | null {
+		// Create the todo part with isAttachedToHuman flag
+		const todoData: IVybeChatTodoContent = {
+			...todoContent,
+			isAttachedToHuman: true,
+			isExpanded: true, // Always expanded when attached to human
+		};
+
+		const todoPart = this.createContentPart(todoData);
+		if (!todoPart) {
+			return null;
+		}
+
+		// Find the composer container within messageHeader to attach the todo
+		const composerOuter = this.messageHeader.querySelector('.vybe-ai-composer-outer') as HTMLElement;
+		if (!composerOuter) {
+			return null;
+		}
+
+		// Find the input wrapper (blur wrapper) to attach directly after it
+		const inputWrapper = composerOuter.querySelector('.composer-input-blur-wrapper') as HTMLElement;
+		if (!inputWrapper) {
+			// Fallback: attach to composer outer
+			const todoContainer = $('div', {
+				style: `
+					width: 100%;
+					box-sizing: border-box;
+					margin-top: -8px;
+					margin-left: 0px;
+					margin-right: 0px;
+				`
+			});
+			todoContainer.appendChild(todoPart.domNode);
+			composerOuter.appendChild(todoContainer);
+		} else {
+			// Attach with negative margin to overlap by border radius (8px) for seamless connection
+			const todoContainer = $('div', {
+				style: `
+					width: 100%;
+					box-sizing: border-box;
+					margin-top: -8px;
+					margin-left: 0px;
+					margin-right: 0px;
+					position: relative;
+				`
+			});
+			todoContainer.appendChild(todoPart.domNode);
+			// Insert right after input wrapper
+			if (inputWrapper.nextSibling) {
+				composerOuter.insertBefore(todoContainer, inputWrapper.nextSibling);
+			} else {
+				composerOuter.appendChild(todoContainer);
+			}
+		}
+
+		// Track the part
+		this.contentParts.push(todoPart);
+		this.contentPartsData.push(todoData);
+
+		return todoPart;
 	}
 
 	public updateContent(content: string, pills: ContextPillData[], images: ImageAttachmentData[], agentMode: AgentMode, modelState: ModelDropdownState): void {
@@ -369,6 +477,7 @@ export class MessagePage extends Disposable {
 	private isResearchAction(contentData: IVybeChatContentData): boolean {
 		return contentData.kind === 'readingFiles' ||
 			contentData.kind === 'searched' ||
+			contentData.kind === 'grepped' ||
 			contentData.kind === 'listed' ||
 			contentData.kind === 'directory';
 	}
@@ -403,6 +512,11 @@ export class MessagePage extends Disposable {
 								return {
 									type: 'searched' as const,
 									data: action as IVybeChatSearchedContent
+								};
+							} else if (action.kind === 'grepped') {
+								return {
+									type: 'grepped' as const,
+									data: action as IVybeChatGreppedContent
 								};
 							} else if (action.kind === 'listed') {
 								return {
@@ -478,25 +592,176 @@ export class MessagePage extends Disposable {
 	}
 
 	/**
+	 * Map content part kind to Cursor's data-message-kind attribute.
+	 */
+	private mapKindToMessageKind(kind: VybeChatContentPartKind): string {
+		switch (kind) {
+			case 'thinking':
+				return 'thinking';
+			case 'phaseIndicator':
+				return 'phaseIndicator'; // Phase indicator has its own kind
+			case 'markdown':
+			case 'codeBlock':
+			case 'planDocument':
+				return 'assistant';
+			case 'tool':
+			case 'readingFiles':
+			case 'searched':
+			case 'grepped':
+			case 'explored':
+			case 'listed':
+			case 'directory':
+			case 'textEdit':
+			case 'terminal':
+				return 'tool';
+			case 'error':
+			case 'progress':
+				return 'assistant';
+			default:
+				return 'assistant';
+		}
+	}
+
+	/**
+	 * Create a unified message wrapper for a content part.
+	 * Matches Cursor's `composer-rendered-message` structure with proper data attributes.
+	 */
+	private createMessageWrapper(
+		part: IVybeChatContentPart,
+		contentData: IVybeChatContentData,
+		toolCallId?: string
+	): HTMLElement {
+		const messageIndex = this.messagePartIndex++;
+		const messageId = `${this.options.messageId}-${messageIndex}`;
+		const messageKind = this.mapKindToMessageKind(contentData.kind);
+		const isStreaming = (contentData as any).isStreaming ?? false;
+
+		const wrapper = $('div');
+		wrapper.className = 'composer-rendered-message hide-if-empty composer-message-blur';
+		wrapper.setAttribute('tabindex', '0');
+		wrapper.setAttribute('data-message-index', messageIndex.toString());
+		wrapper.setAttribute('data-message-id', messageId);
+		wrapper.setAttribute('data-message-role', 'ai');
+		wrapper.setAttribute('data-message-kind', messageKind);
+		wrapper.id = `bubble-${messageId}`;
+
+		// Add tool-specific attributes
+		if (messageKind === 'tool') {
+			if (toolCallId) {
+				wrapper.setAttribute('data-tool-call-id', toolCallId);
+			}
+			wrapper.setAttribute('data-tool-status', isStreaming ? 'loading' : 'completed');
+		}
+
+		// Each message wrapper has its own padding (matches Cursor structure)
+		wrapper.style.cssText = `
+			display: block;
+			outline: none;
+			padding: 0px 18px;
+			background-color: var(--composer-pane-background);
+			opacity: 1;
+			z-index: 99;
+		`;
+
+		// Append the content part's DOM node to the wrapper
+		wrapper.appendChild(part.domNode);
+
+		// Track the wrapper for later updates
+		this.partToWrapperMap.set(part, wrapper);
+
+		return wrapper;
+	}
+
+	/**
+	 * Update tool status on a content part's wrapper.
+	 * Called when a tool completes execution.
+	 */
+	public updateToolStatus(part: IVybeChatContentPart, status: 'loading' | 'completed'): void {
+		const wrapper = this.partToWrapperMap.get(part);
+		if (wrapper && wrapper.getAttribute('data-message-kind') === 'tool') {
+			wrapper.setAttribute('data-tool-status', status);
+		}
+	}
+
+	// Note: Message grouping methods removed - not currently used
+	// Message groups are only needed for "Explored" summaries, which are handled
+	// by VybeChatExploredPart creating its own composer-message-group structure
+
+	/**
+	 * Get incomplete todos from this message page.
+	 * Returns todos that have at least one incomplete item.
+	 */
+	public getIncompleteTodos(): IVybeChatTodoContent | null {
+		const todoData = this.contentPartsData.find(d => d.kind === 'todo') as IVybeChatTodoContent | undefined;
+		if (!todoData || todoData.items.length < 2) {
+			return null;
+		}
+		const incompleteCount = todoData.items.filter(item => item.status !== 'completed').length;
+		if (incompleteCount === 0) {
+			return null; // All completed
+		}
+		return todoData;
+	}
+
+	/**
+	 * Check if any todoItem parts exist (indicating work has started on todos).
+	 */
+	public hasTodoItemParts(): boolean {
+		return this.contentPartsData.some(d => d.kind === 'todoItem');
+	}
+
+	/**
 	 * Add a single content part (for streaming updates).
 	 * Items appear individually, then group into Explored when 3+ research actions complete.
 	 * Returns the created part for further updates.
 	 */
-	public addContentPart(contentData: IVybeChatContentData): IVybeChatContentPart | null {
+	public addContentPart(contentData: IVybeChatContentData, toolCallId?: string): IVybeChatContentPart | null {
+		// Removed verbose logging
+
 		if (!this.aiResponseArea || !this.markdownRendererService) {
+			console.error(`[MessagePage] addContentPart: Missing aiResponseArea or markdownRendererService!`);
 			return null;
 		}
 
 		// Check if part already exists (for streaming updates)
 		const existingIndex = this.contentPartsData.findIndex(d => {
-			// For thinking/markdown/codeBlock, only one of each kind should exist during streaming
-			if (d.kind === contentData.kind && (d.kind === 'thinking' || d.kind === 'markdown' || d.kind === 'codeBlock')) {
+			// For thinking/codeBlock, only one of each kind should exist during streaming
+			if (d.kind === contentData.kind && (d.kind === 'thinking' || d.kind === 'codeBlock')) {
 				return true;
+			}
+			// For markdown, only match if IDs are the same (allows multiple markdown blocks)
+			if (d.kind === 'markdown' && contentData.kind === 'markdown') {
+				const dId = (d as IVybeChatMarkdownContent).id;
+				const newId = (contentData as IVybeChatMarkdownContent).id;
+				// If both have IDs, only match if they're the same
+				if (dId && newId) {
+					return dId === newId;
+				}
+				// If neither has an ID, match (legacy behavior)
+				if (!dId && !newId) {
+					return true;
+				}
+				// One has ID, one doesn't - they're different blocks
+				return false;
+			}
+			// For phaseIndicator, only one should exist at a time (replace existing)
+			if (d.kind === 'phaseIndicator' && contentData.kind === 'phaseIndicator') {
+				return true;
+			}
+			// For tool parts (tool, readingFiles, listed, grepped, searched), check by ID if provided
+			if (d.kind === contentData.kind) {
+				const hasId = (data: IVybeChatContentData): data is IVybeChatContentData & { id?: string } => {
+					return 'id' in data;
+				};
+				if (hasId(d) && hasId(contentData) && d.id && contentData.id && d.id === contentData.id) {
+					return true;
+				}
 			}
 			return false;
 		});
 
 		if (existingIndex >= 0) {
+			// Removed verbose logging
 			// Update existing part
 			const existingPart = this.contentParts[existingIndex];
 			if (existingPart && existingPart.updateContent) {
@@ -513,11 +778,22 @@ export class MessagePage extends Disposable {
 		const part = this.createContentPart(contentData);
 		if (part) {
 			this.contentParts.push(part);
-			this.aiResponseArea.appendChild(part.domNode);
 
-			// If this is a research action that just completed, check for grouping
-			// Use setTimeout to ensure DOM updates are complete
-			if (this.isResearchAction(contentData) && !(contentData as any).isStreaming) {
+			// Create unified message wrapper (Cursor UI alignment)
+			const wrapper = this.createMessageWrapper(part, contentData, toolCallId);
+
+			// Append all content parts in order - no grouping
+			// The LLM outputs content sequentially and we must preserve that order:
+			// thinking → markdown → tool → markdown → tool → markdown...
+			this.aiResponseArea.appendChild(wrapper);
+
+			// Check for grouping when:
+			// 1. A research action completes (might form a group with previous actions)
+			// 2. A non-research action appears (should group previous research actions)
+			const isResearch = this.isResearchAction(contentData);
+			const isNonResearch = !isResearch && (contentData.kind === 'markdown' || contentData.kind === 'thinking' || contentData.kind === 'textEdit' || contentData.kind === 'terminal' || contentData.kind === 'codeBlock');
+
+			if ((isResearch && !(contentData as any).isStreaming) || isNonResearch) {
 				setTimeout(() => {
 					this.checkAndGroupResearchActions();
 				}, 0);
@@ -531,15 +807,17 @@ export class MessagePage extends Disposable {
 	}
 
 	/**
-	 * Check if we have 3+ consecutive completed research actions and group them.
-	 * Only groups when ALL items in a consecutive sequence are complete.
+	 * Check for consecutive research actions (2+) and group them when a break occurs.
+	 * Matches Cursor's behavior: groups 2+ consecutive research actions when:
+	 * - A non-research action appears (markdown, thinking, textEdit, terminal, etc.)
+	 * - All actions in the group are completed
 	 */
 	private checkAndGroupResearchActions(): void {
 		if (!this.aiResponseArea) {
 			return;
 		}
 
-		// Find consecutive research actions where ALL are completed (3+)
+		// Find consecutive research actions (2+) that should be grouped
 		const groups: Array<{ start: number; end: number; actions: IVybeChatContentData[] }> = [];
 		let currentGroup: { start: number; actions: IVybeChatContentData[] } | null = null;
 
@@ -557,22 +835,23 @@ export class MessagePage extends Disposable {
 						currentGroup.actions.push(data);
 					}
 				} else {
-					// Research action still streaming - break group (don't group incomplete sequences)
-					if (currentGroup) {
-						currentGroup = null;
+					// Research action still streaming - finalize previous group if it has 2+ actions
+					if (currentGroup && currentGroup.actions.length >= 2) {
+						groups.push({ start: currentGroup.start, end: i - 1, actions: currentGroup.actions });
 					}
+					currentGroup = null;
 				}
 			} else {
-				// Non-research action - finalize group if it has 3+ completed actions
-				if (currentGroup && currentGroup.actions.length >= 3) {
+				// Non-research action (markdown, thinking, textEdit, terminal, etc.) - finalize group if it has 2+ actions
+				if (currentGroup && currentGroup.actions.length >= 2) {
 					groups.push({ start: currentGroup.start, end: i - 1, actions: currentGroup.actions });
 				}
 				currentGroup = null;
 			}
 		}
 
-		// Check final group (only if all are completed)
-		if (currentGroup && currentGroup.actions.length >= 3) {
+		// Check final group (only if all are completed and has 2+ actions)
+		if (currentGroup && currentGroup.actions.length >= 2) {
 			// Verify all actions in group are completed
 			const allCompleted = currentGroup.actions.every(action => !(action as any).isStreaming);
 			if (allCompleted) {
@@ -590,11 +869,19 @@ export class MessagePage extends Disposable {
 				continue; // Already grouped
 			}
 
-			// Remove individual parts from DOM and tracking
+			// Remove individual parts from DOM and tracking (including wrappers)
 			for (let i = group.start; i <= group.end; i++) {
 				const part = this.contentParts[i];
 				if (part) {
-					part.domNode.remove();
+					// Remove wrapper from DOM (which also removes part.domNode)
+					const wrapper = this.partToWrapperMap.get(part);
+					if (wrapper) {
+						wrapper.remove();
+						this.partToWrapperMap.delete(part);
+					} else {
+						// Fallback: remove domNode directly if no wrapper
+						part.domNode.remove();
+					}
 					part.dispose();
 				}
 			}
@@ -637,14 +924,34 @@ export class MessagePage extends Disposable {
 				this.contentParts.splice(group.start, group.end - group.start + 1, exploredPart);
 				this.contentPartsData.splice(group.start, group.end - group.start + 1, exploredData);
 
+				// Wrap explored part in message group structure (matches Cursor)
+				const messageGroup = $('div');
+				messageGroup.className = 'composer-message-group';
+
+				const innerWrapper = $('div');
+				innerWrapper.style.cssText = 'padding: 0px 18px; opacity: 1;';
+
+				const summaryWrapper = $('div');
+				summaryWrapper.className = 'composer-message-group composer-new-convo-summary';
+				summaryWrapper.style.cssText = 'padding: 0px 2px; cursor: pointer;';
+
+				// The explored part's DOM node goes directly into summary wrapper
+				summaryWrapper.appendChild(exploredPart.domNode);
+				innerWrapper.appendChild(summaryWrapper);
+				messageGroup.appendChild(innerWrapper);
+
+				// Track the wrapper (use messageGroup as the wrapper for tracking)
+				this.partToWrapperMap.set(exploredPart, messageGroup);
+
 				// Insert into DOM at the position of the first removed part
-				const insertBefore = group.start < this.contentParts.length - 1
-					? this.contentParts[group.start + 1].domNode
-					: null;
+				const nextPartIndex = group.start + 1;
+				const nextPart = nextPartIndex < this.contentParts.length ? this.contentParts[nextPartIndex] : null;
+				const insertBefore = nextPart ? this.partToWrapperMap.get(nextPart) : null;
+
 				if (insertBefore) {
-					this.aiResponseArea.insertBefore(exploredPart.domNode, insertBefore);
+					this.aiResponseArea.insertBefore(messageGroup, insertBefore);
 				} else {
-					this.aiResponseArea.appendChild(exploredPart.domNode);
+					this.aiResponseArea.appendChild(messageGroup);
 				}
 			}
 		}
@@ -698,7 +1005,15 @@ export class MessagePage extends Disposable {
 				if (!this.instantiationService) {
 					return null;
 				}
-				const markdownPart = this._register(new VybeChatMarkdownPart(contentData, this.markdownRendererService, this.instantiationService));
+				const markdownPart = this._register(new VybeChatMarkdownPart(
+					contentData,
+					this.markdownRendererService,
+					this.instantiationService,
+					{
+						editorService: this.editorService,
+						workspaceContextService: this.workspaceContextService
+					}
+				));
 
 				// Wire up streaming callback for smart scrolling
 				if (markdownPart && this.options.onContentUpdate) {
@@ -729,73 +1044,149 @@ export class MessagePage extends Disposable {
 				return codeBlockPart;
 			}
 
-		case 'textEdit': {
-			if (!this.instantiationService) {
+			case 'textEdit': {
+				if (!this.instantiationService) {
+					return null;
+				}
+				const textEditPart = this._register(this.instantiationService.createInstance(
+					VybeChatTextEditPart,
+					contentData
+				));
+
+				// Wire up streaming callback for smart scrolling
+				if (textEditPart && this.options.onContentUpdate) {
+					textEditPart.setStreamingUpdateCallback(this.options.onContentUpdate);
+				}
+
+				return textEditPart;
+			}
+
+			case 'terminal': {
+				if (!this.instantiationService) {
+					return null;
+				}
+				const terminalPart = this._register(this.instantiationService.createInstance(
+					VybeChatTerminalPart,
+					contentData
+				));
+
+				// Wire up streaming callback for smart scrolling
+				if (terminalPart && this.options.onContentUpdate) {
+					terminalPart.setStreamingUpdateCallback(this.options.onContentUpdate);
+				}
+
+				return terminalPart;
+			}
+
+			case 'readingFiles': {
+				const readingPart = this._register(new VybeChatReadingFilesPart(contentData as IVybeChatReadingFilesContent, this.editorService, this.fileService, this.notificationService));
+				return readingPart;
+			}
+
+			case 'searched': {
+				const searchedPart = this._register(new VybeChatSearchedPart(contentData as IVybeChatSearchedContent, this.editorService, this.fileService, this.notificationService));
+				return searchedPart;
+			}
+
+			case 'grepped': {
+				const greppedPart = this._register(new VybeChatGreppedPart(contentData as IVybeChatGreppedContent));
+				return greppedPart;
+			}
+
+			case 'explored': {
+				const exploredPart = this._register(new VybeChatExploredPart(contentData as IVybeChatExploredContent, this.editorService, this.fileService, this.notificationService));
+				return exploredPart;
+			}
+
+			case 'planDocument': {
+				if (!this.instantiationService) {
+					throw new Error('IInstantiationService is required for plan document');
+				}
+				const planPart = this._register(new VybeChatPlanDocumentPart(contentData as IVybeChatPlanDocumentContent, this.instantiationService, this.markdownRendererService));
+
+				// Wire up streaming callback for smart scrolling
+				if (planPart && this.options.onContentUpdate) {
+					planPart.onStreamingUpdate = this.options.onContentUpdate;
+				}
+
+				return planPart;
+			}
+
+			case 'error': {
+				// Error content part - show as markdown with error styling
+				const errorContent = contentData as IVybeChatErrorContent;
+				const errorMarkdown = `**Error (${errorContent.level}):** ${errorContent.message}`;
+				const errorMarkdownData: IVybeChatMarkdownContent = {
+					kind: 'markdown',
+					content: errorMarkdown,
+					isStreaming: false
+				};
+				return this.createContentPart(errorMarkdownData);
+			}
+
+			case 'progress': {
+				// Progress content part - show as markdown
+				const progressContent = contentData as IVybeChatProgressContent;
+				const progressMarkdown = `_${progressContent.message}_`;
+				const progressMarkdownData: IVybeChatMarkdownContent = {
+					kind: 'markdown',
+					content: progressMarkdown,
+					isStreaming: false
+				};
+				return this.createContentPart(progressMarkdownData);
+			}
+
+			case 'listed': {
+				const listedPart = this._register(new VybeChatListedPart(contentData as IVybeChatListedContent));
+				return listedPart;
+			}
+
+			case 'directory': {
+				// Directory content part - show as markdown for now
+				const dirContent = contentData as IVybeChatDirectoryContent;
+				const dirMarkdown = `**Directory:** ${dirContent.name}`;
+				const dirMarkdownData: IVybeChatMarkdownContent = {
+					kind: 'markdown',
+					content: dirMarkdown,
+					isStreaming: false
+				};
+				return this.createContentPart(dirMarkdownData);
+			}
+
+			case 'todo': {
+				const todoPart = this._register(new VybeChatTodoPart(contentData as IVybeChatTodoContent));
+				// Wire up streaming callback for smart scrolling
+				if (todoPart && this.options.onContentUpdate) {
+					todoPart.onStreamingUpdate = this.options.onContentUpdate;
+				}
+				return todoPart;
+			}
+
+			case 'todoItem': {
+				const todoItemPart = this._register(new VybeChatTodoItemPart(contentData as IVybeChatTodoItemContent));
+				return todoItemPart;
+			}
+
+			case 'phaseIndicator': {
+				const phaseIndicatorPart = this._register(new VybeChatPhaseIndicatorPart(contentData as IVybeChatPhaseIndicatorContent));
+				return phaseIndicatorPart;
+			}
+
+			case 'tool': {
+				const toolPart = this._register(new VybeChatToolPart(
+					contentData as IVybeChatToolContent,
+					this.editorService,
+					this.fileService,
+					this.notificationService,
+					this.workspaceContextService,
+					this.modelService,
+					this.languageService
+				));
+				return toolPart;
+			}
+
+			default:
 				return null;
-			}
-			const textEditPart = this._register(this.instantiationService.createInstance(
-				VybeChatTextEditPart,
-				contentData
-			));
-
-			// Wire up streaming callback for smart scrolling
-			if (textEditPart && this.options.onContentUpdate) {
-				textEditPart.setStreamingUpdateCallback(this.options.onContentUpdate);
-			}
-
-			return textEditPart;
-		}
-
-		case 'terminal': {
-			if (!this.instantiationService) {
-				return null;
-			}
-			const terminalPart = this._register(this.instantiationService.createInstance(
-				VybeChatTerminalPart,
-				contentData
-			));
-
-			// Wire up streaming callback for smart scrolling
-			if (terminalPart && this.options.onContentUpdate) {
-				terminalPart.setStreamingUpdateCallback(this.options.onContentUpdate);
-			}
-
-			return terminalPart;
-		}
-
-		case 'readingFiles': {
-			const readingPart = this._register(new VybeChatReadingFilesPart(contentData as IVybeChatReadingFilesContent, this.editorService, this.fileService, this.notificationService));
-			return readingPart;
-		}
-
-		case 'searched': {
-			const searchedPart = this._register(new VybeChatSearchedPart(contentData as IVybeChatSearchedContent, this.editorService, this.fileService, this.notificationService));
-			return searchedPart;
-		}
-
-		case 'explored': {
-			const exploredPart = this._register(new VybeChatExploredPart(contentData as IVybeChatExploredContent, this.editorService, this.fileService, this.notificationService));
-			return exploredPart;
-		}
-
-		case 'planDocument': {
-			if (!this.instantiationService) {
-				throw new Error('IInstantiationService is required for plan document');
-			}
-			const planPart = this._register(new VybeChatPlanDocumentPart(contentData as IVybeChatPlanDocumentContent, this.instantiationService, this.markdownRendererService));
-
-			// Wire up streaming callback for smart scrolling
-			if (planPart && this.options.onContentUpdate) {
-				planPart.onStreamingUpdate = this.options.onContentUpdate;
-			}
-
-			return planPart;
-		}
-
-		// TODO: Add more content types (errors, progress, etc.)
-
-		default:
-			return null;
 		}
 	}
 
@@ -823,6 +1214,7 @@ export class MessagePage extends Disposable {
 	// Track accumulated content for streaming updates
 	private accumulatedThinking: string = '';
 	private thinkingStartTime: number | null = null; // Track when thinking started (for duration)
+	private thinkingFinalized: boolean = false; // Track if thinking has been finalized (prevents recalculating duration)
 	// Track accumulated markdown content (single source of truth for what we're building)
 	// This is needed because markdown part's currentContent is only updated after rendering,
 	// and rendering may be batched via requestAnimationFrame, causing stale reads
@@ -831,8 +1223,8 @@ export class MessagePage extends Disposable {
 
 	// Phase 7: New state for normalized streaming events
 	private activeCodeBlocks: Map<string, VybeChatCodeBlockPart> = new Map(); // Track code blocks by block_id
-	private toolCallElements: Map<string, HTMLElement> = new Map(); // Track tool call UI elements by tool_id
-	private phaseIndicator: HTMLElement | null = null; // Current phase status element
+	// REMOVED: toolCallElements - no longer using generic tool call UI
+	// REMOVED: phaseIndicator - now handled as content part
 
 	/**
 	 * Append chunk to thinking part (creates if doesn't exist).
@@ -879,15 +1271,26 @@ export class MessagePage extends Disposable {
 	/**
 	 * Finalize thinking part when content starts streaming.
 	 * Transitions from "Thinking" → "Thought for Xs"
+	 * Only calculates duration ONCE - subsequent calls are no-ops.
 	 */
 	public finalizeThinking(): void {
+		// CRITICAL: Only finalize once - prevent duration from increasing during text streaming
+		if (this.thinkingFinalized) {
+			return; // Already finalized, don't recalculate duration
+		}
+
 		const thinkingPart = this.contentParts.find(p => p.kind === 'thinking') as VybeChatThinkingPart | undefined;
 		if (!thinkingPart) {
 			return; // No thinking part to finalize
 		}
 
-		// Calculate duration
-		const duration = this.thinkingStartTime !== null ? Date.now() - this.thinkingStartTime : 0;
+		// Mark as finalized BEFORE calculating to prevent race conditions
+		this.thinkingFinalized = true;
+
+		// Calculate duration (only happens once)
+		// Minimum of 1 second - "Thought for 0s" looks wrong
+		const rawDuration = this.thinkingStartTime !== null ? Date.now() - this.thinkingStartTime : 0;
+		const duration = Math.max(rawDuration, 1000); // Minimum 1 second
 
 		// Update thinking part with isStreaming: false and duration
 		const thinkingContent: IVybeChatThinkingContent = {
@@ -1024,58 +1427,116 @@ export class MessagePage extends Disposable {
 	}
 
 	/**
+	 * Finalize current markdown block (stops streaming).
+	 * Called before adding tool UI to ensure markdown before and after tools are in separate groups.
+	 * CRITICAL: Clears currentMarkdownBlockId so next appendText creates a new block.
+	 */
+	public finalizeCurrentMarkdown(): void {
+		// Find the markdown part with the current block ID
+		if (!this.currentMarkdownBlockId) {
+			// Removed verbose logging
+			return;
+		}
+
+		const markdownIndex = this.contentPartsData.findIndex(d =>
+			d.kind === 'markdown' && (d as IVybeChatMarkdownContent).id === this.currentMarkdownBlockId
+		);
+
+		if (markdownIndex >= 0) {
+			const markdownData = this.contentPartsData[markdownIndex] as IVybeChatMarkdownContent;
+			// Type guard: check if it's markdown content with isStreaming
+			if (markdownData.isStreaming) {
+				// Removed verbose logging
+				// Update the markdown part to finalize it
+				const markdownPart = this.contentParts[markdownIndex];
+				if (markdownPart && markdownPart.updateContent) {
+					markdownPart.updateContent({
+						...markdownData,
+						isStreaming: false
+					});
+				}
+				// Update data tracking
+				this.contentPartsData[markdownIndex] = {
+					...markdownData,
+					isStreaming: false
+				};
+				// Removed verbose logging
+			} else {
+				// Removed verbose logging
+			}
+		} else {
+			// Removed verbose logging
+		}
+
+		// CRITICAL: Clear the current block ID so next appendText creates a NEW block
+		// Removed verbose logging
+		this.currentMarkdownBlockId = null;
+		// Reset accumulator for the next block
+		this.accumulatedMarkdown = '';
+	}
+
+	/**
 	 * Phase 7: Append plain text to markdown part (for assistant.delta events)
-	 * SIMPLIFIED: Just append delta. No guards, no deduplication, no complexity.
-	 * The markdown part's internal dedupe will handle duplicate renders.
+	 * Uses block-based tracking to ensure each markdown block is independent.
+	 * When a block is finalized, new content creates a NEW block.
 	 */
 	public appendText(text: string): void {
 		if (!text || text.length === 0) {
 			return;
 		}
 
-		// CRITICAL: Check if we already have final content (from setMarkdownContent)
-		// If so, ignore appendText - the final content is authoritative
-		// This prevents late-arriving deltas from corrupting the final content
-		const existingData = this.contentPartsData.find(d => d.kind === 'markdown');
-		if (existingData && !existingData.isStreaming) {
-			// Already finalized - ignore late deltas
-			return;
+		// Removed verbose logging
+
+		// If no current block ID, create a new one
+		if (!this.currentMarkdownBlockId) {
+			this.currentMarkdownBlockId = `md_${++this.markdownBlockCounter}`;
+			this.accumulatedMarkdown = ''; // Reset accumulator for new block
+			// Removed verbose logging
 		}
 
-		// Simple: append delta to accumulated content
+		// Append text to accumulator (simple, no duplicate detection needed with block IDs)
 		this.accumulatedMarkdown += text;
+		// Removed verbose logging
 
-		// Find or create markdown part
-		let part = this.contentParts.find(p => p.kind === 'markdown') as VybeChatMarkdownPart | undefined;
+		// Find or create markdown part with the current block ID
+		const existingIndex = this.contentPartsData.findIndex(d =>
+			d.kind === 'markdown' && (d as IVybeChatMarkdownContent).id === this.currentMarkdownBlockId
+		);
 
-		if (!part) {
-			// Create new markdown part
+		if (existingIndex >= 0) {
+			// Update existing part
+			const existingPart = this.contentParts[existingIndex];
+			if (existingPart && existingPart.updateContent) {
+				// Removed verbose logging
+				existingPart.updateContent({
+					kind: 'markdown',
+					id: this.currentMarkdownBlockId,
+					content: this.accumulatedMarkdown,
+					isStreaming: true
+				});
+				// Update data tracking
+				this.contentPartsData[existingIndex] = {
+					kind: 'markdown',
+					id: this.currentMarkdownBlockId,
+					content: this.accumulatedMarkdown,
+					isStreaming: true
+				};
+			}
+		} else {
+			// Create new markdown part with block ID
+			// Removed verbose logging
 			const contentData: IVybeChatMarkdownContent = {
 				kind: 'markdown',
+				id: this.currentMarkdownBlockId,
 				content: this.accumulatedMarkdown,
 				isStreaming: true
 			};
-			part = this.addContentPart(contentData) as VybeChatMarkdownPart | undefined;
+			const part = this.addContentPart(contentData);
 			if (!part) {
-				return; // Can't proceed without a part
+				console.error(`[MessagePage] appendText: Failed to create markdown part for block ${this.currentMarkdownBlockId}!`);
+			} else {
+				// Removed verbose logging
 			}
-		}
-
-		// Update part with accumulated content (part's internal dedupe will prevent duplicate renders)
-		if (part.updateContent) {
-			part.updateContent({
-				kind: 'markdown',
-				content: this.accumulatedMarkdown,
-				isStreaming: true
-			});
-		}
-
-		// Update data tracking
-		const index = this.contentPartsData.findIndex(d => d.kind === 'markdown');
-		if (index >= 0) {
-			this.contentPartsData[index] = { kind: 'markdown', content: this.accumulatedMarkdown, isStreaming: true };
-		} else {
-			this.contentPartsData.push({ kind: 'markdown', content: this.accumulatedMarkdown, isStreaming: true });
 		}
 	}
 
@@ -1085,17 +1546,7 @@ export class MessagePage extends Disposable {
 	 * ONLY if the content has actually changed - prevents unnecessary re-renders
 	 */
 	public setMarkdownContentIfChanged(fullText: string): void {
-		// DIAGNOSTIC: Log content being set
-		const hasCodeBlocks = fullText.includes('```');
-		const currentHasCodeBlocks = this.accumulatedMarkdown.includes('```');
-		console.log('[MessagePage] setMarkdownContentIfChanged', {
-			fullTextLength: fullText.length,
-			accumulatedLength: this.accumulatedMarkdown.length,
-			fullTextHasCodeBlocks: hasCodeBlocks,
-			accumulatedHasCodeBlocks: currentHasCodeBlocks,
-			contentMatches: this.accumulatedMarkdown === fullText
-		});
-
+		// Removed verbose logging
 		// CRITICAL: Only update if content actually changed
 		// This prevents re-rendering code blocks unnecessarily, which causes flicker
 		if (this.accumulatedMarkdown === fullText) {
@@ -1250,134 +1701,83 @@ export class MessagePage extends Disposable {
 	}
 
 	/**
-	 * Phase 7: Update agent phase status indicator
-	 * Simple structure matching provided HTML: <div class="simulated-thinking-container"><span class="make-shine">text</span></div>
+	 * Remove phase indicator content parts.
+	 * Called when agent moves to next phase (no longer planning).
 	 */
-	public updatePhase(phase: string, label?: string): void {
-		// Create or update phase indicator element above assistant message
-		if (!this.phaseIndicator) {
-			// Create simple structure matching provided HTML
-			const container = document.createElement('div');
-			container.className = 'simulated-thinking-container simulated-thinking-container-group-summary';
-
-			// Phase text with shine animation
-			const phaseTextElement = document.createElement('span');
-			phaseTextElement.className = 'make-shine';
-
-			// Build hierarchy
-			container.appendChild(phaseTextElement);
-
-			// Store the text element for updates
-			(container as any).__phaseTextElement = phaseTextElement;
-
-			this.phaseIndicator = container;
-
-			// Insert before aiResponseArea
-			if (this.aiResponseArea && this.aiResponseArea.parentElement) {
-				this.aiResponseArea.parentElement.insertBefore(this.phaseIndicator, this.aiResponseArea);
-			}
-		}
-
-		// Display label or default label based on phase
-		const displayLabel = label || this.getDefaultPhaseLabel(phase);
-		const phaseTextElement = (this.phaseIndicator as any).__phaseTextElement;
-		if (phaseTextElement) {
-			phaseTextElement.textContent = displayLabel;
-		}
-	}
-
-	/**
-	 * Get default phase label if none provided
-	 */
-	private getDefaultPhaseLabel(phase: string): string {
-		switch (phase) {
-			case 'planning':
-				return 'Planning next step';
-			case 'acting':
-				return 'Executing tool';
-			case 'reflecting':
-				return 'Analyzing result';
-			case 'finalizing':
-				return 'Finalizing response';
-			default:
-				return phase;
-		}
-	}
-
-	/**
-	 * Phase 7: Add a tool call card to the message
-	 */
-	public addToolCall(tool_id: string, tool_name: string, arguments_: Record<string, unknown>): void {
-		// Create a new UI element for tool call
-		const toolCallElement = document.createElement('div');
-		toolCallElement.className = 'vybe-tool-call';
-		toolCallElement.dataset.toolId = tool_id;
-		toolCallElement.style.cssText = `
-			margin: 8px 0;
-			padding: 12px;
-			background: var(--vscode-input-background);
-			border: 1px solid var(--vscode-input-border);
-			border-radius: 4px;
-		`;
-
-		// Header with tool name
-		const header = document.createElement('div');
-		header.style.cssText = 'font-weight: 600; margin-bottom: 8px;';
-		header.textContent = `🔧 ${tool_name}`;
-		toolCallElement.appendChild(header);
-
-		// Arguments preview (truncated)
-		const argsPreview = document.createElement('div');
-		argsPreview.style.cssText = 'font-size: 12px; color: var(--vscode-descriptionForeground); font-family: monospace;';
-		const argsStr = JSON.stringify(arguments_, null, 2);
-		argsPreview.textContent = argsStr.length > 200 ? argsStr.substring(0, 200) + '...' : argsStr;
-		toolCallElement.appendChild(argsPreview);
-
-		// Status: pending
-		const status = document.createElement('div');
-		status.style.cssText = 'font-size: 11px; color: var(--vscode-descriptionForeground); margin-top: 4px;';
-		status.textContent = 'Status: Pending';
-		toolCallElement.appendChild(status);
-
-		// Add to message timeline
-		if (this.aiResponseArea) {
-			this.aiResponseArea.appendChild(toolCallElement);
-		}
-
-		// Store in Map
-		this.toolCallElements.set(tool_id, toolCallElement);
-	}
-
-	/**
-	 * Phase 7: Update tool call with result or error
-	 */
-	public updateToolResult(tool_id: string, result: unknown, error?: string): void {
-		// Find tool call element by tool_id
-		const toolCallElement = this.toolCallElements.get(tool_id);
-		if (!toolCallElement) {
-			console.warn('[MessagePage] updateToolResult: tool_id not found:', tool_id);
-			return;
-		}
-
-		// Find status element
-		const statusElement = toolCallElement.querySelector('div:last-child') as HTMLElement;
-		if (statusElement) {
-			if (error) {
-				statusElement.textContent = `Status: Failed - ${error}`;
-				statusElement.style.color = 'var(--vscode-errorForeground)';
-			} else {
-				statusElement.textContent = 'Status: Completed';
-				statusElement.style.color = 'var(--vscode-descriptionForeground)';
-
-				// Add result preview
-				const resultPreview = document.createElement('div');
-				resultPreview.style.cssText = 'font-size: 12px; color: var(--vscode-descriptionForeground); font-family: monospace; margin-top: 8px;';
-				const resultStr = JSON.stringify(result, null, 2);
-				resultPreview.textContent = resultStr.length > 200 ? resultStr.substring(0, 200) + '...' : resultStr;
-				toolCallElement.appendChild(resultPreview);
+	public removePhaseIndicator(): void {
+		// Find and remove all phase indicator parts
+		// Work backwards to avoid index shifting issues
+		for (let i = this.contentParts.length - 1; i >= 0; i--) {
+			const part = this.contentParts[i];
+			if (part.kind === 'phaseIndicator') {
+				// Remove from arrays
+				this.contentParts.splice(i, 1);
+				// Find and remove corresponding data (should be at same index)
+				if (i < this.contentPartsData.length && this.contentPartsData[i].kind === 'phaseIndicator') {
+					this.contentPartsData.splice(i, 1);
+				} else {
+					// Fallback: find first phaseIndicator data
+					const dataIndex = this.contentPartsData.findIndex(d => d.kind === 'phaseIndicator');
+					if (dataIndex >= 0) {
+						this.contentPartsData.splice(dataIndex, 1);
+					}
+				}
+				// Remove from DOM
+				const wrapper = this.partToWrapperMap.get(part);
+				if (wrapper) {
+					wrapper.remove(); // Remove from DOM (works even if no parent)
+				}
+				this.partToWrapperMap.delete(part);
+				// Dispose part
+				part.dispose();
 			}
 		}
 	}
+
+	/**
+	 * Update a content part by its ID
+	 * Used to update tool content parts from loading → complete state
+	 */
+	public updateContentPartById(id: string, updates: Partial<IVybeChatContentData>): boolean {
+		// Find content part by ID
+		const index = this.contentPartsData.findIndex(data => (data as any).id === id);
+		if (index === -1) {
+			return false;
+		}
+
+		const existingData = this.contentPartsData[index];
+		const existingPart = this.contentParts[index];
+
+		// Merge updates into existing data
+		const updatedData = { ...existingData, ...updates } as IVybeChatContentData;
+		this.contentPartsData[index] = updatedData;
+
+		// Update the part if it has an updateContent method
+		if (existingPart && existingPart.updateContent) {
+			existingPart.updateContent(updatedData);
+		}
+
+		// Update wrapper's data-tool-status attribute if isStreaming changed to false
+		if (existingPart && 'isStreaming' in updates && updates.isStreaming === false) {
+			this.updateToolStatus(existingPart, 'completed');
+		}
+
+		// Check for grouping when research action completes
+		if (this.isResearchAction(updatedData) && !(updatedData as any).isStreaming) {
+			setTimeout(() => {
+				this.checkAndGroupResearchActions();
+			}, 0);
+		}
+
+		return true;
+	}
+
+	/**
+	 * REMOVED: addToolCall, removeToolCall, updateToolResult
+	 * These methods created generic "vybe-tool-call" UI elements.
+	 * We now use custom content parts instead (readingFiles, searched, etc.)
+	 * No generic tool call UI is shown - only custom content parts after tool execution.
+	 */
 
 	/**
 	 * Phase 7: Mark message as complete, stop streaming indicators
@@ -1396,7 +1796,7 @@ export class MessagePage extends Disposable {
 			console.log('[MessagePage] createBlock: block already exists, skipping', block.id);
 			return;
 		}
-		console.log('[MessagePage] createBlock', { id: block.id, type: block.type, contentLength: block.content.length });
+		// Removed verbose logging
 		this.blocks.set(block.id, block);
 		this.renderBlock(block);
 	}
@@ -1458,7 +1858,7 @@ export class MessagePage extends Disposable {
 		filename?: string,
 		description?: string
 	): void {
-		console.log('[MessagePage] addCodeBlockFromTool', { toolId, language, codeLength: code.length, filename });
+		// Removed verbose logging
 
 		// Create a code block content part
 		const contentData: IVybeChatCodeBlockContent = {
@@ -1577,125 +1977,91 @@ export class MessagePage extends Disposable {
 	public finalize(): void {
 		// Finalize all content parts
 
-		// Set isStreaming: false on all content parts
-		for (const part of this.contentParts) {
-			if (part.updateContent) {
-				// Find part data by kind (more reliable than index, especially for thinking/markdown/codeBlock)
-				const partData = this.contentPartsData.find(d => {
-					if (d.kind === part.kind) {
-						// For thinking/markdown/codeBlock, there's only one of each kind
-						if (d.kind === 'thinking' || d.kind === 'markdown' || d.kind === 'codeBlock') {
-							return true;
-						}
-						// For other kinds, match by kind
-						return true;
-					}
-					return false;
-				});
+		// CRITICAL: Use index-based matching to handle multiple markdown parts
+		// Each part at index i corresponds to contentPartsData[i]
+		for (let i = 0; i < this.contentParts.length; i++) {
+			const part = this.contentParts[i];
+			const partData = this.contentPartsData[i];
 
-				if (partData) {
-					// Ensure content exists for markdown parts before updating
-					if (partData.kind === 'markdown') {
-						const markdownContent = (partData as any).content;
-						if (!markdownContent || markdownContent.length === 0) {
-							continue;
-						}
-					}
-					const updatedData = { ...partData, isStreaming: false };
+			if (!part.updateContent || !partData) {
+				continue;
+			}
 
-					// Add duration for thinking parts
-					if (updatedData.kind === 'thinking' && this.thinkingStartTime !== null) {
-						(updatedData as any).duration = Date.now() - this.thinkingStartTime;
-					}
-
-					try {
-						// Ensure content is always a string (never undefined)
-						if (updatedData.kind === 'markdown' && !(updatedData as any).content) {
-							(updatedData as any).content = '';
-						}
-						// Update the part
-						part.updateContent(updatedData);
-						// Update contentPartsData to reflect finalization
-						const dataIndex = this.contentPartsData.findIndex(d => {
-							if (d.kind === part.kind) {
-								if (d.kind === 'thinking' || d.kind === 'markdown' || d.kind === 'codeBlock') {
-									return true;
-								}
-								return true;
-							}
-							return false;
-						});
-						if (dataIndex >= 0) {
-							this.contentPartsData[dataIndex] = updatedData;
-						}
-					} catch (error) {
-						console.error('[MessagePage] Error updating content part during finalize:', error, {
-							partKind: partData.kind,
-							hasContent: !!(partData as any).content || !!(partData as any).value,
-							contentLength: (partData as any).content ? (partData as any).content.length :
-							             ((partData as any).value ? ((partData as any).value instanceof Array ? (partData as any).value.join('').length : (partData as any).value.length) : 0),
-							errorMessage: error instanceof Error ? error.message : String(error)
-						});
-						// Don't re-throw - continue finalizing other parts
-					}
+			// Ensure content exists for markdown parts before updating
+			if (partData.kind === 'markdown') {
+				const markdownContent = (partData as any).content;
+				if (!markdownContent || markdownContent.length === 0) {
+					continue;
 				}
 			}
-		}
 
-		// Remove phase indicator if exists, but only if we have content
-		// This prevents the phase indicator from vanishing before content appears
-		const hasContent = this.contentParts.length > 0 && this.contentParts.some(part => {
-			if (part.kind === 'markdown') {
-				const index = this.contentParts.indexOf(part);
-				const partData = index >= 0 ? this.contentPartsData[index] : undefined;
-				return partData && (partData as any).content && (partData as any).content.length > 0;
+			const updatedData = { ...partData, isStreaming: false };
+
+			// Add duration for thinking parts
+			if (updatedData.kind === 'thinking' && this.thinkingStartTime !== null) {
+				(updatedData as any).duration = Date.now() - this.thinkingStartTime;
 			}
-			return true; // Other parts count as content
-		});
 
-		if (this.phaseIndicator && hasContent) {
-			this.phaseIndicator.remove();
-			this.phaseIndicator = null;
+			try {
+				// Ensure content is always a string (never undefined)
+				if (updatedData.kind === 'markdown' && !(updatedData as any).content) {
+					(updatedData as any).content = '';
+				}
+				// Update the part with ITS OWN data (not first matching data)
+				part.updateContent(updatedData);
+				// Update contentPartsData to reflect finalization
+				this.contentPartsData[i] = updatedData;
+			} catch (error) {
+				console.error('[MessagePage] Error updating content part during finalize:', error, {
+					partKind: partData.kind,
+					index: i,
+					hasContent: !!(partData as any).content || !!(partData as any).value,
+					contentLength: (partData as any).content ? (partData as any).content.length :
+						((partData as any).value ? ((partData as any).value instanceof Array ? (partData as any).value.join('').length : (partData as any).value.length) : 0),
+					errorMessage: error instanceof Error ? error.message : String(error)
+				});
+				// Don't re-throw - continue finalizing other parts
+			}
 		}
+
+		// Phase indicators are now content parts, so they're handled automatically
 	}
 
 	/**
-	 * Phase 7: Display error banner in message
+	 * Display error popup above composer
+	 *
+	 * This is the standard way to show error messages in VYBE Chat.
+	 * All errors should use this method to ensure consistent UI.
+	 *
+	 * The popup will automatically:
+	 * - Use composer background color (matches theme)
+	 * - Set button variant based on count (single = primary/VYBE green, multiple = secondary)
+	 * - Position above the composer input box
 	 */
 	public showError(message: string, code?: string): void {
-		// Create error content part or banner element
-		const errorElement = document.createElement('div');
-		errorElement.className = 'vybe-error-banner';
-		errorElement.style.cssText = `
-			margin: 8px 0;
-			padding: 12px;
-			background: var(--vscode-inputValidation-errorBackground);
-			border: 1px solid var(--vscode-inputValidation-errorBorder);
-			border-radius: 4px;
-			color: var(--vscode-errorForeground);
-		`;
+		// Use the new composer warning popup (standard error display)
+		const fullMessage = code ? `${message} (Code: ${code})` : message;
 
-		// Display message prominently
-		const messageElement = document.createElement('div');
-		messageElement.style.cssText = 'font-weight: 600; margin-bottom: 4px;';
-		messageElement.textContent = `⚠️ ${message}`;
-		errorElement.appendChild(messageElement);
-
-		// Show code if available (smaller, muted)
-		if (code) {
-			const codeElement = document.createElement('div');
-			codeElement.style.cssText = 'font-size: 11px; opacity: 0.8;';
-			codeElement.textContent = `Code: ${code}`;
-			errorElement.appendChild(codeElement);
-		}
-
-		// Add to message timeline
-		if (this.aiResponseArea) {
-			this.aiResponseArea.appendChild(errorElement);
-		}
-
-		// Finalize message (stop streaming)
-		this.finalize();
+		this.composer.showWarning({
+			title: code ? `Error: ${code}` : 'Error',
+			message: fullMessage,
+			icon: 'error',
+			showCloseButton: true,
+			buttons: [
+				{
+					label: 'Try again',
+					variant: 'secondary', // Will be auto-converted to 'primary' since it's the only non-tertiary button
+					action: () => {
+						// Hide popup on retry
+						this.composer.hideWarning();
+						// Could trigger a retry action here if needed
+					}
+				}
+			],
+			onClose: () => {
+				// Popup was closed
+			}
+		});
 	}
 
 	/**

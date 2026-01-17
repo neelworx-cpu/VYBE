@@ -20,3 +20,192 @@
 	height: 0;
 	display: none;
 }
+
+/* Composer Warning Popup Styles */
+	.composer-warning-popup {
+	position: absolute;
+	left: -1px;
+	right: -1px;
+	bottom: 100%;
+	z-index: 11;
+	margin-bottom: 4px;
+	padding: 8px;
+	border: 1px solid var(--vscode-dropdown-border);
+	border-radius: 8px;
+	box-shadow: rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0.1) 0px 4px 6px -1px, rgba(0, 0, 0, 0.1) 0px 2px 4px -2px;
+	/* Background color set dynamically in JavaScript to match composer */
+	color: var(--vscode-foreground);
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	font-size: 13px;
+	line-height: 18.2px;
+	animation: fade-in-fast 0.1s ease-in-out;
+}
+
+.composer-warning-popup-icon {
+	font-size: 16px;
+	line-height: 16px;
+	opacity: 0.8;
+	width: 16px;
+	height: 18px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.composer-error-title {
+	font-size: 12px;
+	font-weight: 500;
+	line-height: 15.6px;
+	letter-spacing: 0.066px;
+	color: var(--vscode-foreground);
+}
+
+.composer-warning-popup-close-button {
+	cursor: pointer;
+	opacity: 0.5;
+	transition: opacity 0.1s ease;
+}
+
+.composer-warning-popup-close-button:hover {
+	opacity: 1;
+}
+
+.composer-warning-message-with-title {
+	opacity: 0.8;
+	font-size: 12px;
+	line-height: 18.2px;
+	color: var(--vscode-foreground);
+	user-select: text;
+	margin-bottom: 0;
+}
+
+.composer-warning-popup-control-row {
+	display: flex;
+	flex-direction: row;
+	gap: 6px;
+	justify-content: space-between;
+	align-items: center;
+	padding-top: 0;
+}
+
+.composer-warning-button {
+	font-size: 12px;
+	line-height: 16px;
+	box-sizing: border-box;
+	min-height: 20px;
+	transition: background-color 0.1s ease, color 0.1s ease;
+}
+
+.composer-warning-button-tertiary {
+	background-color: transparent;
+	border: none;
+	/* Color set dynamically in JavaScript to match markdown row */
+}
+
+.composer-warning-button-tertiary:hover {
+	opacity: 0.8;
+}
+
+.composer-warning-button-text {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.keybinding-font-settings {
+	font-feature-settings: "cv05";
+}
+
+/* Fade-in animation (if not already defined globally) */
+@keyframes fade-in-fast {
+	from {
+		opacity: 0;
+		transform: translateY(-4px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
+.fade-in-fast {
+	animation: fade-in-fast 0.1s ease-in-out;
+}
+
+/* ============================== */
+/* Cursor UI Alignment - Phase 5  */
+/* ============================== */
+
+/* Unified message wrapper (matches Cursor's composer-rendered-message) */
+.composer-rendered-message {
+	display: block;
+	outline: none;
+	padding: 0;
+	background-color: var(--vscode-sideBar-background);
+	opacity: 1;
+	z-index: 99;
+}
+
+.composer-rendered-message:focus {
+	outline: none;
+}
+
+/* Hide empty messages */
+.composer-rendered-message.hide-if-empty:empty {
+	display: none;
+}
+
+/* Message blur effect on scroll */
+.composer-message-blur {
+	transition: opacity 0.15s ease-in-out;
+}
+
+/* Message group container (wraps related messages: thinking + tools + assistant) */
+.composer-message-group {
+	padding: 0;
+	margin: 0;
+}
+
+/* Summary wrapper inside message group */
+.composer-new-convo-summary {
+	padding: 0px 2px;
+	cursor: pointer;
+}
+
+/* Tool-specific styles */
+.composer-rendered-message[data-message-kind="tool"] {
+	padding: 0;
+}
+
+.composer-rendered-message[data-message-kind="tool"][data-tool-status="loading"] .collapsible-header-text {
+	opacity: 0.7;
+}
+
+.composer-rendered-message[data-message-kind="tool"][data-tool-status="completed"] .collapsible-header-text {
+	opacity: 1;
+}
+
+/* Grouped tool calls in message group */
+.composer-grouped-toolformer-message {
+	padding: 0;
+}
+
+.composer-summary-single-message {
+	padding: 0;
+}
+
+/* Chat fade-in animation for markdown sections */
+.chat-fade-in {
+	animation: chat-fade-in 0.15s ease-in;
+}
+
+@keyframes chat-fade-in {
+	from {
+		opacity: 0;
+	}
+	to {
+		opacity: 1;
+	}
+}

@@ -9,7 +9,7 @@ import { $, getWindow, isAncestorOfActiveElement, trackFocus } from '../../../..
 import { WorkbenchList } from '../../../../platform/list/browser/listService.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { IListAccessibilityProvider, IListOptions } from '../../../../base/browser/ui/list/listWidget.js';
-import { NOTIFICATIONS_BACKGROUND } from '../../../common/theme.js';
+import { SIDE_BAR_BACKGROUND } from '../../../common/theme.js';
 import { INotificationViewItem } from '../../../common/notifications.js';
 import { NotificationsListDelegate, NotificationRenderer } from './notificationsViewer.js';
 import { CopyNotificationMessageAction } from './notificationsActions.js';
@@ -82,7 +82,7 @@ export class NotificationsList extends Disposable {
 				setRowLineHeight: false,
 				horizontalScrolling: false,
 				overrideStyles: {
-					listBackground: NOTIFICATIONS_BACKGROUND
+					listBackground: SIDE_BAR_BACKGROUND /* Use sidebar background (secondary panel) - works for both VYBE Dark (#1a1b1d) and VYBE Light (#FFFFFF) */
 				},
 				accessibilityProvider: this.instantiationService.createInstance(NotificationAccessibilityProvider, options)
 			}

@@ -9,13 +9,13 @@
    ANIMATIONS
    ============================================ */
 
-/* Shine animation for phase indicator text */
+/* Shine animation for phase indicator text - left to right sweep */
 @keyframes shine {
 	0% {
-		background-position: -200% center;
+		background-position: -200% center;  /* Highlight starts off-screen left */
 	}
 	100% {
-		background-position: 200% center;
+		background-position: 200% center;   /* Highlight ends off-screen right (left-to-right sweep) */
 	}
 }
 
@@ -71,3 +71,4 @@
 	-webkit-text-fill-color: rgba(0, 0, 0, 0);
 	color: rgba(20, 20, 20, 0.92);
 }
+

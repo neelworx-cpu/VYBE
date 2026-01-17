@@ -7,6 +7,8 @@
 .monaco-workbench .part.titlebar {
 	display: flex;
 	flex-direction: row;
+	position: relative;
+	/* z-index: 3000 !important; CRITICAL: Ensure titlebar (with window controls) is always on top */
 }
 
 .monaco-workbench.mac .part.titlebar {
@@ -26,6 +28,8 @@
 	display: flex;
 	height: 100%;
 	width: 100%;
+	position: relative;
+	z-index: 3000 !important; /* CRITICAL: Ensure titlebar container (with window controls) is always on top */
 }
 
 /* Account for zooming */
@@ -69,6 +73,8 @@
 	display: flex;
 	height: 100%;
 	align-items: center;
+	position: relative;
+	z-index: 3000; /* Ensure titlebar sections are above panels */
 }
 
 .monaco-workbench .part.titlebar > .titlebar-container.has-center > .titlebar-left {
@@ -289,7 +295,8 @@
 	flex-grow: 0;
 	flex-shrink: 0;
 	text-align: center;
-	z-index: 3000;
+	position: relative;
+	z-index: 3000 !important; /* CRITICAL: Ensure window controls are always on top of panels */
 	-webkit-app-region: no-drag;
 	width: 0px;
 	height: 100%;
@@ -322,6 +329,8 @@
 /* Window Controls Container Desktop: apply zoom friendly size */
 .monaco-workbench:not(.web):not(.mac) .part.titlebar .window-controls-container {
 	width: calc(138px / var(--zoom-factor, 1));
+	position: relative;
+	z-index: 3000 !important; /* Ensure window controls are always on top */
 }
 
 .monaco-workbench:not(.web):not(.mac) .part.titlebar .titlebar-container.counter-zoom .window-controls-container {

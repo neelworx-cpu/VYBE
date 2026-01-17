@@ -60,7 +60,7 @@
 		"menu.selectionBackground": "#3ECF8E",
 		"notificationCenterHeader.background": "#1F1F1F",
 		"notificationCenterHeader.foreground": "#CCCCCC",
-		"notifications.background": "#1F1F1F",
+		"notifications.background": "#222427",
 		"notifications.border": "#2B2B2B",
 		"notifications.foreground": "#CCCCCC",
 		"panel.background": "#1a1b1d",

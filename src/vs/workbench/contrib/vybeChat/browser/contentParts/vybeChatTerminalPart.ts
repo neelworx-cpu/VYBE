@@ -18,6 +18,8 @@ import { TerminalCapability } from '../../../../../platform/terminal/common/capa
 import { PromptInputState } from '../../../../../platform/terminal/common/capabilities/commandDetection/promptInputModel.js';
 import { IWorkspaceContextService } from '../../../../../platform/workspace/common/workspace.js';
 import { IClipboardService } from '../../../../../platform/clipboard/common/clipboardService.js';
+import { IStorageService, StorageScope, StorageTarget } from '../../../../../platform/storage/common/storage.js';
+import { IVybeAgentService } from '../../../vybeAgent/common/vybeAgentService.js';
 
 /**
  * Terminal Tool Call Content Part
@@ -55,6 +57,7 @@ export class VybeChatTerminalPart extends VybeChatContentPart {
 	private statusIndicator: HTMLElement | null = null;
 	private warningModal: HTMLElement | null = null;
 	private selectedPermission: string = 'Ask Every Time';
+	private static readonly STORAGE_KEY_TERMINAL_RUN_EVERYTHING = 'vybe.terminal.runEverything';
 	private isOutputExpanded: boolean = false; // Default to collapsed (limited height)
 	private outputExpandButton: HTMLElement | null = null;
 	private openInTerminalButton: HTMLElement | null = null; // Reference to "Open in Terminal" button
@@ -71,6 +74,9 @@ export class VybeChatTerminalPart extends VybeChatContentPart {
 	private outputBuffer: string = ''; // Buffer for accumulating output
 	private completionTimer: any = null; // Timer for detecting command completion
 
+	// Task ID for LangGraph HITL integration
+	private taskId: string | undefined;
+
 	constructor(
 		content: IVybeChatTerminalContent,
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
@@ -79,11 +85,22 @@ export class VybeChatTerminalPart extends VybeChatContentPart {
 		@ITerminalService private readonly terminalService: ITerminalService,
 		@ITerminalGroupService private readonly terminalGroupService: ITerminalGroupService,
 		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
-		@IClipboardService private readonly clipboardService: IClipboardService
+		@IClipboardService private readonly clipboardService: IClipboardService,
+		@IStorageService private readonly storageService: IStorageService,
+		@IVybeAgentService private readonly agentService: IVybeAgentService
 	) {
 		super('terminal');
 		this.currentContent = content;
 		this.uniqueId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+		// Extract task ID from content if available
+		this.taskId = content.toolCallId?.split('-')[0];
+
+		// Load permission preference from storage
+		const runEverything = this.storageService.getBoolean(VybeChatTerminalPart.STORAGE_KEY_TERMINAL_RUN_EVERYTHING, StorageScope.PROFILE, false);
+		if (runEverything) {
+			this.selectedPermission = 'Run Everything';
+		}
 	}
 
 	public setStreamingUpdateCallback(callback: () => void): void {
@@ -1032,7 +1049,16 @@ export class VybeChatTerminalPart extends VybeChatContentPart {
 		// Close menu
 		this.closePermissionMenu();
 
-		// TODO: Store preference (will be handled in settings later)
+		// Store preference if "Run Everything" is selected
+		if (permission === 'Run Everything') {
+			this.storageService.store(VybeChatTerminalPart.STORAGE_KEY_TERMINAL_RUN_EVERYTHING, true, StorageScope.PROFILE, StorageTarget.USER);
+		} else if (permission === 'Ask Every Time') {
+			// When user selects "Ask Every Time", clear the global preference to reinstate it
+			this.storageService.remove(VybeChatTerminalPart.STORAGE_KEY_TERMINAL_RUN_EVERYTHING, StorageScope.PROFILE);
+		} else {
+			// For "Run in Sandbox" or other options, clear preference
+			this.storageService.remove(VybeChatTerminalPart.STORAGE_KEY_TERMINAL_RUN_EVERYTHING, StorageScope.PROFILE);
+		}
 	}
 
 	private showRunEverythingModal(): void {
@@ -1193,8 +1219,23 @@ export class VybeChatTerminalPart extends VybeChatContentPart {
 
 		this._register(addDisposableListener(doNotShowBtn, 'click', () => {
 			// "Do not show again" = always allow all terminal commands across all messages
-			this.selectPermission('Run Everything');
-			// TODO: Store global preference in settings
+			// Save global preference
+			this.selectedPermission = 'Run Everything';
+			this.storageService.store(VybeChatTerminalPart.STORAGE_KEY_TERMINAL_RUN_EVERYTHING, true, StorageScope.PROFILE, StorageTarget.USER);
+
+			// Update button text
+			if (this.permissionButton) {
+				const content = this.permissionButton.querySelector('.composer-tool-call-button-content');
+				if (content) {
+					while (content.firstChild) {
+						content.removeChild(content.firstChild);
+					}
+					content.appendChild(document.createTextNode('Run Everything'));
+					const chevron = $('div.codicon.codicon-chevron-down');
+					content.appendChild(chevron);
+				}
+			}
+
 			console.log('[Terminal] Run Everything enabled globally (all messages)');
 			this.closeWarningModal();
 		}));
@@ -1239,8 +1280,23 @@ export class VybeChatTerminalPart extends VybeChatContentPart {
 
 		this._register(addDisposableListener(continueBtn, 'click', () => {
 			// "Continue" = allow Run Everything only for this message's terminal commands
-			this.selectPermission('Run Everything');
-			console.log('[Terminal] Run Everything enabled for this message only');
+			// Do NOT save global preference - only apply to this message
+			this.selectedPermission = 'Run Everything';
+
+			// Update button text
+			if (this.permissionButton) {
+				const content = this.permissionButton.querySelector('.composer-tool-call-button-content');
+				if (content) {
+					while (content.firstChild) {
+						content.removeChild(content.firstChild);
+					}
+					content.appendChild(document.createTextNode('Run Everything'));
+					const chevron = $('div.codicon.codicon-chevron-down');
+					content.appendChild(chevron);
+				}
+			}
+
+			console.log('[Terminal] Run Everything enabled for this message only (not saved globally)');
 			this.closeWarningModal();
 		}));
 
@@ -1589,6 +1645,14 @@ export class VybeChatTerminalPart extends VybeChatContentPart {
 			}
 		}
 
+		// If we have a task ID, notify LangGraph that user rejected the command
+		if (this.taskId && this.agentService.resumeWithApproval) {
+			console.log('[Terminal] Rejecting LangGraph command for task:', this.taskId);
+			this.agentService.resumeWithApproval(this.taskId, 'reject').catch(error => {
+				console.error('[Terminal] LangGraph reject failed:', error);
+			});
+		}
+
 		// Rebuild control row to show "Skipped" status
 		this.rebuildControlRow();
 	}
@@ -1641,8 +1705,21 @@ export class VybeChatTerminalPart extends VybeChatContentPart {
 		// Rebuild control row to show "Running" status
 		this.rebuildControlRow();
 
-		// Execute command using terminal service
-		await this.executeCommand();
+		// If we have a task ID, use LangGraph resume for HITL
+		// This signals to the agent that the user approved the command
+		if (this.taskId && this.agentService.resumeWithApproval) {
+			console.log('[Terminal] Resuming LangGraph agent with approval for task:', this.taskId);
+			try {
+				await this.agentService.resumeWithApproval(this.taskId, 'approve');
+			} catch (error) {
+				console.error('[Terminal] LangGraph resume failed, falling back to direct execution:', error);
+				// Fallback to direct execution
+				await this.executeCommand();
+			}
+		} else {
+			// Fallback: Execute command directly using terminal service
+			await this.executeCommand();
+		}
 	}
 
 	/**

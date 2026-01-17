@@ -48,7 +48,7 @@ export function createSection(parent: HTMLElement, title: string | null): HTMLEl
 		sectionTitle.style.cssText = `
 			font-size: 12px;
 			font-weight: 400;
-			color: rgba(20, 20, 20, 0.55);
+			color: var(--vscode-descriptionForeground, rgba(128, 128, 128, 0.7));
 			letter-spacing: 0.07px;
 			line-height: 14px;
 		`;
@@ -93,7 +93,7 @@ export function createCell(parent: HTMLElement, config: CellConfig): HTMLElement
 			left: 12px;
 			right: 12px;
 			height: 1px;
-			background-color: rgba(20, 20, 20, 0.07);
+			background-color: var(--vscode-panel-border, var(--vscode-widget-border, rgba(128, 128, 128, 0.2)));
 		`;
 	}
 
@@ -124,7 +124,7 @@ export function createCell(parent: HTMLElement, config: CellConfig): HTMLElement
 	description.textContent = config.description;
 	description.style.cssText = `
 		font-size: 12px;
-		color: rgba(20, 20, 20, 0.55);
+		color: var(--vscode-descriptionForeground, rgba(128, 128, 128, 0.7));
 		line-height: 16px;
 	`;
 
@@ -193,7 +193,7 @@ export function createCell(parent: HTMLElement, config: CellConfig): HTMLElement
 				align-items: center;
 				gap: 10px;
 				padding: 3px 6px;
-				border: 1px solid rgba(20, 20, 20, 0.15);
+				border: 1px solid var(--vscode-input-border, rgba(128, 128, 128, 0.3));
 				border-radius: 6px;
 				background: transparent;
 				cursor: pointer;
@@ -226,8 +226,8 @@ export function createButton(label: string, variant: 'primary' | 'tertiary' = 't
 		font-size: 12px;
 		line-height: 16px;
 		${variant === 'primary'
-			? 'background-color: rgb(60, 124, 171); color: rgb(252, 252, 252);'
-			: 'border: 1px solid rgba(20, 20, 20, 0.15); color: var(--vscode-foreground); background: transparent;'
+			? 'background-color: var(--vscode-button-background, rgb(60, 124, 171)); color: var(--vscode-button-foreground, rgb(252, 252, 252));'
+			: 'border: 1px solid var(--vscode-input-border, rgba(128, 128, 128, 0.3)); color: var(--vscode-foreground); background: transparent;'
 		}
 	`;
 
@@ -271,7 +271,7 @@ export function createCellWithNumberInput(parent: HTMLElement, config: NumberInp
 			left: 12px;
 			right: 12px;
 			height: 1px;
-			background-color: rgba(20, 20, 20, 0.07);
+			background-color: var(--vscode-panel-border, var(--vscode-widget-border, rgba(128, 128, 128, 0.2)));
 		`;
 	}
 
@@ -292,7 +292,7 @@ export function createCellWithNumberInput(parent: HTMLElement, config: NumberInp
 	description.textContent = config.description;
 	description.style.cssText = `
 		font-size: 12px;
-		color: rgba(20, 20, 20, 0.55);
+		color: var(--vscode-descriptionForeground, rgba(128, 128, 128, 0.7));
 		line-height: 16px;
 	`;
 
@@ -326,7 +326,7 @@ export function createCellWithNumberInput(parent: HTMLElement, config: NumberInp
 		align-items: center;
 		gap: 10px;
 		padding: 3px 6px;
-		border: 1px solid rgba(20, 20, 20, 0.15);
+		border: 1px solid var(--vscode-input-border, rgba(128, 128, 128, 0.3));
 		border-radius: 6px;
 		background: transparent;
 		cursor: pointer;
@@ -374,7 +374,7 @@ export function createCellWithTagEditor(parent: HTMLElement, config: TagEditorCe
 			left: 12px;
 			right: 12px;
 			height: 1px;
-			background-color: rgba(20, 20, 20, 0.07);
+			background-color: var(--vscode-panel-border, var(--vscode-widget-border, rgba(128, 128, 128, 0.2)));
 		`;
 	}
 
@@ -395,7 +395,7 @@ export function createCellWithTagEditor(parent: HTMLElement, config: TagEditorCe
 	description.textContent = config.description;
 	description.style.cssText = `
 		font-size: 12px;
-		color: rgba(20, 20, 20, 0.55);
+		color: var(--vscode-descriptionForeground, rgba(128, 128, 128, 0.7));
 		line-height: 16px;
 	`;
 

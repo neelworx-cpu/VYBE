@@ -102,7 +102,7 @@ export class VybeSettingsEditor extends EditorPane {
 			width: 28px;
 			height: 28px;
 			border-radius: 50%;
-			background-color: rgba(20, 20, 20, 0.04);
+			background-color: var(--vscode-list-inactiveSelectionBackground, rgba(128, 128, 128, 0.1));
 			display: flex;
 			align-items: center;
 			justify-content: center;
@@ -115,7 +115,7 @@ export class VybeSettingsEditor extends EditorPane {
 			margin: 0;
 			font-size: 12px;
 			text-transform: uppercase;
-			color: rgba(20, 20, 20, 0.37);
+			color: var(--vscode-descriptionForeground, rgba(128, 128, 128, 0.6));
 			text-align: center;
 		`;
 
@@ -138,7 +138,7 @@ export class VybeSettingsEditor extends EditorPane {
 		plan.style.cssText = `
 			margin: 0;
 			font-size: 12px;
-			color: rgba(20, 20, 20, 0.55);
+			color: var(--vscode-descriptionForeground, rgba(128, 128, 128, 0.7));
 			overflow: hidden;
 			text-overflow: ellipsis;
 			white-space: nowrap;
@@ -167,7 +167,7 @@ export class VybeSettingsEditor extends EditorPane {
 		cellsContainer.style.cssText = 'display: flex; flex-direction: column; gap: 1px;';
 
 		// Navigation items
-		type NavItem = { divider: true } | { icon: string; label: string; id: string };
+		type NavItem = { divider: true } | { icon: string; label: string; id: string } | { footer: true; label: string };
 		const navItems: NavItem[] = [
 			{ icon: 'codicon-gear', label: 'General', id: 'general' },
 			{ icon: 'codicon-agent', label: 'Agents', id: 'agents' },
@@ -181,10 +181,16 @@ export class VybeSettingsEditor extends EditorPane {
 			{ icon: 'codicon-server', label: 'Indexing & Docs', id: 'indexing-docs' },
 			{ icon: 'codicon-globe', label: 'Network', id: 'network' },
 			{ icon: 'codicon-beaker', label: 'Beta', id: 'beta' },
+			{ divider: true },
+			{ footer: true, label: 'Docs' },
 		];
 
 		function isDivider(item: NavItem): item is { divider: true } {
 			return 'divider' in item && item.divider === true;
+		}
+
+		function isFooter(item: NavItem): item is { footer: true; label: string } {
+			return 'footer' in item && item.footer === true;
 		}
 
 		for (const item of navItems) {
@@ -193,9 +199,35 @@ export class VybeSettingsEditor extends EditorPane {
 				divider.style.cssText = `
 					margin: 8px 0;
 					border: none;
-					border-top: 1px solid rgba(20, 20, 20, 0.07);
+					border-top: 1px solid var(--vscode-panel-border, var(--vscode-widget-border, rgba(128, 128, 128, 0.2)));
 					width: 100%;
 				`;
+			} else if (isFooter(item)) {
+				// Footer item (Docs)
+				const footerCell = DOM.append(cellsContainer, DOM.$('.cursor-settings-sidebar-cell'));
+				footerCell.style.cssText = `
+					display: flex;
+					align-items: center;
+					gap: 6px;
+					padding: 4px 6px;
+					border-radius: 4px;
+					cursor: pointer;
+				`;
+
+				// Docs icon on the left
+				const docsIcon = DOM.append(footerCell, DOM.$('span.codicon.codicon-book'));
+				docsIcon.style.cssText = 'font-size: 16px; color: var(--vscode-descriptionForeground, rgba(128, 128, 128, 0.7));';
+
+				const docsLabel = DOM.append(footerCell, DOM.$('span.cursor-settings-sidebar-cell-label'));
+				docsLabel.textContent = item.label;
+				docsLabel.title = item.label;
+				docsLabel.style.cssText = `
+					font-size: 12px;
+					color: var(--vscode-foreground);
+					flex: 1;
+				`;
+
+				// Removed external link icon on the right as per user request
 			} else {
 				const cell = DOM.append(cellsContainer, DOM.$('.cursor-settings-sidebar-cell'));
 				cell.style.cssText = `
@@ -224,7 +256,7 @@ export class VybeSettingsEditor extends EditorPane {
 				}));
 
 				const icon = DOM.append(cell, DOM.$(`span.codicon.${item.icon}`));
-				icon.style.cssText = 'font-size: 16px; color: rgba(20, 20, 20, 0.55);';
+				icon.style.cssText = 'font-size: 16px; color: var(--vscode-descriptionForeground, rgba(128, 128, 128, 0.7));';
 
 				const label = DOM.append(cell, DOM.$('span.cursor-settings-sidebar-cell-label'));
 				label.textContent = item.label;
@@ -242,42 +274,6 @@ export class VybeSettingsEditor extends EditorPane {
 				}));
 			}
 		}
-
-		// Footer divider
-		const footerDivider = DOM.append(sidebarContent, DOM.$('hr.cursor-settings-sidebar-divider'));
-		footerDivider.style.cssText = `
-			margin: 8px 0;
-			border: none;
-			border-top: 1px solid rgba(20, 20, 20, 0.07);
-			width: 100%;
-		`;
-
-		// Footer
-		const footer = DOM.append(sidebarContent, DOM.$('.cursor-settings-sidebar-footer'));
-		const footerCell = DOM.append(footer, DOM.$('.cursor-settings-sidebar-cell'));
-		footerCell.style.cssText = `
-			display: flex;
-			align-items: center;
-			gap: 6px;
-			padding: 4px 6px;
-			border-radius: 4px;
-			cursor: pointer;
-		`;
-
-		const docsIcon = DOM.append(footerCell, DOM.$('span.codicon.codicon-book'));
-		docsIcon.style.cssText = 'font-size: 16px; color: rgba(20, 20, 20, 0.55);';
-
-		const docsLabel = DOM.append(footerCell, DOM.$('span.cursor-settings-sidebar-cell-label'));
-		docsLabel.textContent = 'Docs';
-		docsLabel.title = 'Docs';
-		docsLabel.style.cssText = `
-			font-size: 12px;
-			color: var(--vscode-foreground);
-			flex: 1;
-		`;
-
-		const externalIcon = DOM.append(footerCell, DOM.$('span.codicon.codicon-link-external'));
-		externalIcon.style.cssText = 'font-size: 16px; color: rgba(20, 20, 20, 0.55);';
 
 		return sidebar;
 	}

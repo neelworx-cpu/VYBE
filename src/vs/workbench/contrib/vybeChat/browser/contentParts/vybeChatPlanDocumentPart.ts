@@ -9,6 +9,8 @@ import { IInstantiationService } from '../../../../../platform/instantiation/com
 import { IMarkdownRendererService } from '../../../../../platform/markdown/browser/markdownRenderer.js';
 import { ModelDropdown, ModelDropdownState } from '../components/composer/modelDropdown.js';
 import { IVybeLLMModelService } from '../../../vybeLLM/common/vybeLLMModelService.js';
+import { ICommandService } from '../../../../../platform/commands/common/commands.js';
+import { IEditorService } from '../../../../../workbench/services/editor/common/editorService.js';
 import { MarkdownString } from '../../../../../base/common/htmlContent.js';
 import { VybeChatCodeBlockPart } from './vybeChatCodeBlockPart.js';
 import * as dom from '../../../../../base/browser/dom.js';
@@ -46,6 +48,9 @@ export class VybeChatPlanDocumentPart extends VybeChatContentPart {
 	private exportButton: HTMLElement | null = null;
 	private iconElement: HTMLElement | null = null;
 	private loadingSpinner: HTMLElement | null = null;
+	private modelService: IVybeLLMModelService | undefined = undefined;
+	private modelLabelElement: HTMLElement | null = null;
+	private modelLabelContainer: HTMLElement | null = null;
 
 	constructor(
 		content: IVybeChatPlanDocumentContent,
@@ -398,13 +403,17 @@ export class VybeChatPlanDocumentPart extends VybeChatContentPart {
 			`
 		});
 
-		const modelLabel = $('span');
-		modelLabel.textContent = this.modelState.isAutoEnabled ? 'Auto' : this.getModelLabel(this.modelState.selectedModelId);
-		modelLabel.style.cssText = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: normal; max-width: 100%; flex: 1 1 auto; min-width: 0px;';
+		// Store references for updating
+		this.modelLabelContainer = labelText;
+		this.modelLabelElement = $('span');
+		this.modelLabelElement.style.cssText = 'white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: normal; max-width: 100%; flex: 1 1 auto; min-width: 0px;';
 
-		labelText.appendChild(modelLabel);
+		labelText.appendChild(this.modelLabelElement);
 		label.appendChild(labelText);
 		content.appendChild(label);
+
+		// Update model label with icon
+		this.updateModelLabelWithIcon();
 
 		const chevron = $('span.codicon.codicon-chevron-down', {
 			style: 'font-size: 14px; flex-shrink: 0; color: var(--vscode-foreground);'
@@ -415,10 +424,9 @@ export class VybeChatPlanDocumentPart extends VybeChatContentPart {
 
 		// Create model dropdown
 		// Get model service from instantiation service if available
-		let modelService: IVybeLLMModelService | undefined;
 		try {
 			// Use invokeFunction to access the service via accessor pattern
-			modelService = this.instantiationService.invokeFunction((accessor) => {
+			this.modelService = this.instantiationService.invokeFunction((accessor) => {
 				try {
 					return accessor.get(IVybeLLMModelService);
 				} catch {
@@ -427,12 +435,17 @@ export class VybeChatPlanDocumentPart extends VybeChatContentPart {
 			});
 		} catch {
 			// Service not available - continue without it
-			modelService = undefined;
+			this.modelService = undefined;
 		}
-		this.modelDropdown = this._register(new ModelDropdown(button, modelService));
+		this.modelDropdown = this._register(new ModelDropdown(
+			button,
+			this.modelService,
+			this.instantiationService.invokeFunction(accessor => accessor.get(ICommandService)),
+			this.instantiationService.invokeFunction(accessor => accessor.get(IEditorService))
+		));
 		this._register(this.modelDropdown.onStateChange((newState: ModelDropdownState) => {
 			this.modelState = newState;
-			modelLabel.textContent = newState.isAutoEnabled ? 'Auto' : this.getModelLabel(newState.selectedModelId);
+			this.updateModelLabelWithIcon();
 		}));
 
 		this._register(dom.addDisposableListener(button, 'click', async (e) => {
@@ -1242,6 +1255,72 @@ export class VybeChatPlanDocumentPart extends VybeChatContentPart {
 			'gemini-3-pro': 'Gemini 3 Pro'
 		};
 		return modelMap[modelId] || modelId;
+	}
+
+	/**
+	 * Update model label with thinking icon if model supports thinking
+	 */
+	private async updateModelLabelWithIcon(): Promise<void> {
+		if (!this.modelLabelElement || !this.modelLabelContainer) {
+			return;
+		}
+
+		// Clear existing content
+		this.modelLabelElement.textContent = '';
+
+		// Remove any existing thinking icon
+		const existingIcon = this.modelLabelContainer.querySelector('.model-thinking-icon');
+		if (existingIcon) {
+			existingIcon.remove();
+		}
+
+		if (this.modelState.isAutoEnabled) {
+			this.modelLabelElement.textContent = 'Auto';
+			return;
+		}
+
+		const labelText = this.getModelLabel(this.modelState.selectedModelId);
+		this.modelLabelElement.textContent = labelText;
+
+		// Check if model has thinking capability
+		if (this.modelService) {
+			try {
+				const allModels = await this.modelService.getAllModels();
+				const selectedModel = allModels.find(m => m.id === this.modelState.selectedModelId);
+
+				if (selectedModel?.hasThinking) {
+					// Add thinking icon (aligned with text baseline)
+					const iconContainer = $('span');
+					iconContainer.className = 'model-thinking-icon';
+					iconContainer.style.cssText = `
+						display: inline-flex;
+						align-items: center;
+						justify-content: center;
+						gap: 2px;
+						flex-shrink: 0;
+						height: 17px;
+						line-height: 17px;
+					`;
+
+					const icon = $('span.codicon.codicon-thinking');
+					icon.className = 'codicon codicon-thinking';
+					icon.style.cssText = `
+						order: 0;
+						margin-right: 2px !important;
+						font-size: 10px !important;
+						opacity: 0.6;
+						line-height: 17px;
+						vertical-align: middle;
+						display: inline-block;
+					`;
+
+					iconContainer.appendChild(icon);
+					this.modelLabelContainer.appendChild(iconContainer);
+				}
+			} catch (error) {
+				console.warn('[VybeChatPlanDocumentPart] Failed to check model thinking capability:', error);
+			}
+		}
 	}
 
 	private handleExport(): void {

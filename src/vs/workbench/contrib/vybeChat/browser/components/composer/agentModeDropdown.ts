@@ -42,9 +42,9 @@ export class AgentModeDropdown extends Disposable {
 	];
 
 	private readonly levels: AgentLevelItem[] = [
-		{ id: 'L1', label: 'L1', description: 'Safe, read-only' },
-		{ id: 'L2', label: 'L2', description: 'Moderate capabilities' },
-		{ id: 'L3', label: 'L3', description: 'Full capabilities' }
+		{ id: 'L1', label: 'L1', description: 'Quick · 10 tools, 5 turns' },
+		{ id: 'L2', label: 'L2', description: 'Standard · 30 tools, 15 turns' },
+		{ id: 'L3', label: 'L3', description: 'Deep · 100 tools, planning' }
 	];
 
 	constructor(private anchorElement: HTMLElement) {

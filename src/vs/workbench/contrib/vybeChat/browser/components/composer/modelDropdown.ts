@@ -6,7 +6,10 @@
 import { $, append, addDisposableListener, clearNode } from '../../../../../../base/browser/dom.js';
 import { Disposable } from '../../../../../../base/common/lifecycle.js';
 import { Emitter } from '../../../../../../base/common/event.js';
-import { IVybeLLMModelService } from '../../../../vybeLLM/common/vybeLLMModelService.js';
+import { IVybeLLMModelService, VybeModel } from '../../../../vybeLLM/common/vybeLLMModelService.js';
+import { ICommandService } from '../../../../../../platform/commands/common/commands.js';
+import { IEditorService } from '../../../../../../workbench/services/editor/common/editorService.js';
+import { ModelHoverPopup } from './modelHoverPopup.js';
 
 export interface ModelItem {
 	id: string;
@@ -30,6 +33,8 @@ export class ModelDropdown extends Disposable {
 	private currentHoveredItem: HTMLElement | null = null;
 	private isHiding: boolean = false; // Flag to prevent immediate re-opening after hide
 	private justSelectedModel: boolean = false; // Flag to prevent reopening after model selection
+	private hoverPopup: ModelHoverPopup | null = null;
+	private modelCache: Map<string, VybeModel> = new Map(); // Cache full model info for hover popup
 
 	private state: ModelDropdownState = {
 		isAutoEnabled: true,
@@ -45,12 +50,17 @@ export class ModelDropdown extends Disposable {
 
 	constructor(
 		private anchorElement: HTMLElement,
-		private readonly modelService?: IVybeLLMModelService
+		private readonly modelService?: IVybeLLMModelService,
+		private readonly commandService?: ICommandService,
+		private readonly editorService?: IEditorService
 	) {
 		super();
 
 		// Clean up any existing dropdowns on construction
 		this.cleanupAllDropdowns();
+
+		// Initialize hover popup
+		this.hoverPopup = this._register(new ModelHoverPopup());
 
 		// Load local models if service is available
 		if (this.modelService) {
@@ -90,6 +100,13 @@ export class ModelDropdown extends Disposable {
 			// Use getEnabledModels() to only show models user has enabled in settings
 			const vybeModels = await this.modelService.getEnabledModels();
 			console.log(`[ModelDropdown] Loaded ${vybeModels.length} enabled models:`, vybeModels.map(m => m.label));
+
+			// Cache full model info for hover popup
+			this.modelCache.clear();
+			vybeModels.forEach(model => {
+				this.modelCache.set(model.id, model);
+			});
+
 			this.localModels = vybeModels.map((model) => ({
 				id: model.id,
 				label: model.isLocal ? `${model.label} (${model.providerLabel})` : `${model.label}`,
@@ -172,6 +189,11 @@ export class ModelDropdown extends Disposable {
 	}
 
 	hide(): void {
+		// Hide hover popup
+		if (this.hoverPopup) {
+			this.hoverPopup.hide();
+		}
+
 		// Clean up ALL dropdowns in DOM first (prevent multiple instances)
 		this.cleanupAllDropdowns();
 
@@ -420,8 +442,15 @@ export class ModelDropdown extends Disposable {
 			`;
 
 			// Scrollable models section
+			// Max-height calculated for exactly 8 items (no partial 9th item visible):
+			// Each item: 2px (top padding) + 16px (row) + 2px (bottom padding) = 20px
+			// 8 items × 20px = 160px
+			// 7 gaps × 2px = 14px
+			// Container padding: 2px top + 2px bottom = 4px
+			// Total: 160px + 14px + 4px = 178px
+			// Reduced to 174px to ensure no partial 9th item hover background is visible
 			const scrollableContainer = append(this.contentArea, $('.model-scrollable-container'));
-			scrollableContainer.style.cssText = 'max-height: 180px; overflow-y: auto; padding: 2px;';
+			scrollableContainer.style.cssText = 'max-height: 174px; overflow-y: auto; padding: 2px;';
 
 			// Models section
 			const modelsSection = append(scrollableContainer, $('.model-list-section'));
@@ -455,7 +484,136 @@ export class ModelDropdown extends Disposable {
 					this.renderModelItem(modelsSection, model, hoverBg);
 				});
 			}
+
+			// Add Models item at the very bottom
+			this.renderAddModelsItem(this.contentArea, hoverBg);
 		}
+	}
+
+	private renderAddModelsItem(container: HTMLElement, _hoverBg: string): void {
+		const isDarkTheme = this.isDarkTheme();
+
+		// Divider
+		const divider = append(container, $('.model-divider'));
+		divider.style.cssText = `
+			height: 1px;
+			width: 100%;
+			background-color: ${isDarkTheme ? '#383838' : '#d9d9d9'};
+			opacity: 0.8;
+			margin: 0 2px;
+		`;
+
+		const itemWrapper = append(container, $('.model-item-wrapper'));
+		itemWrapper.id = 'open-model-settings';
+
+		const item = append(itemWrapper, $('.composer-unified-context-menu-item'));
+		item.style.cssText = `
+			display: flex;
+			flex-direction: column;
+			padding: 0px 6px 4px 6px;
+			min-width: 0;
+			cursor: pointer;
+			border-radius: 4px;
+			background-color: transparent;
+		`;
+
+		// Main row - vertically centered
+		const mainRow = append(item, $('.model-main-row'));
+		mainRow.style.cssText = `
+			display: flex;
+			justify-content: space-between;
+			align-items: center;
+			min-width: 0;
+			width: 100%;
+			height: 16px;
+			gap: 6px;
+		`;
+
+		// Left side - vertically centered
+		const leftSide = append(mainRow, $('.model-left'));
+		leftSide.style.cssText = `
+			display: flex;
+			align-items: center;
+			gap: 6px;
+			min-width: 0;
+			height: 16px;
+			width: 100%;
+		`;
+
+		const labelContainer = append(leftSide, $('.model-label-container'));
+		labelContainer.style.cssText = `
+			display: flex;
+			width: 100%;
+			align-items: center;
+			min-width: 0;
+			gap: 6px;
+			height: 16px;
+		`;
+
+		const labelWrapper = append(labelContainer, $('.model-label-wrapper'));
+		labelWrapper.style.cssText = `
+			max-width: 100%;
+			flex-shrink: 1;
+			min-width: 0;
+			color: ${isDarkTheme ? 'rgba(228, 228, 228, 0.92)' : 'rgba(51, 51, 51, 0.9)'};
+			display: flex;
+			align-items: center;
+		`;
+
+		const label = append(labelWrapper, $('span.monaco-highlighted-label'));
+		label.textContent = 'Add Models';
+		label.style.cssText = `
+			color: ${isDarkTheme ? 'rgba(228, 228, 228, 0.92)' : 'rgba(51, 51, 51, 0.9)'};
+			font-size: 12px;
+			line-height: 16px;
+			white-space: nowrap;
+			text-overflow: ellipsis;
+			overflow: hidden;
+			display: block;
+			width: 100%;
+		`;
+
+		// Right side - chevron, vertically centered
+		const rightSide = append(mainRow, $('.model-right'));
+		rightSide.style.cssText = `
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			gap: 6px;
+			height: 16px;
+		`;
+
+		const chevron = append(rightSide, $('span.codicon.codicon-chevron-right'));
+		chevron.style.cssText = `
+			font-size: 10px;
+			opacity: 0.3;
+			color: ${isDarkTheme ? 'rgba(228, 228, 228, 0.92)' : 'rgba(51, 51, 51, 0.9)'};
+			display: flex;
+			align-items: center;
+			line-height: 1;
+			transform: translateY(2px);
+		`;
+
+		// No hover effect - remove background on hover
+		// Click handler - open settings models tab directly
+		this._register(addDisposableListener(item, 'click', async (e) => {
+			e.stopPropagation();
+			e.preventDefault();
+			this.hide();
+			if (this.commandService && this.editorService) {
+				// Open VYBE settings editor
+				await this.commandService.executeCommand('vybe.openSettingsEditor');
+				// Wait for editor to open, then select models tab
+				setTimeout(() => {
+					if (this.editorService) {
+						const activeEditor = this.editorService.activeEditorPane;
+						if (activeEditor && (activeEditor as any).selectTab) {
+							(activeEditor as any).selectTab('models');
+						}
+					}
+				}, 100);
+			}
+		}));
 	}
 
 	private renderToggle(
@@ -688,7 +846,20 @@ export class ModelDropdown extends Disposable {
 			overflow: hidden;
 		`;
 
-		const labelWrapper = append(labelContainer, $('.model-label-wrapper'));
+		// Label text wrapper (flex-shrink: 1 to allow icon space)
+		const labelTextWrapper = append(labelContainer, $('div'));
+		labelTextWrapper.style.cssText = `
+			display: flex;
+			width: 100%;
+			align-items: center;
+			min-width: 0;
+			gap: 6px;
+			height: 17px;
+			overflow: hidden;
+		`;
+
+		// Label text container (flex-shrink: 1)
+		const labelWrapper = append(labelTextWrapper, $('div'));
 		labelWrapper.style.cssText = `
 			max-width: 100%;
 			flex-shrink: 1;
@@ -709,18 +880,37 @@ export class ModelDropdown extends Disposable {
 			width: 100%;
 		`;
 
-		// Brain icon if model has thinking
+		// Thinking icon if model has thinking (aligned with text baseline)
 		if (model.hasThinking) {
-			const iconContainer = append(labelContainer, $('.model-icon-container'));
-			iconContainer.style.cssText = 'flex-shrink: 0;';
+			const iconContainer = append(labelTextWrapper, $('div'));
+			iconContainer.style.cssText = `
+				flex-shrink: 0;
+				display: flex;
+				align-items: center;
+				height: 17px;
+			`;
 
-			const icon = append(iconContainer, $('span.codicon.codicon-symbol-namespace'));
+			const iconInner = append(iconContainer, $('span'));
+			iconInner.style.cssText = `
+				display: inline-flex;
+				align-items: center;
+				justify-content: center;
+				gap: 2px;
+				flex-shrink: 0;
+				height: 17px;
+				line-height: 17px;
+			`;
+
+			const icon = append(iconInner, $('span.codicon.codicon-thinking'));
+			icon.className = 'codicon codicon-thinking';
 			icon.style.cssText = `
-				font-size: 10px;
+				order: 0;
+				margin-right: 2px !important;
+				font-size: 10px !important;
 				opacity: 0.6;
-				line-height: 1;
-				transform: translateY(3px);
-				margin-right: 2px;
+				line-height: 17px;
+				vertical-align: middle;
+				display: inline-block;
 			`;
 		}
 
@@ -750,6 +940,21 @@ export class ModelDropdown extends Disposable {
 			}
 			item.style.backgroundColor = hoverBg;
 			this.currentHoveredItem = item;
+
+			// Show hover popup with model info
+			if (this.hoverPopup && this.modelService) {
+				const fullModel = this.modelCache.get(model.id);
+				if (fullModel) {
+					this.hoverPopup.show(fullModel, item);
+				}
+			}
+		}));
+
+		// Hide hover popup on mouse leave
+		this._register(addDisposableListener(item, 'mouseleave', () => {
+			if (this.hoverPopup) {
+				this.hoverPopup.hide();
+			}
 		}));
 
 		// Click handler

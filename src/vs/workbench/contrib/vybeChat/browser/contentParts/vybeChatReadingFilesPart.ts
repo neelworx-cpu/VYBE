@@ -17,12 +17,14 @@ const $ = dom.$;
  */
 export interface IVybeChatReadingFilesContent {
 	kind: 'readingFiles';
+	id?: string;
 	files: Array<{
 		name: string;
 		path?: string;
 		lineRange?: { start: number; end: number };
 	}>;
 	isStreaming?: boolean;
+	error?: { code: string; message: string };
 }
 
 /**
@@ -32,6 +34,7 @@ export interface IVybeChatReadingFilesContent {
 export class VybeChatReadingFilesPart extends VybeChatContentPart {
 	private container: HTMLElement | undefined;
 	private headerElement: HTMLElement | undefined;
+	private headerTextElement: HTMLElement | undefined;
 	private readTextElement: HTMLElement | undefined;
 	private filenameElement: HTMLElement | undefined;
 	private iconElement: HTMLElement | undefined;
@@ -49,7 +52,7 @@ export class VybeChatReadingFilesPart extends VybeChatContentPart {
 		notificationService?: INotificationService
 	) {
 		super('readingFiles');
-		this.partId = (content as any).id ?? undefined;
+		this.partId = content.id;
 		this.files = content.files || [];
 		this.isStreaming = content.isStreaming ?? false;
 		this.editorService = editorService;
@@ -118,7 +121,7 @@ export class VybeChatReadingFilesPart extends VybeChatContentPart {
 		});
 
 		// Header text
-		const headerText = $('.collapsible-header-text', {
+		this.headerTextElement = $('.collapsible-header-text', {
 			style: `
 				flex: 0 1 auto;
 				min-width: 0px;
@@ -231,12 +234,12 @@ export class VybeChatReadingFilesPart extends VybeChatContentPart {
 		textInner.appendChild(this.readTextElement);
 		textInner.appendChild(this.filenameElement);
 		textWrapper.appendChild(textInner);
-		headerText.appendChild(textWrapper);
+		this.headerTextElement.appendChild(textWrapper);
 		// Add loading spinner if streaming
 		if (this.iconElement) {
-			headerText.appendChild(this.iconElement);
+			this.headerTextElement.appendChild(this.iconElement);
 		}
-		headerContent.appendChild(headerText);
+		headerContent.appendChild(this.headerTextElement);
 		this.headerElement.appendChild(headerContent);
 
 		// Build container hierarchy
@@ -289,18 +292,15 @@ export class VybeChatReadingFilesPart extends VybeChatContentPart {
 		}
 
 		// Validate line range
-		let lineRange = file.lineRange;
-		if (lineRange) {
-			if (lineRange.start < 1) {
-				lineRange.start = 1;
+		const lineRange = file.lineRange
+			? {
+				start: file.lineRange.start < 1 ? 1 : file.lineRange.start,
+				end: file.lineRange.end < file.lineRange.start ? file.lineRange.start : file.lineRange.end
 			}
-			if (lineRange.end < lineRange.start) {
-				lineRange.end = lineRange.start;
-			}
-		}
+			: undefined;
 
 		try {
-			const editorInput: any = {
+			const editorInput: { resource: URI; options?: { selection: { startLineNumber: number; startColumn: number; endLineNumber: number; endColumn: number } } } = {
 				resource: fileUri
 			};
 
@@ -327,19 +327,17 @@ export class VybeChatReadingFilesPart extends VybeChatContentPart {
 
 	updateContent(data: IVybeChatReadingFilesContent): void {
 		// Update ID if provided
-		const dataId = (data as any).id;
-		if (dataId !== undefined && dataId !== this.partId) {
-			this.partId = dataId;
+		if (data.id !== undefined && data.id !== this.partId) {
+			this.partId = data.id;
 			if (this.container && this.partId) {
 				this.container.setAttribute('data-part-id', this.partId);
 			}
 		}
 
 		// Handle errors
-		const dataError = (data as any).error;
-		if (dataError !== undefined) {
+		if (data.error !== undefined) {
 			if (this.filenameElement) {
-				this.filenameElement.textContent = `Error: ${dataError.message}`;
+				this.filenameElement.textContent = `Error: ${data.error.message}`;
 				this.filenameElement.style.opacity = '0.5';
 				this.filenameElement.style.color = 'var(--vscode-errorForeground)';
 			}
@@ -388,26 +386,23 @@ export class VybeChatReadingFilesPart extends VybeChatContentPart {
 			}
 
 			// Handle complete -> streaming transition (add spinner)
-			if (!wasStreaming && this.isStreaming && this.headerElement) {
-				const headerText = this.headerElement.querySelector('.collapsible-header-text');
-				if (headerText) {
-					this.iconElement = $('div.codicon.codicon-loading.codicon-modifier-spin', {
-						style: `
-							color: var(--vscode-foreground);
-							opacity: 0.55;
-							line-height: 12px;
-							width: 12px;
-							height: 12px;
-							display: flex;
-							justify-content: center;
-							align-items: center;
-							flex-shrink: 0;
-							font-size: 12px;
-							margin-left: 4px;
-						`
-					});
-					headerText.appendChild(this.iconElement);
-				}
+			if (!wasStreaming && this.isStreaming && this.headerTextElement) {
+				this.iconElement = $('div.codicon.codicon-loading.codicon-modifier-spin', {
+					style: `
+						color: var(--vscode-foreground);
+						opacity: 0.55;
+						line-height: 12px;
+						width: 12px;
+						height: 12px;
+						display: flex;
+						justify-content: center;
+						align-items: center;
+						flex-shrink: 0;
+						font-size: 12px;
+						margin-left: 4px;
+					`
+				});
+				this.headerTextElement.appendChild(this.iconElement);
 			}
 		}
 	}

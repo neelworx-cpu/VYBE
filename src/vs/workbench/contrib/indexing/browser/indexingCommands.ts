@@ -12,7 +12,7 @@ import { INotificationService } from '../../../../platform/notification/common/n
 import { IDialogService } from '../../../../platform/dialogs/common/dialogs.js';
 import { localize } from '../../../../nls.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
-import { CONFIG_ENABLE_LOCAL_INDEXING } from '../../../services/indexing/common/indexingConfiguration.js';
+import { CONFIG_CLOUD_INDEXING_ENABLED } from '../../../services/indexing/common/indexingConfiguration.js';
 import { IndexState } from '../../../services/indexing/common/indexService.js';
 
 // Phase 12: Command to pause indexing
@@ -35,7 +35,7 @@ class PauseIndexingAction extends Action2 {
 		const dialogService = accessor.get(IDialogService);
 		const configurationService = accessor.get(IConfigurationService);
 
-		const indexingEnabled = configurationService.getValue<boolean>(CONFIG_ENABLE_LOCAL_INDEXING) ?? false;
+		const indexingEnabled = configurationService.getValue<boolean>(CONFIG_CLOUD_INDEXING_ENABLED) ?? false;
 		if (!indexingEnabled) {
 			notificationService.info(localize('indexing.notEnabled', 'Indexing is not enabled'));
 			return;
@@ -87,7 +87,7 @@ class ResumeIndexingAction extends Action2 {
 		const notificationService = accessor.get(INotificationService);
 		const configurationService = accessor.get(IConfigurationService);
 
-		const indexingEnabled = configurationService.getValue<boolean>(CONFIG_ENABLE_LOCAL_INDEXING) ?? false;
+		const indexingEnabled = configurationService.getValue<boolean>(CONFIG_CLOUD_INDEXING_ENABLED) ?? false;
 		if (!indexingEnabled) {
 			notificationService.info(localize('indexing.notEnabled', 'Indexing is not enabled'));
 			return;
@@ -126,7 +126,7 @@ class RebuildIndexAction extends Action2 {
 		const dialogService = accessor.get(IDialogService);
 		const configurationService = accessor.get(IConfigurationService);
 
-		const indexingEnabled = configurationService.getValue<boolean>(CONFIG_ENABLE_LOCAL_INDEXING) ?? false;
+		const indexingEnabled = configurationService.getValue<boolean>(CONFIG_CLOUD_INDEXING_ENABLED) ?? false;
 		if (!indexingEnabled) {
 			notificationService.info(localize('indexing.notEnabled', 'Indexing is not enabled'));
 			return;

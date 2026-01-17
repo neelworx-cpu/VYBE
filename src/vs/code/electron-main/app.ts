@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { app, BrowserWindow, protocol, session, Session, systemPreferences, WebFrameMain } from 'electron';
+import { app, protocol, session, Session, systemPreferences, WebFrameMain } from 'electron';
 import { addUNCHostToAllowlist, disableUNCAccessRestrictions } from '../../base/node/unc.js';
 import { validatedIpcMain } from '../../base/parts/ipc/electron-main/ipcMain.js';
 import { hostname, release } from 'os';
@@ -98,7 +98,7 @@ import { IUserDataProfilesMainService } from '../../platform/userDataProfile/ele
 import { IExtensionsProfileScannerService } from '../../platform/extensionManagement/common/extensionsProfileScannerService.js';
 import { IExtensionsScannerService } from '../../platform/extensionManagement/common/extensionsScannerService.js';
 import { ExtensionsScannerService } from '../../platform/extensionManagement/node/extensionsScannerService.js';
-import { VybeMcpMainService } from './vybeMcpMainService.js';
+// VybeMcpMainService removed - LangGraph handles all agent operations
 import { UserDataProfilesHandler } from '../../platform/userDataProfile/electron-main/userDataProfilesHandler.js';
 import { ProfileStorageChangesListenerChannel } from '../../platform/userDataProfile/electron-main/userDataProfileStorageIpc.js';
 import { Promises, RunOnceScheduler, runWhenGlobalIdle } from '../../base/common/async.js';
@@ -119,11 +119,12 @@ import { AuxiliaryWindowsMainService } from '../../platform/auxiliaryWindow/elec
 import { normalizeNFC } from '../../base/common/normalization.js';
 import { ICSSDevelopmentService, CSSDevelopmentService } from '../../platform/cssDev/node/cssDevService.js';
 import { INativeMcpDiscoveryHelperService, NativeMcpDiscoveryHelperChannelName } from '../../platform/mcp/common/nativeMcpDiscoveryHelper.js';
-import { VybeLLMMessageChannel } from '../../workbench/contrib/vybeLLM/electron-main/vybeLLMMessageChannel.js';
+// VybeLLMMessageChannel removed - LangGraph handles all LLM communication now
 import { NativeMcpDiscoveryHelperService } from '../../platform/mcp/node/nativeMcpDiscoveryHelperService.js';
 import { IWebContentExtractorService } from '../../platform/webContentExtractor/common/webContentExtractor.js';
 import { NativeWebContentExtractorService } from '../../platform/webContentExtractor/electron-main/webContentExtractorService.js';
 import ErrorTelemetry from '../../platform/telemetry/electron-main/errorTelemetry.js';
+import { registerVybeIpcHandlers } from '../../workbench/contrib/vybeAgent/electron-main/vybeIpcHandlers.js';
 
 /**
  * The main VS Code application. There will only ever be one instance,
@@ -139,7 +140,7 @@ export class CodeApplication extends Disposable {
 	private windowsMainService: IWindowsMainService | undefined;
 	private auxiliaryWindowsMainService: IAuxiliaryWindowsMainService | undefined;
 	private nativeHostMainService: INativeHostMainService | undefined;
-	private vybeMcpService: VybeMcpMainService | null = null;
+	// vybeMcpService removed - LangGraph handles all agent operations
 
 	constructor(
 		private readonly mainProcessNodeIpcServer: NodeIPCServer,
@@ -516,79 +517,7 @@ export class CodeApplication extends Disposable {
 
 		validatedIpcMain.on('vscode:reloadWindow', event => event.sender.reload());
 
-		// VYBE MCP: Get environment variable from main process
-		validatedIpcMain.handle('vscode:getVybeMcpCommand', async (event) => {
-			return process.env.VYBE_MCP_COMMAND || undefined;
-		});
-
-		// VYBE MCP: Spawn MCP process in main process
-		validatedIpcMain.handle('vscode:spawnVybeMcp', async (event, options: { mcpCommand: string; cwd?: string }) => {
-			try {
-				// Instantiate service directly (not using service collection)
-				this.vybeMcpService = new VybeMcpMainService(
-					this.loggerService,
-					this.environmentMainService
-				);
-				const result = await this.vybeMcpService.spawnMcp({
-					mcpCommand: options.mcpCommand,
-					cwd: options.cwd
-				});
-				return result;
-			} catch (error) {
-				const errorMessage = error instanceof Error ? error.message : String(error);
-				return { success: false, error: errorMessage };
-			}
-		});
-
-		// VYBE MCP: Tool response handler is registered in vybeMcpToolBridge
-		// No need to register here - the bridge uses ipcMain directly for dynamic request/response matching
-
-		// VYBE MCP: Send command to MCP process (Phase 4.1)
-		validatedIpcMain.handle('vscode:sendVybeMcpCommand', async (event, { command, params, taskId }: { command: string; params: any; taskId: string }) => {
-			try {
-				if (!this.vybeMcpService) {
-					throw new Error('MCP service is not initialized');
-				}
-				const result = await this.vybeMcpService.sendCommand(command, params, taskId);
-				return result;
-			} catch (error) {
-				throw error;
-			}
-		});
-
-		// VYBE MCP: Forward agent events from renderer to all renderers (for LLM streaming events)
-		validatedIpcMain.on('vscode:vybeAgentEvent', (event, payload: { taskId: string; event: any }) => {
-			// Forward to all renderer windows
-			const windows = BrowserWindow.getAllWindows();
-			for (const window of windows) {
-				window.webContents.send('vscode:vybeAgentEvent', payload);
-			}
-		});
-
-		// VYBE MCP: Call MCP tool from renderer (for model listing, etc.)
-		validatedIpcMain.handle('vscode:vybeMcpCallTool', async (event, { toolName, params }: { toolName: string; params: any }) => {
-			try {
-				if (!this.vybeMcpService) {
-					throw new Error('MCP service is not initialized');
-				}
-				this.logService.debug(`[VYBE MCP] Calling tool via command: ${toolName}`, params);
-				// Use sendCommand to call the tool via command protocol
-				// The MCP process will handle this as a 'call_tool' command
-				const taskId = `tool_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-				const result = await this.vybeMcpService.sendCommand('call_tool', {
-					tool_name: toolName,
-					arguments: params
-				}, taskId);
-				this.logService.debug(`[VYBE MCP] Tool result received for: ${toolName}`);
-				return result.result;
-			} catch (error) {
-				const errorMessage = error instanceof Error ? error.message : String(error);
-				const errorStack = error instanceof Error ? error.stack : undefined;
-				this.logService.error(`[VYBE MCP] callTool error: ${errorMessage}`, errorStack);
-				// Ensure error is properly serialized for IPC
-				throw new Error(errorMessage);
-			}
-		});
+		// VYBE MCP handlers removed - LangGraph handles all agent operations via registerVybeIpcHandlers()
 
 		// VYBE MCP: Fetch API key from Supabase Edge Function (main process has no CORS restrictions)
 		validatedIpcMain.handle('vscode:vybeFetchApiKey', async (event, { provider }: { provider: string }) => {
@@ -636,6 +565,16 @@ export class CodeApplication extends Disposable {
 				}
 
 				this.logService.info(`[VYBE MCP] Successfully fetched ${provider} API key`);
+
+				// Store the key in LangGraph's shared store for immediate use
+				try {
+					const { setSharedApiKey } = await import('../../workbench/contrib/vybeAgent/electron-main/vybeLangGraphService.js');
+					setSharedApiKey(provider, apiKey);
+					this.logService.info(`[VYBE MCP] API key stored in LangGraph shared store for ${provider}`);
+				} catch (e) {
+					this.logService.debug(`[VYBE MCP] Could not store key in LangGraph (may not be initialized yet)`);
+				}
+
 				return { apiKey };
 			} catch (error) {
 				const errorMessage = error instanceof Error ? error.message : String(error);
@@ -644,28 +583,14 @@ export class CodeApplication extends Disposable {
 			}
 		});
 
-		// VYBE MCP: Patch utilities (Node.js-only, called from renderer via IPC)
-		validatedIpcMain.handle('vscode:vybeValidatePatch', async (event, originalContent: string, patch: string) => {
-			try {
-				const { validatePatch } = await import('../../workbench/contrib/mcp/node/vybePatchUtils.js');
-				return validatePatch(originalContent, patch);
-			} catch (error) {
-				return {
-					valid: false,
-					error: error instanceof Error ? error.message : String(error),
-					hunkCount: 0
-				};
-			}
-		});
+		// ========================================================================
+		// VYBE Agent: Direct LLM streaming (no MCP subprocess)
+		// ========================================================================
+		// VYBE Agent IPC Handlers are registered via registerVybeIpcHandlers()
+		// All LLM operations now go through LangGraph in the main process
+		// ========================================================================
 
-		validatedIpcMain.handle('vscode:vybeApplyPatch', async (event, originalContent: string, patch: string) => {
-			try {
-				const { applyPatchInMemory } = await import('../../workbench/contrib/mcp/node/vybePatchUtils.js');
-				return applyPatchInMemory(originalContent, patch);
-			} catch (error) {
-				return null;
-			}
-		});
+		// VYBE MCP Patch utilities - removed, LangGraph handles tool execution
 
 		validatedIpcMain.handle('vscode:notifyZoomLevel', async (event, zoomLevel: number | undefined) => {
 			const window = this.windowsMainService?.getWindowByWebContents(event.sender);
@@ -673,6 +598,18 @@ export class CodeApplication extends Disposable {
 				window.notifyZoomLevel(zoomLevel);
 			}
 		});
+
+		// ========================================================================
+		// VYBE Agent: New production streaming architecture
+		// ========================================================================
+		try {
+			registerVybeIpcHandlers();
+			this.logService.info('[VYBE Agent] Production streaming handlers registered successfully');
+		} catch (error) {
+			const errorMessage = error instanceof Error ? error.message : String(error);
+			const errorStack = error instanceof Error ? error.stack : undefined;
+			this.logService.error(`[VYBE Agent] Failed to register streaming handlers: ${errorMessage}`, errorStack);
+		}
 
 		//#endregion
 	}
@@ -1396,9 +1333,7 @@ export class CodeApplication extends Disposable {
 		const utilityProcessWorkerChannel = ProxyChannel.fromService(accessor.get(IUtilityProcessWorkerMainService), disposables);
 		mainProcessElectronServer.registerChannel(ipcUtilityProcessWorkerChannelName, utilityProcessWorkerChannel);
 
-		// VYBE LLM Message Channel
-		const vybeLLMMessageChannel = new VybeLLMMessageChannel();
-		mainProcessElectronServer.registerChannel('vybe-channel-llmMessage', vybeLLMMessageChannel);
+		// VYBE LLM Message Channel - removed, LangGraph handles all LLM communication
 	}
 
 	private async openFirstWindow(accessor: ServicesAccessor, initialProtocolUrls: IInitialProtocolUrls | undefined): Promise<ICodeWindow[]> {

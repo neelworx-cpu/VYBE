@@ -138,13 +138,39 @@
 }
 
 /* Panel on left/right - also rounded */
-.monaco-workbench .part.panel.left,
-.monaco-workbench .part.panel.right {
+.monaco-workbench .part.panel.left {
 	border-radius: 6px;
-	margin: 0 3px 3px 3px;
+	margin-top: 0;
+	margin-bottom: 13px;
+	margin-left: 3px;
+	margin-right: 3px;
 	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
 	border: none;
 	background-color: var(--vscode-sideBar-background); /* VYBE: Use theme panel color */
+}
+
+/* Right Panel (Console, etc.) - Rounded on ALL 4 sides */
+/* Aligns with editor panel for consistent spacing */
+/* CRITICAL: Ensure window controls (close/minimize/maximize) are not overlapped */
+.monaco-workbench .part.panel.right {
+	border-radius: 6px;
+	margin-top: 0;
+	margin-bottom: 13px;
+	margin-left: 2px; /* Match editor margin-right for alignment */
+	margin-right: 3px;
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+	border: none;
+	background-color: var(--vscode-sideBar-background); /* VYBE: Use theme panel color */
+	position: relative;
+	z-index: 1; /* Ensure panel is below window controls (z-index: 3000) */
+}
+
+/* Ensure right panel content doesn't overlap with window controls area */
+.monaco-workbench .part.panel.right > .content {
+	padding-top: 0;
+	overflow: hidden;
+	/* Ensure content respects titlebar/window controls area */
+	margin-top: 0;
 }
 
 /* Auxiliary Bar (Chat/Agent Panel) - Rounded on ALL 4 sides */
