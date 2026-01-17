@@ -5,12 +5,11 @@
 
 import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
-import { IWorkspaceContextService, toWorkspaceIdentifier, isWorkspaceIdentifier, isSingleFolderWorkspaceIdentifier, IAnyWorkspaceIdentifier } from '../../../../platform/workspace/common/workspace.js';
+import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import { IEditorService } from '../../../services/editor/common/editorService.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { ILanguageModelToolsService, CountTokensCallback, IToolData, IToolImpl, IToolInvocation, IToolResult } from '../../chat/common/languageModelToolsService.js';
 import { IWorkbenchContribution } from '../../../common/contributions.js';
-import { getExtHostIndexingProxy } from '../../../api/browser/mainThreadIndexing.js';
 
 // Phase 12: MCP tool data definitions (external contract, no vybe_ prefix)
 const GetContextForQueryMcpToolData: IToolData = {
@@ -76,141 +75,79 @@ const GetIndexStatusMcpToolData: IToolData = {
 	tags: ['indexing', 'rag', 'mcp']
 };
 
-// Phase 12: Helper to extract workspaceId
-function getWorkspaceId(workspaceIdentifier: IAnyWorkspaceIdentifier): string {
-	if (workspaceIdentifier.id) {
-		return workspaceIdentifier.id;
-	}
-	if (isWorkspaceIdentifier(workspaceIdentifier) && workspaceIdentifier.configPath) {
-		return workspaceIdentifier.configPath.fsPath;
-	}
-	if (isSingleFolderWorkspaceIdentifier(workspaceIdentifier)) {
-		return workspaceIdentifier.uri.fsPath;
-	}
-	return '';
-}
-
 // Phase 12: MCP tool implementations (same as internal, but with MCP names)
+// NOTE: These tools relied on local indexing RPC methods that have been removed.
+// Cloud indexing is now the only method. These tools are stubbed to return appropriate errors.
+
 class GetContextForQueryMcpTool implements IToolImpl {
-	constructor(
-		private readonly workspaceContextService: IWorkspaceContextService
-	) { }
+	// eslint-disable-next-line @typescript-eslint/no-unused-vars
+	constructor(_workspaceContextService: IWorkspaceContextService) { }
 
-	async invoke(invocation: IToolInvocation, _countTokens: CountTokensCallback, _progress: any, token: CancellationToken): Promise<IToolResult> {
-		const extHostIndexing = getExtHostIndexingProxy();
-		if (!extHostIndexing) {
-			throw new Error('ExtHostIndexing proxy not available');
-		}
-
-		const workspace = this.workspaceContextService.getWorkspace();
-		const workspaceIdentifier = toWorkspaceIdentifier(workspace);
-		const workspaceId = getWorkspaceId(workspaceIdentifier);
-
-		const { query, maxChars, maxTokens } = invocation.parameters as { query: string; maxChars?: number; maxTokens?: number };
-
-		if (!query || typeof query !== 'string') {
-			throw new Error('query parameter is required and must be a string');
-		}
-
-		const items = await extHostIndexing.$devAssembleContextForQuery(workspaceId, query, { maxChars, maxTokens }, token);
-
+	async invoke(_invocation: IToolInvocation, _countTokens: CountTokensCallback, _progress: unknown, _token: CancellationToken): Promise<IToolResult> {
+		// This tool relied on $devAssembleContextForQuery which was part of local indexing
+		// Use the codebase_search tool instead for cloud-based semantic search
 		return {
 			content: [{
 				kind: 'text',
-				value: JSON.stringify({ items }, null, 2)
+				value: JSON.stringify({
+					error: 'This tool is not available with cloud indexing. Use codebase_search tool instead.',
+					suggestion: 'Use the codebase_search tool for semantic code search with cloud indexing.'
+				}, null, 2)
 			}]
 		};
 	}
 }
 
 class GetRepoOverviewMcpTool implements IToolImpl {
-	constructor(
-		private readonly workspaceContextService: IWorkspaceContextService
-	) { }
+	// eslint-disable-next-line @typescript-eslint/no-unused-vars
+	constructor(_workspaceContextService: IWorkspaceContextService) { }
 
-	async invoke(invocation: IToolInvocation, _countTokens: CountTokensCallback, _progress: any, token: CancellationToken): Promise<IToolResult> {
-		const extHostIndexing = getExtHostIndexingProxy();
-		if (!extHostIndexing) {
-			throw new Error('ExtHostIndexing proxy not available');
-		}
-
-		const workspace = this.workspaceContextService.getWorkspace();
-		const workspaceIdentifier = toWorkspaceIdentifier(workspace);
-		const workspaceId = getWorkspaceId(workspaceIdentifier);
-
-		const overview = await extHostIndexing.$devGetRepoOverview(workspaceId, token);
-
+	async invoke(_invocation: IToolInvocation, _countTokens: CountTokensCallback, _progress: unknown, _token: CancellationToken): Promise<IToolResult> {
+		// This tool relied on $devGetRepoOverview which was part of local indexing
 		return {
 			content: [{
 				kind: 'text',
-				value: JSON.stringify(overview, null, 2)
+				value: JSON.stringify({
+					error: 'This tool is not available with cloud indexing.',
+					suggestion: 'Use file listing and codebase_search tools to explore the repository.'
+				}, null, 2)
 			}]
 		};
 	}
 }
 
 class GetActiveFileContextMcpTool implements IToolImpl {
-	constructor(
-		private readonly workspaceContextService: IWorkspaceContextService,
-		private readonly editorService: IEditorService
-	) { }
+	// eslint-disable-next-line @typescript-eslint/no-unused-vars
+	constructor(_workspaceContextService: IWorkspaceContextService, _editorService: IEditorService) { }
 
-	async invoke(invocation: IToolInvocation, _countTokens: CountTokensCallback, _progress: any, token: CancellationToken): Promise<IToolResult> {
-		const extHostIndexing = getExtHostIndexingProxy();
-		if (!extHostIndexing) {
-			throw new Error('ExtHostIndexing proxy not available');
-		}
-
-		const activeEditorPane = this.editorService.activeEditorPane;
-		if (!activeEditorPane) {
-			throw new Error('No active editor');
-		}
-
-		const resource = activeEditorPane.input?.resource;
-		if (!resource) {
-			throw new Error('Active editor has no resource');
-		}
-
-		const workspace = this.workspaceContextService.getWorkspace();
-		const workspaceIdentifier = toWorkspaceIdentifier(workspace);
-		const workspaceId = getWorkspaceId(workspaceIdentifier);
-
-		const { maxChars } = invocation.parameters as { maxChars?: number };
-
-		// Use the active file URI as the query to get context around it
-		const query = resource.fsPath;
-		const items = await extHostIndexing.$devAssembleContextForQuery(workspaceId, query, { maxChars }, token);
-
+	async invoke(_invocation: IToolInvocation, _countTokens: CountTokensCallback, _progress: unknown, _token: CancellationToken): Promise<IToolResult> {
+		// This tool relied on $devAssembleContextForQuery which was part of local indexing
 		return {
 			content: [{
 				kind: 'text',
-				value: JSON.stringify({ items }, null, 2)
+				value: JSON.stringify({
+					error: 'This tool is not available with cloud indexing.',
+					suggestion: 'Use the read_file tool to read the active file content directly.'
+				}, null, 2)
 			}]
 		};
 	}
 }
 
 class GetIndexStatusMcpTool implements IToolImpl {
-	constructor(
-		private readonly workspaceContextService: IWorkspaceContextService
-	) { }
+	// eslint-disable-next-line @typescript-eslint/no-unused-vars
+	constructor(_workspaceContextService: IWorkspaceContextService) { }
 
-	async invoke(invocation: IToolInvocation, _countTokens: CountTokensCallback, _progress: any, token: CancellationToken): Promise<IToolResult> {
-		const extHostIndexing = getExtHostIndexingProxy();
-		if (!extHostIndexing) {
-			throw new Error('ExtHostIndexing proxy not available');
-		}
-
-		const workspace = this.workspaceContextService.getWorkspace();
-		const workspaceIdentifier = toWorkspaceIdentifier(workspace);
-		const workspaceId = getWorkspaceId(workspaceIdentifier);
-
-		const status = await extHostIndexing.$getStatus(workspaceId);
-
+	async invoke(_invocation: IToolInvocation, _countTokens: CountTokensCallback, _progress: unknown, _token: CancellationToken): Promise<IToolResult> {
+		// This tool relied on $getStatus which was part of local indexing
+		// For cloud indexing status, check the Settings > Indexing & Docs tab
 		return {
 			content: [{
 				kind: 'text',
-				value: JSON.stringify(status, null, 2)
+				value: JSON.stringify({
+					error: 'This tool is not available with cloud indexing.',
+					suggestion: 'Check the Settings > Indexing & Docs tab for indexing status.'
+				}, null, 2)
 			}]
 		};
 	}

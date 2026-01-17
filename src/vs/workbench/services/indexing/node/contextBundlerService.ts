@@ -8,8 +8,7 @@ import { Disposable } from '../../../../base/common/lifecycle.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { ContextBundle, ContextQuery, IContextBundlerService } from '../common/contextBundlerService.js';
 import { ISemanticSearchService } from '../common/semanticSearchService.js';
-import { IGraphService } from '../common/graphService.js';
-import { CONFIG_ENABLE_LOCAL_SEMANTIC_SEARCH, CONFIG_ENABLE_LOCAL_INDEXING, CONFIG_EMBEDDING_MODEL } from '../common/indexingConfiguration.js';
+import { CONFIG_CLOUD_INDEXING_ENABLED } from '../common/indexingConfiguration.js';
 
 /**
  * Phase 1 stub: returns an empty bundle with uninitialized freshness metadata.
@@ -20,14 +19,12 @@ export class ContextBundlerService extends Disposable implements IContextBundler
 	constructor(
 		@IConfigurationService private readonly configurationService: IConfigurationService,
 		@ISemanticSearchService private readonly semanticSearchService: ISemanticSearchService,
-		@IGraphService private readonly graphService: IGraphService,
 	) {
 		super();
 	}
 
 	private isEnabled(): boolean {
-		return !!this.configurationService.getValue<boolean>(CONFIG_ENABLE_LOCAL_INDEXING)
-			&& !!this.configurationService.getValue<boolean>(CONFIG_ENABLE_LOCAL_SEMANTIC_SEARCH);
+		return !!this.configurationService.getValue<boolean>(CONFIG_CLOUD_INDEXING_ENABLED);
 	}
 
 	async getContextForMcp(query: ContextQuery, _token?: CancellationToken): Promise<ContextBundle> {
@@ -50,18 +47,8 @@ export class ContextBundlerService extends Disposable implements IContextBundler
 			provenance: s.provenance
 		}));
 
-		const symbols = [];
-		for (const s of semantic) {
-			const neighbors = await this.graphService.getNeighbors(s.uri.toString(), query.workspace as unknown as any);
-			for (const edge of neighbors) {
-				symbols.push({
-					id: edge.to,
-					name: edge.to,
-					uri: s.uri,
-					languageId: s.languageId
-				});
-			}
-		}
+		// Graph service removed - local indexing dependency
+		const symbols: any[] = [];
 
 		return {
 			snippets,
@@ -71,7 +58,7 @@ export class ContextBundlerService extends Disposable implements IContextBundler
 			engineMetadata: {
 				selectionStrategy: 'hybrid',
 				indexFreshness: 'fresh',
-				embeddingModel: this.configurationService.getValue<string>(CONFIG_EMBEDDING_MODEL) || 'coderank-embed'
+				embeddingModel: 'voyage-code-3' // Cloud indexing uses Voyage AI
 			}
 		};
 	}
