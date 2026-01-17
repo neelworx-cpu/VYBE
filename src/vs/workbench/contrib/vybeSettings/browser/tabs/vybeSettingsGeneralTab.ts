@@ -73,10 +73,31 @@ export function renderGeneralTab(
 
 	// Reset Dialogs subsection
 	const resetSubSection = DOM.append(prefsSectionList, DOM.$('.cursor-settings-sub-section'));
+
+	// Reset Terminal Permissions cell
+	const resetTerminalCell = createCell(resetSubSection, {
+		label: 'Reset Terminal Permissions',
+		description: 'Reinstate "Ask Every Time" for terminal commands',
+		action: { type: 'button', label: 'Reset', variant: 'tertiary' }
+	});
+
+	// Wire up reset button to clear terminal permission preference
+	const resetTerminalButton = resetTerminalCell.querySelector('button') as HTMLElement;
+	if (resetTerminalButton) {
+		disposables.add(addDisposableListener(resetTerminalButton, EventType.CLICK, () => {
+			// Clear terminal permission preference to reinstate "Ask Every Time"
+			const STORAGE_KEY_TERMINAL_RUN_EVERYTHING = 'vybe.terminal.runEverything';
+			storageService.remove(STORAGE_KEY_TERMINAL_RUN_EVERYTHING, StorageScope.PROFILE);
+			console.log('[VYBESettings] Reset terminal permissions - reinstated "Ask Every Time"');
+		}));
+	}
+
+	// Reset "Don't Ask Again" Dialogs cell (for other dialogs)
 	createCell(resetSubSection, {
 		label: 'Reset "Don\'t Ask Again" Dialogs',
 		description: 'See warnings and tips that you\'ve hidden',
-		action: { type: 'button', label: 'Show', variant: 'tertiary' }
+		action: { type: 'button', label: 'Show', variant: 'tertiary' },
+		hasDivider: true
 	});
 
 	// Notifications section
