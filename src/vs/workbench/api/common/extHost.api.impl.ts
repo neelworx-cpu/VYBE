@@ -17,7 +17,7 @@ import * as languageConfiguration from '../../../editor/common/languages/languag
 import { OverviewRulerLane } from '../../../editor/common/model.js';
 import { ExtensionError, ExtensionIdentifierSet, IExtensionDescription } from '../../../platform/extensions/common/extensions.js';
 import * as files from '../../../platform/files/common/files.js';
-import { ServicesAccessor } from '../../../platform/instantiation/common/instantiation.js';
+import { IInstantiationService, ServicesAccessor } from '../../../platform/instantiation/common/instantiation.js';
 import { ILogService, ILoggerService, LogLevel } from '../../../platform/log/common/log.js';
 import { getRemoteName } from '../../../platform/remote/common/remoteHosts.js';
 import { TelemetryTrustedValue } from '../../../platform/telemetry/common/telemetryUtils.js';
@@ -236,7 +236,8 @@ export function createApiFactoryAndRegisterActors(accessor: ServicesAccessor): I
 	const extHostStatusBar = rpcProtocol.set(ExtHostContext.ExtHostStatusBar, new ExtHostStatusBar(rpcProtocol, extHostCommands.converter));
 	const extHostSpeech = rpcProtocol.set(ExtHostContext.ExtHostSpeech, new ExtHostSpeech(rpcProtocol));
 	const extHostEmbeddings = rpcProtocol.set(ExtHostContext.ExtHostEmbeddings, new ExtHostEmbeddings(rpcProtocol));
-	const extHostIndexing = new ExtHostIndexing(accessor.get(IExtHostConfiguration), accessor.get(ILogService), accessor.get(IExtHostInitDataService), accessor.get(IExtHostWorkspace), extHostFileSystemEvent, extHostDocumentsAndEditors);
+	const instaService = accessor.get(IInstantiationService);
+	const extHostIndexing = new ExtHostIndexing(accessor.get(ILogService), instaService);
 	console.log('[extHost.api.impl] ExtHostIndexing created, embedding runtime initialization should start automatically');
 	rpcProtocol.set(ExtHostContext.ExtHostIndexing, extHostIndexing);
 

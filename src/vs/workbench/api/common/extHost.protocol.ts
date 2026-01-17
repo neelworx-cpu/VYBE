@@ -1479,94 +1479,15 @@ export interface RepoOverviewDto {
 
 export interface ExtHostIndexingShape {
 	/**
-	 * Dev-only DB persistence smoke test. Implementations must use the same
-	 * SQLite backend and storage path as the real index, and return a
-	 * structured result indicating whether persistence is working.
+	 * Pinecone Vector Store RPC methods
+	 * Local indexing RPC methods have been removed - cloud indexing is now the only method
 	 */
-	$runDbSmokeTest(workspaceId: string): Promise<{ ok: boolean; reason?: string }>;
-
-	/**
-	 * Minimal index status query used by the renderer-side proxy. This can
-	 * return an uninitialized/default state until the full indexing pipeline
-	 * is wired through the extension host.
-	 */
-	$getStatus(workspaceId: string): Promise<IndexStatusDto>;
-
-	/**
-	 * Builds a full on-disk index of the workspace file tree using the
-	 * persistent SQLite backend. Implementations must fail loudly when the
-	 * database is unavailable.
-	 */
-	$buildFullIndex(workspaceId: string, roots: UriComponents[], token: CancellationToken): Promise<IndexStatusDto>;
-
-	/**
-	 * Incrementally refreshes specific paths. For the initial file-tree-only
-	 * phase this may re-use the full indexer implementation.
-	 */
-	$refreshPaths(workspaceId: string, uris: UriComponents[], token: CancellationToken): Promise<IndexStatusDto>;
-
-	/**
-	 * Incrementally re-indexes the given saved files by computing chunks and
-	 * updating per-file metadata. Implementations must use a single SQLite
-	 * transaction per file and skip unchanged files based on their content
-	 * hash.
-	 */
-	$indexSavedFiles(workspaceId: string, uris: UriComponents[], token: CancellationToken): Promise<IndexStatusDto>;
-
-	/**
-	 * Dev-only end-to-end verification entry point. Runs a full tree index,
-	 * selects a deterministic subset of discovered files, indexes them, and
-	 * logs PASS/FAIL based on DB-backed status deltas.
-	 */
-	$devRunE2EIndexTest(workspaceId: string, roots: UriComponents[], token: CancellationToken): Promise<void>;
-
-	/**
-	 * Promoted internal API for querying similar chunks using the local
-	 * embeddings store. This is read-only and does not modify the index.
-	 */
-	$querySimilarChunksInternal(workspaceId: string, query: string, topK: number): Promise<DevSimilarChunkHitDto[]>;
-
-	/**
-	 * Safely deletes all index data for the given workspace and resets
-	 * its state to idle. This is the only destructive operation allowed.
-	 */
-	$deleteIndex(workspaceId: string): Promise<void>;
-
-	/**
-	 * Safely deletes all index data for the given workspace and resets
-	 * its state to idle, then rebuilds from scratch. This is the only destructive operation allowed.
-	 */
-	$rebuildWorkspaceIndex(workspaceId: string, reason?: string): Promise<void>;
-
-	/**
-	 * Phase 10: Control plane - Pause indexing operations for a workspace.
-	 */
-	$pauseIndexing(workspaceId: string, reason?: string): Promise<void>;
-
-	/**
-	 * Phase 10: Control plane - Resume indexing operations for a workspace.
-	 */
-	$resumeIndexing(workspaceId: string): Promise<void>;
-
-	/**
-	 * Phase 10: Control plane - Trigger vector index backfill for a workspace.
-	 */
-	$triggerVectorBackfill(workspaceId: string): Promise<void>;
-
-	/**
-	 * Phase 11: Dev-only context assembly for query.
-	 */
-	$devAssembleContextForQuery(
-		workspaceId: string,
-		query: string,
-		options: { maxChars?: number; maxTokens?: number },
-		token: CancellationToken
-	): Promise<ContextItemDto[]>;
-
-	/**
-	 * Phase 11: Dev-only repo overview.
-	 */
-	$devGetRepoOverview(workspaceId: string, token: CancellationToken): Promise<RepoOverviewDto>;
+	$pineconeTestConnection(): Promise<{ success: boolean; error?: string }>;
+	$pineconeUpsert(namespace: string, vectors: Array<{ id: string; values: number[]; metadata: Record<string, string | number> }>): Promise<void>;
+	$pineconeQuery(namespace: string, vector: number[], topK: number): Promise<Array<{ id: string; score: number; metadata: Record<string, string | number> }>>;
+	$pineconeDelete(namespace: string, ids: string[]): Promise<void>;
+	$pineconeDeleteNamespace(namespace: string): Promise<void>;
+	$pineconeGetNamespaceStats(namespace: string): Promise<{ vectorCount: number; dimension: number }>;
 }
 
 export interface IExtensionChatAgentMetadata extends Dto<IChatAgentMetadata> {
