@@ -131,6 +131,8 @@ export interface SolveTaskParams {
 	cursorLocation?: { path: string; line: number };
 	/** Operation mode */
 	mode?: AgentMode;
+	/** Reasoning effort level (low/medium/high/xhigh) */
+	reasoningLevel?: 'low' | 'medium' | 'high' | 'xhigh';
 	/** Capability level */
 	agentLevel?: AgentLevel;
 	/** Specific model to use (overrides auto-routing) */

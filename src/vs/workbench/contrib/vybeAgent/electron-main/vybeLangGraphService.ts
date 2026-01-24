@@ -31,9 +31,9 @@ let HumanMessage: any;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let ToolMessage: any;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-let SystemMessage: any;
+let createAgent: any; // from langchain
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-let createReactAgent: any; // from @langchain/langgraph/prebuilt
+let createMiddleware: any; // from langchain for middleware
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let Command: any; // from @langchain/langgraph for interrupt
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -97,6 +97,7 @@ export interface LangGraphTaskRequest {
 	goal: string;
 	model?: string; // Selected model ID (e.g., 'gemini-2.5-pro', 'gemini-2.5-flash')
 	level?: 'L1' | 'L2' | 'L3'; // Budget tier level
+	reasoningLevel?: 'low' | 'medium' | 'high' | 'xhigh'; // Reasoning effort level (defaults to 'medium')
 	context?: {
 		workspaceRoot?: string;
 		activeFile?: string;
@@ -118,6 +119,7 @@ export interface ToolContext {
 		grep: (pattern: string, path?: string, glob?: string) => Promise<string>;
 		listDir: (path: string) => Promise<string>;
 		codebaseSearch: (query: string, directories?: string[]) => Promise<string>;
+		deleteFile: (targetFile: string) => Promise<string>;
 	};
 	terminalService: {
 		runCommand: (command: string, isBackground?: boolean) => Promise<string>;
@@ -165,6 +167,7 @@ interface ActiveTask {
 	eventHandler: (event: LangGraphEvent) => void;
 	toolContext?: ToolContext;
 	checkpointer?: any;
+	reasoningLevel: 'low' | 'medium' | 'high' | 'xhigh';
 }
 
 const activeTasks = new Map<string, ActiveTask>();
@@ -193,11 +196,16 @@ async function loadLangChainModules(): Promise<boolean> {
 		Command = langGraph.Command;
 		// Note: interrupt is available but not used - we handle interrupts via event streaming
 
-		// Import createReactAgent from prebuilt
-		console.log('[VybeLangGraphService] Importing @langchain/langgraph/prebuilt...');
-		const prebuilt = await import('@langchain/langgraph/prebuilt');
-		createReactAgent = prebuilt.createReactAgent;
-		console.log('[VybeLangGraphService] ✓ createReactAgent loaded');
+		// Import createAgent from langchain
+		console.log('[VybeLangGraphService] Importing langchain...');
+		const langchain = await import('langchain');
+		createAgent = langchain.createAgent;
+		createMiddleware = langchain.createMiddleware;
+		console.log('[VybeLangGraphService] ✓ createAgent loaded');
+		console.log('[VybeLangGraphService] ✓ createMiddleware loaded');
+
+		// ToolMessage is already imported from @langchain/core/messages above
+		// It's used in the tool error middleware
 
 		// Import LangChain core messages
 		console.log('[VybeLangGraphService] Importing @langchain/core/messages...');
@@ -205,7 +213,7 @@ async function loadLangChainModules(): Promise<boolean> {
 		console.log('[VybeLangGraphService] Messages imported, keys:', Object.keys(messages).slice(0, 10));
 		HumanMessage = messages.HumanMessage;
 		ToolMessage = messages.ToolMessage;
-		SystemMessage = messages.SystemMessage;
+		// SystemMessage removed - now using systemPrompt parameter in createAgent
 		isAIMessageChunk = messages.isAIMessageChunk; // For type checking in stream mode
 
 		// Import LangChain model adapters - these are the proper LangChain way
@@ -477,7 +485,7 @@ async function* streamGeminiDirect(
  * Tools that require user approval before execution.
  * Used by the human-in-the-loop logic in runAgentLoop.
  */
-const TOOLS_REQUIRING_APPROVAL = ['write_file', 'edit_file', 'run_terminal_cmd'];
+const TOOLS_REQUIRING_APPROVAL = ['edit_file', 'run_terminal_cmd']; // edit_file requires approval when creating new files
 
 /**
  * Request tool execution from the browser process via IPC.
@@ -503,37 +511,45 @@ function createLangChainTools(): any[] {
 	}
 
 	const readFileTool = tool(
-		async ({ target_file, offset, limit }: { target_file: string; offset?: number; limit?: number }) => {
-			return await requestToolExecution('read_file', { target_file, offset, limit });
+		async (args: { target_file: string; should_read_entire_file?: boolean; start_line_one_indexed?: number; end_line_one_indexed_inclusive?: number; explanation?: string; offset?: number; limit?: number }) => {
+			try {
+				// Support both Cursor format (start_line_one_indexed, end_line_one_indexed_inclusive) and VYBE format (offset, limit)
+				const offset = args.start_line_one_indexed ?? args.offset;
+				const limit = args.end_line_one_indexed_inclusive ?? args.limit;
+				const result = await requestToolExecution('read_file', { target_file: args.target_file, offset, limit, should_read_entire_file: args.should_read_entire_file });
+				return result || 'Tool executed successfully with no output';
+			} catch (error) {
+				const errorMessage = error instanceof Error ? error.message : String(error);
+				return `Error: ${errorMessage}`;
+			}
 		},
 		{
 			name: 'read_file',
-			description: 'Read a file from the workspace. Returns file contents with line numbers.',
+			description: 'Read the contents of a file. The output of this tool call will be the 1-indexed file contents from start_line_one_indexed to end_line_one_indexed_inclusive, together with a summary of the lines outside start_line_one_indexed and end_line_one_indexed_inclusive. Note that this call can view at most 250 lines at a time and 200 lines minimum. When using this tool to gather information, it\'s your responsibility to ensure you have the COMPLETE context. Specifically, each time you call this command you should: 1) Assess if the contents you viewed are sufficient to proceed with your task. 2) Take note of where there are lines not shown. 3) If the file contents you have viewed are insufficient, and you suspect they may be in lines not shown, proactively call the tool again to view those lines. 4) When in doubt, call this tool again to gather more information. Remember that partial file views may miss critical dependencies, imports, or functionality. In some cases, if reading a range of lines is not enough, you may choose to read the entire file. Reading entire files is often wasteful and slow, especially for large files (i.e. more than a few hundred lines). So you should use this option sparingly. Reading the entire file is not allowed in most cases. You are only allowed to read the entire file if it has been edited or manually attached to the conversation by the user.',
 			schema: z.object({
-				target_file: z.string().describe('Path to the file'),
-				offset: z.number().optional().describe('Line number to start reading from'),
-				limit: z.number().optional().describe('Number of lines to read'),
+				target_file: z.string().describe('The path of the file to read. You can use either a relative path in the workspace or an absolute path. If an absolute path is provided, it will be preserved as is.'),
+				should_read_entire_file: z.boolean().optional().describe('Whether to read the entire file. Defaults to false. Reading entire files is often wasteful and slow, especially for large files (i.e., more than a few hundred lines). So you should use this option sparingly. Reading the entire file is not allowed in most cases. You are only allowed to read the entire file if it has been edited or manually attached to the conversation by the user.'),
+				start_line_one_indexed: z.number().optional().describe('The one-indexed line number to start reading from (inclusive).'),
+				end_line_one_indexed_inclusive: z.number().optional().describe('The one-indexed line number to end reading at (inclusive).'),
+				explanation: z.string().optional().describe('One sentence explanation as to why this tool is being used, and how it contributes to the goal.'),
+				// Backward compatibility with VYBE format
+				offset: z.number().optional().describe('[DEPRECATED] Use start_line_one_indexed instead. Line number to start reading from.'),
+				limit: z.number().optional().describe('[DEPRECATED] Use end_line_one_indexed_inclusive instead. Number of lines to read.'),
 			}),
 		}
 	);
 
-	const writeFileTool = tool(
-		async ({ file_path, contents }: { file_path: string; contents: string }) => {
-			return await requestToolExecution('write_file', { file_path, contents });
-		},
-		{
-			name: 'write_file',
-			description: 'Write contents to a file, creating or overwriting.',
-			schema: z.object({
-				file_path: z.string().describe('Path to the file'),
-				contents: z.string().describe('Contents to write'),
-			}),
-		}
-	);
+	// write_file tool removed - use edit_file for all file operations (create, overwrite, edit)
 
 	const editFileTool = tool(
 		async ({ file_path, old_string, new_string }: { file_path: string; old_string: string; new_string: string }) => {
-			return await requestToolExecution('edit_file', { file_path, old_string, new_string });
+			try {
+				const result = await requestToolExecution('edit_file', { file_path, old_string, new_string });
+				return result || 'Tool executed successfully with no output';
+			} catch (error) {
+				const errorMessage = error instanceof Error ? error.message : String(error);
+				return `Error: ${errorMessage}`;
+			}
 		},
 		{
 			name: 'edit_file',
@@ -547,50 +563,121 @@ function createLangChainTools(): any[] {
 	);
 
 	const grepTool = tool(
-		async ({ pattern, path, glob }: { pattern: string; path?: string; glob?: string }) => {
-			// Pass pattern through unchanged - ^import is valid regex that works in Cursor
+		async (args: {
+			pattern: string;
+			path?: string;
+			glob?: string;
+			output_mode?: "content" | "files_with_matches" | "count";
+			"-B"?: number;
+			"-A"?: number;
+			"-C"?: number;
+			"-i"?: boolean;
+			type?: string;
+			head_limit?: number;
+			multiline?: boolean;
+		}) => {
+			// Map Cursor's -i (case insensitive) to VYBE's caseSensitive (opposite logic)
+			const caseSensitive = args["-i"] === true ? false : (args["-i"] === false ? true : undefined);
+
 			console.log(`[VybeLangGraphService] 🔍 Grep tool called:`, {
-				pattern,
-				path: path || '(workspace root)',
-				glob: glob || '(all files)'
+				pattern: args.pattern,
+				path: args.path || '(workspace root)',
+				glob: args.glob,
+				output_mode: args.output_mode,
+				"-B": args["-B"],
+				"-A": args["-A"],
+				"-C": args["-C"],
+				"-i": args["-i"],
+				type: args.type,
+				head_limit: args.head_limit,
+				multiline: args.multiline,
 			});
 
-			return await requestToolExecution('grep', { pattern, path, glob });
+			try {
+				const result = await requestToolExecution('grep', {
+					pattern: args.pattern,
+					path: args.path,
+					glob: args.glob,
+					caseSensitive: caseSensitive,
+					outputMode: args.output_mode,
+					beforeLines: args["-B"],
+					afterLines: args["-A"],
+					contextLines: args["-C"],
+					fileType: args.type,
+					headLimit: args.head_limit,
+					multiline: args.multiline,
+				});
+				return result || 'Tool executed successfully with no output';
+			} catch (error) {
+				const errorMessage = error instanceof Error ? error.message : String(error);
+				return `Error: ${errorMessage}`;
+			}
 		},
 		{
 			name: 'grep',
-			description: 'Search for a text pattern in files. Returns matching lines with file paths and line numbers. IMPORTANT: Use plain text for simple searches (e.g., "import" not "^import"). The pattern is treated as a regular expression, but for simple word searches, do NOT add regex anchors like ^ or $ at the start/end.',
+			description: 'A powerful search tool built on ripgrep. Usage: Prefer grep for exact symbol/string searches. Whenever possible, use this instead of terminal grep/rg. This tool is faster and respects .gitignore/.cursorignore. Supports full regex syntax, e.g. "log.*Error", "function\\s+\\w+". Ensure you escape special chars to get exact matches, e.g. "functionCall\\(". Avoid overly broad glob patterns (e.g., "--glob *") as they bypass .gitignore rules and may be slow. Only use "type" (or "glob" for file types) when certain of the file type needed. Note: import paths may not match source file types (.js vs .ts). Output modes: "content" shows matching lines (supports -A/-B/-C context, -n line numbers, head_limit), "files_with_matches" shows only file paths (supports head_limit), "count" shows match counts per file. Pattern syntax: Uses ripgrep (not grep) - literal braces need escaping (e.g. use interface\\{\\} to find interface{} in Go code). Multiline matching: By default patterns match within single lines only. For cross-line patterns like struct \\{[\\s\\S]*?field, use multiline: true. Results are capped for responsiveness; truncated results show "at least" counts. Content output follows ripgrep format: "-" for context lines, ":" for match lines, and all lines grouped by file. Unsaved or out of workspace active editors are also searched and show "(unsaved)" or "(out of workspace)". Use absolute paths to read/edit these files.',
 			schema: z.object({
-				pattern: z.string().describe('Text pattern to search for. Use plain text for simple searches (e.g., "import" will find "import" anywhere). Do NOT add ^ at the start unless you specifically need to match only at the beginning of lines. The pattern is treated as a regular expression.'),
-				path: z.string().optional().describe('Directory to search in'),
-				glob: z.string().optional().describe('File pattern like *.ts'),
+				pattern: z.string().describe('The regular expression pattern to search for in file contents (rg --regexp)'),
+				path: z.string().optional().describe('File or directory to search in (rg pattern -- PATH). Defaults to Cursor workspace roots.'),
+				glob: z.string().optional().describe('Glob pattern (rg --glob GLOB -- PATH) to filter files (e.g., "*.js", "*.{ts,tsx}").'),
+				output_mode: z.enum(["content", "files_with_matches", "count"]).optional().describe('Output mode: "content" shows matching lines (supports -A/-B/-C context, -n line numbers, head_limit), "files_with_matches" shows only file paths (supports head_limit), "count" shows match counts (supports head_limit). Defaults to "content".'),
+				"-B": z.number().optional().describe('Number of lines to show before each match (rg -B). Requires output_mode: "content", ignored otherwise.'),
+				"-A": z.number().optional().describe('Number of lines to show after each match (rg -A). Requires output_mode: "content", ignored otherwise.'),
+				"-C": z.number().optional().describe('Number of lines to show before and after each match (rg -C). Requires output_mode: "content", ignored otherwise.'),
+				"-i": z.boolean().optional().describe('Case insensitive search (rg -i). Defaults to false.'),
+				type: z.string().optional().describe('File type to search (rg --type). Common types: js, py, rust, go, java, etc. More efficient than glob for standard file types.'),
+				head_limit: z.number().optional().describe('Limit output to first N lines/entries, equivalent to "| head -N". Works across all output modes: content (limits output lines), files_with_matches (limits file paths), count (limits count entries). When unspecified, shows all ripgrep results.'),
+				multiline: z.boolean().optional().describe('Enable multiline mode where . matches newlines and patterns can span lines (rg -U --multiline-dotall). Default: false.'),
 			}),
 		}
 	);
 
 	const listDirTool = tool(
-		async ({ target_directory }: { target_directory: string }) => {
-			return await requestToolExecution('list_dir', { target_directory });
+		async (args: { target_directory: string; ignore_globs?: string[]; explanation?: string }) => {
+			try {
+				// Validate against using "." - Cursor explicitly says "never use '.' unless explicitly listing the workspace root"
+				if (args.target_directory === '.' || args.target_directory === './') {
+					throw new Error('Do not use "." as the directory path. Use the actual directory name or path (e.g., "src", "src/components"). Only use "." if explicitly listing the workspace root.');
+				}
+
+				const result = await requestToolExecution('list_dir', {
+					target_directory: args.target_directory,
+					ignore_globs: args.ignore_globs
+				});
+				return result || 'Tool executed successfully with no output';
+			} catch (error) {
+				const errorMessage = error instanceof Error ? error.message : String(error);
+				return `Error: ${errorMessage}`;
+			}
 		},
 		{
 			name: 'list_dir',
-			description: 'List files and directories in a path.',
+			description: 'Lists files and directories in a given path. The target_directory parameter can be relative to the workspace root or absolute. You can optionally provide an array of glob patterns to ignore with the "ignore_globs" parameter. Other details: The result does not display dot-files and dot-directories. IMPORTANT: Always use the actual directory name or path - never use "." unless explicitly listing the workspace root.',
 			schema: z.object({
-				target_directory: z.string().describe('Path to directory'),
+				target_directory: z.string().describe('Path to directory to list contents of. Always use the actual directory name or path (e.g., "src", "src/components"). Never use "." unless explicitly listing the workspace root.'),
+				ignore_globs: z.array(z.string()).optional().describe('Optional array of glob patterns to ignore. All patterns match anywhere in the target directory. Patterns not starting with "**/" are automatically prepended with "**/". Examples: "*.js" (becomes "**/*.js") - ignore all .js files, "**/node_modules/**" - ignore all node_modules directories, "**/test/**/test_*.ts" - ignore all test_*.ts files in any test directory.'),
+				explanation: z.string().optional().describe('One sentence explanation as to why this tool is being used, and how it contributes to the goal.'),
 			}),
 		}
 	);
 
 	const runTerminalCmdTool = tool(
-		async ({ command, is_background }: { command: string; is_background?: boolean }) => {
-			return await requestToolExecution('run_terminal_cmd', { command, is_background });
+		async ({ command, is_background, explanation }: { command: string; is_background: boolean; explanation?: string }) => {
+			try {
+				const result = await requestToolExecution('run_terminal_cmd', { command, is_background: is_background ?? false, explanation });
+				return result || 'Tool executed successfully with no output';
+			} catch (error) {
+				const errorMessage = error instanceof Error ? error.message : String(error);
+				return `Error: ${errorMessage}`;
+			}
 		},
 		{
 			name: 'run_terminal_cmd',
-			description: 'Execute a terminal command. Requires user approval.',
+			description: 'PROPOSE a command to run on behalf of the user. Note that the user may have to approve the command before it is executed. The user may reject it if it is not to their liking, or may modify the command before approving it. If they do change it, take those changes into account. In using these tools, adhere to the following guidelines: 1. Based on the contents of the conversation, you will be told if you are in the same shell as a previous step or a different shell. 2. If in a new shell, you should cd to the appropriate directory and do necessary setup in addition to running the command. By default, the shell will initialize in the project root. 3. If in the same shell, LOOK IN CHAT HISTORY for your current working directory. The environment also persists (e.g. exported env vars, venv/nvm activations). 4. For ANY commands that would require user interaction, ASSUME THE USER IS NOT AVAILABLE TO INTERACT and PASS THE NON-INTERACTIVE FLAGS (e.g. --yes for npx). 5. For commands that are long running/expected to run indefinitely until interruption, please run them in the background. To run jobs in the background, set is_background to true rather than changing the details of the command.',
 			schema: z.object({
-				command: z.string().describe('The command to execute'),
-				is_background: z.boolean().optional().describe('Run in background'),
+				command: z.string().describe('The terminal command to execute'),
+				is_background: z.boolean().describe('Whether the command should be run in the background'),
+				explanation: z.string().optional().describe('One sentence explanation as to why this command needs to be run and how it contributes to the goal.'),
 			}),
 		}
 	);
@@ -650,21 +737,28 @@ Returns the current list of todos with their status.`,
 	);
 
 	const codebaseSearchTool = tool(
-		async ({ query, target_directories, maxResults }: { query: string; target_directories?: string[]; maxResults?: number }) => {
-			return await requestToolExecution('codebase_search', { query, target_directories, maxResults });
+		async ({ explanation, query, target_directories, maxResults }: { explanation: string; query: string; target_directories: string[]; maxResults?: number }) => {
+			try {
+				const result = await requestToolExecution('codebase_search', { explanation, query, target_directories, maxResults });
+				return result || 'Tool executed successfully with no output';
+			} catch (error) {
+				const errorMessage = error instanceof Error ? error.message : String(error);
+				return `Error: ${errorMessage}`;
+			}
 		},
 		{
 			name: 'codebase_search',
-			description: 'Semantic search over the codebase using AI embeddings. Use this for conceptual questions like "where is X implemented?", "how does Y work?", "what files handle Z?". This tool understands code meaning, not just text matching. Prefer this over grep for "where/how/what" questions about code functionality, architecture, or implementation details. Returns relevant code snippets with file paths and line ranges.',
+			description: 'Semantic search that finds code by meaning, not exact text. Use codebase_search when you need to: Explore unfamiliar codebases, Ask "how / where / what" questions to understand behavior, Find code by meaning rather than exact text. Skip codebase_search for: Exact text matches (use grep), Reading known files (use read_file), Simple symbol lookups (use grep), Find file by name (use file_search). Target Directories: Provide ONE directory or file path; [] searches the whole repo. No globs or wildcards. Good: ["backend/api/"] - focus directory, ["src/components/Button.tsx"] - single file, [] - search everywhere when unsure. BAD: ["frontend/", "backend/"] - multiple paths, ["src/**/utils/**"] - globs, ["*.ts"] or ["**/*"] - wildcard paths. Search Strategy: 1. Start with exploratory queries - semantic search is powerful and often finds relevant context in one go. Begin broad with [] if you\'re not sure where relevant code is. 2. Review results; if a directory or file stands out, rerun with that as the target. 3. Break large questions into smaller ones (e.g. auth roles vs session storage). 4. For big files (>1K lines) run codebase_search, or grep if you know the exact symbols you\'re looking for, scoped to that file instead of reading the entire file. Usage: When full chunk contents are provided, avoid re-reading the exact same chunk contents using the read_file tool. Sometimes, just the chunk signatures and not the full chunks will be shown. Chunk signatures are usually Class or Function signatures that chunks are contained in. Use the read_file or grep tools to explore these chunks or files if you think they might be relevant. When reading chunks that weren\'t provided as full chunks (e.g. only as line ranges or signatures), you\'ll sometimes want to expand the chunk ranges to include the start of the file to see imports, expand the range to include lines from the signature, or expand the range to read multiple chunks from a file at once.',
 			schema: z.object({
-				query: z.string().describe('Natural language query describing what to search for (e.g., "where is authentication handled?", "how does file reading work?")'),
-				target_directories: z.array(z.string()).optional().describe('Optional: Array of directory paths to limit search to (relative to workspace root)'),
-				maxResults: z.number().optional().describe('Maximum number of results to return (default: 20)'),
+				explanation: z.string().describe('One sentence explanation as to why this tool is being used, and how it contributes to the goal.'),
+				query: z.string().describe('A complete question about what you want to understand. Ask as if talking to a colleague: \'How does X work?\', \'What happens when Y?\', \'Where is Z handled?\''),
+				target_directories: z.array(z.string()).describe('Prefix directory paths to limit search scope (single directory only, no glob patterns). Use [] to search the whole repo.'),
+				maxResults: z.number().optional().describe('[INTERNAL] Maximum number of results to return (default: 20)'),
 			}),
 		}
 	);
 
-	return [readFileTool, writeFileTool, editFileTool, grepTool, listDirTool, runTerminalCmdTool, writeTodosTool, getTodosTool, codebaseSearchTool];
+	return [readFileTool, editFileTool, grepTool, listDirTool, runTerminalCmdTool, writeTodosTool, getTodosTool, codebaseSearchTool];
 }
 
 // Cached tools - created once after modules load
@@ -790,8 +884,9 @@ export class VybeLangGraphService {
 		eventHandler: (event: LangGraphEvent) => void,
 		toolContext?: ToolContext
 	): Promise<void> {
-		const { taskId, goal, model, level = 'L2', context } = request;
-		console.log(`[VybeLangGraphService] Starting task ${taskId} with model: ${model || 'default'}, level: ${level}`);
+		const { taskId, goal, model, level = 'L2', reasoningLevel = 'medium', context } = request;
+		const finalReasoningLevel = reasoningLevel || 'medium'; // Ensure it's never null/undefined
+		console.log(`[VybeLangGraphService] Starting task ${taskId} with model: ${model || 'default'}, level: ${level}, reasoningLevel: ${finalReasoningLevel}`);
 
 		// Ensure initialized
 		if (!await this.initialize()) {
@@ -805,7 +900,7 @@ export class VybeLangGraphService {
 		}
 
 		// Set up tool executor to call browser process via IPC
-		// This is used by createReactAgent for frontier models (Gemini, OpenAI, etc.)
+		// This is used by createAgent for frontier models (Gemini, OpenAI, etc.)
 		if (toolContext) {
 			// Tool execution queue to serialize tool calls (one at a time, like Cursor)
 			// This prevents multiple tools from showing "Reading" simultaneously
@@ -815,14 +910,18 @@ export class VybeLangGraphService {
 
 			setToolExecutor(async (toolName: string, args: Record<string, unknown>): Promise<string> => {
 				const myPosition = ++toolQueuePosition;
-				console.log(`[VybeLangGraphService] 🔄 Tool ${toolName} queued at position ${myPosition}`);
+				const executionStartTime = Date.now();
+				console.log(`[VybeLangGraphService] 🔧 TOOL EXEC START: ${toolName} (position ${myPosition})`, {
+					args: JSON.stringify(args).substring(0, 200),
+					timestamp: executionStartTime
+				});
 
 				// Queue this tool execution after all previous ones complete
 				const executeThisTool = async (): Promise<string> => {
-					// Removed verbose logging
-
 					// Emit tool.call event for UI
 					const toolCallId = `exec_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+					console.log(`[VybeLangGraphService] 🔧 TOOL CALL ID GENERATED: ${toolCallId} for ${toolName}`);
+
 					eventHandler({
 						type: 'token',
 						payload: {
@@ -850,6 +949,7 @@ export class VybeLangGraphService {
 					};
 
 					try {
+						console.log(`[VybeLangGraphService] 🔧 TOOL EXEC BEGIN: ${toolName} (id: ${toolCallId})`);
 						let result: string;
 						// CRITICAL: Declare these outside switch so emergency fallback can access them
 						let fullGrepResult: string | undefined; // Store full grep result for parsing
@@ -868,18 +968,32 @@ export class VybeLangGraphService {
 									result = truncateResult(result, MAX_TOOL_RESULT_SIZE);
 								}
 								break;
-							case 'write_file':
-								await toolContext.fileService.writeFile(args.file_path as string, args.contents as string);
-								result = 'File written successfully';
-								break;
-							case 'edit_file':
-								await toolContext.fileService.editFile(
+							// write_file tool removed - use edit_file for all file operations
+							case 'edit_file': {
+								const editFileResult = await toolContext.fileService.editFile(
 									args.file_path as string,
 									args.old_string as string,
 									args.new_string as string
 								);
-								result = 'File edited successfully';
+								// Parse result to check for deferred write
+								try {
+									const parsedResult = typeof editFileResult === 'string' ? JSON.parse(editFileResult) : editFileResult;
+									if (parsedResult?.deferred === true) {
+										// File write is deferred - use the message from tool or construct clear message
+										result = parsedResult.message || `File edited successfully: ${args.file_path as string}. The file system has confirmed the write operation.`;
+									} else if (parsedResult?.created === true) {
+										// New file was created immediately
+										result = `File created successfully: ${args.file_path as string}`;
+									} else {
+										// File was written immediately (shouldn't happen for existing files, but handle gracefully)
+										result = `File edited successfully: ${args.file_path as string}`;
+									}
+								} catch {
+									// If parsing fails, use the result as-is (should be a string)
+									result = typeof editFileResult === 'string' ? editFileResult : 'File edited successfully';
+								}
 								break;
+							}
 							case 'grep':
 								// fileService.grep() executes tool in browser, returns JSON string from createGrepTool
 								try {
@@ -897,7 +1011,6 @@ export class VybeLangGraphService {
 									// IPC always returns a string, so parse it immediately to get the full object
 									// Store the FULL string before any truncation
 									fullGrepResult = typeof grepResult === 'string' ? grepResult : JSON.stringify(grepResult);
-									console.log(`[VybeLangGraphService] 🔍 Grep result received: type=${typeof grepResult}, length=${fullGrepResult?.length || 0}, startsWith{=${fullGrepResult?.trim().startsWith('{') || false}`);
 
 									// CRITICAL: Parse the FULL JSON string immediately to get all matches
 									// This must happen BEFORE truncation, so we have access to all 806 files
@@ -913,9 +1026,6 @@ export class VybeLangGraphService {
 												fullGrepResultJson = parsedJson;
 											} else {
 												fullGrepResultJson = parsedJson;
-												const fileCount = parsedJson.fileCount;
-												const matchCount = parsedJson.matches?.length || 0;
-												console.log(`[VybeLangGraphService] 🔍 ✅ Parsed fullGrepResultJson from IPC string: ${matchCount} matches, ${fileCount || 'unknown'} files`);
 											}
 										} catch (e) {
 											const errorMsg = e instanceof Error ? e.message : String(e);
@@ -936,10 +1046,6 @@ export class VybeLangGraphService {
 										// Shouldn't happen (IPC returns string), but handle it just in case
 										// eslint-disable-next-line @typescript-eslint/no-explicit-any
 										fullGrepResultJson = grepResult as any;
-										// eslint-disable-next-line @typescript-eslint/no-explicit-any
-										const fileCount = (grepResult as any).fileCount;
-										// eslint-disable-next-line @typescript-eslint/no-explicit-any
-										console.log(`[VybeLangGraphService] 🔍 ✅ Captured fullGrepResultJson object: ${(grepResult as any).matches?.length || 0} matches, ${fileCount || 'unknown'} files`);
 									} else {
 										// Invalid result type
 										console.error(`[VybeLangGraphService] 🔍 ❌ Invalid grep result type: ${typeof grepResult}`);
@@ -952,8 +1058,6 @@ export class VybeLangGraphService {
 										} as any;
 									}
 
-									// CRITICAL: Log what we captured
-									console.log(`[VybeLangGraphService] 🔍 After IPC parsing: fullGrepResultJson=${!!fullGrepResultJson}, hasMatches=${!!fullGrepResultJson?.matches}, matchesLength=${fullGrepResultJson?.matches?.length || 0}`);
 
 									// Convert to string for result (truncate only the preview, not the full data)
 									result = typeof grepResult === 'string' ? grepResult : JSON.stringify(grepResult);
@@ -981,6 +1085,13 @@ export class VybeLangGraphService {
 								result = await toolContext.fileService.listDir(args.target_directory as string);
 								if (result.length > MAX_TOOL_RESULT_SIZE) {
 									console.warn(`[VybeLangGraphService] ⚠️ Truncating large list_dir result from ${result.length} to ${MAX_TOOL_RESULT_SIZE}`);
+									result = truncateResult(result, MAX_TOOL_RESULT_SIZE);
+								}
+								break;
+							case 'delete_file':
+								result = await toolContext.fileService.deleteFile(args.target_file as string);
+								if (result.length > MAX_TOOL_RESULT_SIZE) {
+									console.warn(`[VybeLangGraphService] ⚠️ Truncating large delete_file result from ${result.length} to ${MAX_TOOL_RESULT_SIZE}`);
 									result = truncateResult(result, MAX_TOOL_RESULT_SIZE);
 								}
 								break;
@@ -1025,7 +1136,6 @@ export class VybeLangGraphService {
 							resultPayload.grepResults = [];
 							resultPayload.totalMatches = 0;
 							resultPayload.truncated = false;
-							console.log(`[VybeLangGraphService] 🔍 Pre-initialized grep payload structure`);
 						}
 
 						if (toolName === 'list_dir') {
@@ -1048,24 +1158,11 @@ export class VybeLangGraphService {
 								console.warn(`[VybeLangGraphService] 🔍 ⚠️ grepResults not pre-initialized, initializing now`);
 							}
 
-							console.log(`[VybeLangGraphService] 🔍 Entering grep parsing block: fullGrepResult=${!!fullGrepResult}, fullGrepResultJson=${!!fullGrepResultJson}, result length=${result?.length || 0}`);
-							console.log(`[VybeLangGraphService] 🔍 fullGrepResultJson preview:`, fullGrepResultJson ? {
-								hasMatches: !!fullGrepResultJson.matches,
-								matchesLength: fullGrepResultJson.matches?.length || 0,
-								// eslint-disable-next-line @typescript-eslint/no-explicit-any
-								fileCount: (fullGrepResultJson as any).fileCount,
-								// eslint-disable-next-line @typescript-eslint/no-explicit-any
-								hasError: !!(fullGrepResultJson as any).error,
-								keys: Object.keys(fullGrepResultJson)
-							} : 'null');
-
 							try {
 								// The tool might return JSON (VS Code search service) or string (fileService.grep())
 								// Use fullGrepResultJson if available (object), otherwise parse fullGrepResult or result
 								// eslint-disable-next-line @typescript-eslint/no-explicit-any
 								let parsed: any = null;
-
-								console.log(`[VybeLangGraphService] 🔍 Starting grep result parsing: fullGrepResultJson=${!!fullGrepResultJson}, fullGrepResult length=${fullGrepResult?.length || 0}, result length=${result?.length || 0}`);
 
 								// CRITICAL: Always try to parse from fullGrepResult first (before truncation)
 								// This ensures we have access to the complete JSON even if fullGrepResultJson wasn't set
@@ -1075,7 +1172,6 @@ export class VybeLangGraphService {
 										const parsedFromFull = JSON.parse(fullGrepResult) as any;
 										if (parsedFromFull && parsedFromFull.matches && Array.isArray(parsedFromFull.matches)) {
 											parsed = parsedFromFull;
-											console.log(`[VybeLangGraphService] 🔍 ✅ Parsed from fullGrepResult: ${parsed.matches.length} matches`);
 										}
 									} catch (e) {
 										console.warn(`[VybeLangGraphService] 🔍 ⚠️ Failed to parse fullGrepResult:`, e instanceof Error ? e.message : String(e));
@@ -1086,16 +1182,13 @@ export class VybeLangGraphService {
 								// eslint-disable-next-line @typescript-eslint/no-explicit-any
 								if (!parsed && fullGrepResultJson && !(fullGrepResultJson as any).error) {
 									parsed = fullGrepResultJson;
-									console.log(`[VybeLangGraphService] 🔍 ✅ Using fullGrepResultJson object: ${parsed.matches?.length || 0} matches, fileCount=${parsed.fileCount || 'unknown'}`);
 								}
 
 								// Validate parsed structure and create grepResults
-								console.log(`[VybeLangGraphService] 🔍 Before validation: parsed=${!!parsed}, parsedType=${typeof parsed}, hasError=${parsed?.error ? 'yes' : 'no'}, hasMatches=${!!parsed?.matches}, matchesIsArray=${Array.isArray(parsed?.matches)}`);
 								if (parsed && typeof parsed === 'object' && !parsed.error) {
 									// Directly create grepResults from parsed if it has matches
 									if (parsed.matches && Array.isArray(parsed.matches)) {
 										if (parsed.matches.length > 0) {
-											console.log(`[VybeLangGraphService] 🔍 Grouping ${parsed.matches.length} matches by file...`);
 											const fileMap = new Map<string, number>();
 											let matchesWithFile = 0;
 											let matchesWithoutFile = 0;
@@ -1207,7 +1300,6 @@ export class VybeLangGraphService {
 											}
 										} else if (typeof rawResult === 'object' && rawResult !== null) {
 											parsed = rawResult;
-											console.log(`[VybeLangGraphService] 🔍 ✅ Using rawResult object directly`);
 										}
 
 										// If we successfully parsed JSON, process it
@@ -1234,13 +1326,11 @@ export class VybeLangGraphService {
 												// Use parsed.totalMatches if available, otherwise use matches.length
 												resultPayload.totalMatches = typeof parsed.totalMatches === 'number' ? parsed.totalMatches : parsed.matches.length;
 												resultPayload.truncated = typeof parsed.truncated === 'boolean' ? parsed.truncated : false;
-												console.log(`[VybeLangGraphService] 🔍 ✅ Created grepResults from parsed: ${resultPayload.grepResults.length} files, ${resultPayload.totalMatches} total matches`);
 											} else if (parsed.matches.length === 0) {
 												// Empty matches array - valid result
 												resultPayload.grepResults = [];
 												resultPayload.totalMatches = 0;
 												resultPayload.truncated = typeof parsed.truncated === 'boolean' ? parsed.truncated : false;
-												console.log(`[VybeLangGraphService] 🔍 ℹ️ Empty matches array from parsed JSON`);
 											} else {
 												// Matches exist but no file paths found
 												resultPayload.grepResults = [];
@@ -1274,7 +1364,6 @@ export class VybeLangGraphService {
 												});
 												resultPayload.totalMatches = matchedLines;
 												resultPayload.truncated = false;
-												console.log(`[VybeLangGraphService] 🔍 ✅ Created grepResults from string format: ${resultPayload.grepResults.length} files`);
 											} else {
 												resultPayload.grepResults = [];
 												resultPayload.totalMatches = 0;
@@ -1321,18 +1410,6 @@ export class VybeLangGraphService {
 								resultPayload.truncated = false;
 							}
 
-							// CRITICAL: Log the actual payload structure to verify grepResults is included
-							console.log(`[VybeLangGraphService] 🔍 📤 FINAL PAYLOAD CHECK:`, {
-								tool_id: resultPayload.tool_id,
-								tool_name: resultPayload.tool_name,
-								hasGrepResults: !!resultPayload.grepResults,
-								grepResultsType: Array.isArray(resultPayload.grepResults) ? 'array' : typeof resultPayload.grepResults,
-								grepResultsLength: resultPayload.grepResults?.length || 0,
-								totalMatches: resultPayload.totalMatches,
-								truncated: resultPayload.truncated,
-								payloadKeys: Object.keys(resultPayload),
-								grepResultsInKeys: 'grepResults' in resultPayload
-							});
 						} else if (toolName === 'codebase_search') {
 							// Parse codebase_search results
 							try {
@@ -1349,7 +1426,6 @@ export class VybeLangGraphService {
 										} : undefined,
 									}));
 									resultPayload.totalResults = parsed.totalResults || parsed.results.length;
-									console.log(`[VybeLangGraphService] 🔍 ✅ Parsed codebase_search results: ${resultPayload.searchResults.length} results`);
 								} else {
 									resultPayload.searchResults = [];
 									resultPayload.totalResults = 0;
@@ -1376,14 +1452,12 @@ export class VybeLangGraphService {
 								// eslint-disable-next-line @typescript-eslint/no-explicit-any
 								if (fullGrepResultJson && !(fullGrepResultJson as any).error && fullGrepResultJson.matches && Array.isArray(fullGrepResultJson.matches)) {
 									emergencyParsed = fullGrepResultJson;
-									console.log(`[VybeLangGraphService] 🔍 Emergency: Using fullGrepResultJson with ${emergencyParsed.matches.length} matches`);
 								}
 								// Try 2: Parse from fullGrepResult string
 								else if (fullGrepResult && typeof fullGrepResult === 'string' && fullGrepResult.trim().startsWith('{')) {
 									try {
 										// eslint-disable-next-line @typescript-eslint/no-explicit-any
 										emergencyParsed = JSON.parse(fullGrepResult) as any;
-										console.log(`[VybeLangGraphService] 🔍 Emergency: Parsed fullGrepResult, got ${emergencyParsed?.matches?.length || 0} matches`);
 									} catch (e) {
 										console.error(`[VybeLangGraphService] 🔍 Emergency: Failed to parse fullGrepResult:`, e);
 									}
@@ -1393,7 +1467,6 @@ export class VybeLangGraphService {
 									try {
 										// eslint-disable-next-line @typescript-eslint/no-explicit-any
 										emergencyParsed = JSON.parse(result) as any;
-										console.log(`[VybeLangGraphService] 🔍 Emergency: Parsed result string (may be truncated), got ${emergencyParsed?.matches?.length || 0} matches`);
 									} catch (e) {
 										console.error(`[VybeLangGraphService] 🔍 Emergency: Failed to parse result string:`, e);
 									}
@@ -1422,9 +1495,6 @@ export class VybeLangGraphService {
 										});
 										resultPayload.totalMatches = typeof emergencyParsed.totalMatches === 'number' ? emergencyParsed.totalMatches : emergencyParsed.matches.length;
 										resultPayload.truncated = typeof emergencyParsed.truncated === 'boolean' ? emergencyParsed.truncated : false;
-										console.log(`[VybeLangGraphService] 🔍 ✅ Emergency parse succeeded: ${resultPayload.grepResults.length} files, ${resultPayload.totalMatches} matches`);
-									} else {
-										console.error(`[VybeLangGraphService] 🔍 Emergency: Parsed ${emergencyParsed.matches.length} matches but fileMap is empty`);
 									}
 								}
 
@@ -1438,6 +1508,14 @@ export class VybeLangGraphService {
 							}
 						}
 
+						const executionEndTime = Date.now();
+						const executionDuration = executionEndTime - executionStartTime;
+						console.log(`[VybeLangGraphService] 🔧 TOOL EXEC SUCCESS: ${toolName} (id: ${toolCallId})`, {
+							resultLength: result.length,
+							duration: `${executionDuration}ms`,
+							timestamp: executionEndTime
+						});
+
 						eventHandler({
 							type: 'tool.result',
 							payload: resultPayload,
@@ -1445,9 +1523,36 @@ export class VybeLangGraphService {
 							task_id: taskId,
 						});
 
+						// CRITICAL: Ensure we always return a valid string (LangGraph requirement)
+						if (!result || typeof result !== 'string') {
+							console.error(`[VybeLangGraphService] 🔧 ❌ CRITICAL: Tool ${toolName} returned invalid result type: ${typeof result}`);
+							result = `Tool ${toolName} executed but returned invalid result type: ${typeof result}`;
+						}
+
 						return result;
 					} catch (error) {
+						const executionEndTime = Date.now();
+						const executionDuration = executionEndTime - executionStartTime;
 						const msg = error instanceof Error ? error.message : String(error);
+						console.error(`[VybeLangGraphService] 🔧 ❌ TOOL EXEC ERROR: ${toolName} (id: ${toolCallId})`, {
+							error: msg,
+							duration: `${executionDuration}ms`,
+							timestamp: executionEndTime,
+							stack: error instanceof Error ? error.stack : undefined
+						});
+
+						// Emit tool.error event for UI to display popup
+						eventHandler({
+							type: 'tool.error',
+							payload: {
+								tool_name: toolName,
+								tool_call_id: toolCallId,
+								error: msg,
+								code: 'TOOL_EXECUTION_ERROR'
+							},
+							timestamp: Date.now(),
+							task_id: taskId,
+						});
 
 						// Emit tool.result even on error to update UI state
 						eventHandler({
@@ -1462,6 +1567,7 @@ export class VybeLangGraphService {
 							task_id: taskId,
 						});
 
+						// CRITICAL: Always return a valid string even on error (LangGraph requirement)
 						return `Tool execution error: ${msg}`;
 					}
 				};
@@ -1516,6 +1622,7 @@ export class VybeLangGraphService {
 			abortController,
 			eventHandler,
 			toolContext,
+			reasoningLevel: finalReasoningLevel,
 			checkpointer: this.checkpointer,
 		};
 		activeTasks.set(taskId, activeTask);
@@ -1529,9 +1636,9 @@ export class VybeLangGraphService {
 		});
 
 		try {
-			// All models use createReactAgent (GPT, Claude, Gemini)
-			const modelId = model || 'gemini-2.5-flash';
-			console.log(`[VybeLangGraphService] Using createReactAgent loop for: ${modelId}`);
+			// All models use createAgent (GPT, Claude, Gemini)
+			const modelId = model || 'azure/gpt-5.2';
+			console.log(`[VybeLangGraphService] Using createAgent loop for: ${modelId}`);
 			await this.runAgentLoop(activeTask, context);
 		} catch (error) {
 			if (abortController.signal.aborted) {
@@ -1556,8 +1663,53 @@ export class VybeLangGraphService {
 	}
 
 	/**
-	 * Run the agent using LangGraph's createReactAgent with proper streaming.
-	 * This is the proper LangGraph pattern with ordered event streaming.
+	 * Create tool error handler middleware that emits error events to UI
+	 */
+	private createToolErrorHandlerMiddleware(
+		eventHandler: (event: LangGraphEvent) => void,
+		taskId: string
+	): any {
+		if (!createMiddleware || !ToolMessage) {
+			console.warn('[VybeLangGraphService] createMiddleware or ToolMessage not available, skipping tool error middleware');
+			return null;
+		}
+
+		return createMiddleware({
+			name: 'VybeToolErrorHandler',
+			wrapToolCall: async (request: any, handler: any) => {
+				try {
+					return await handler(request);
+				} catch (error) {
+					const errorMessage = error instanceof Error ? error.message : String(error);
+					const toolName = request.toolCall?.name || 'unknown';
+					const toolCallId = request.toolCall?.id || 'unknown';
+
+					// Emit error event for UI to display
+					eventHandler({
+						type: 'tool.error',
+						payload: {
+							tool_name: toolName,
+							tool_call_id: toolCallId,
+							error: errorMessage,
+							code: 'TOOL_EXECUTION_ERROR'
+						},
+						timestamp: Date.now(),
+						task_id: taskId
+					});
+
+					// Return ToolMessage to model for retry
+					return new ToolMessage({
+						content: `Tool error: ${errorMessage}. Please check your input and try again.`,
+						tool_call_id: toolCallId,
+					});
+				}
+			},
+		});
+	}
+
+	/**
+	 * Run the agent using LangChain's createAgent with proper streaming.
+	 * This is the proper LangChain pattern with ordered event streaming.
 	 */
 	private async runAgentLoop(
 		task: ActiveTask,
@@ -1565,13 +1717,19 @@ export class VybeLangGraphService {
 	): Promise<void> {
 		const { taskId, state, abortController, eventHandler } = task;
 
+		// Track tool calls from model to match with results
+		const toolCallIdMap = new Map<string, { toolName: string; args: Record<string, unknown>; timestamp: number }>();
+
 		// Import budget tier configuration
 		const { BUDGET_TIERS } = await import('./vybePromptConfig.js');
 		const tier = BUDGET_TIERS[state.level];
 
-		console.log(`[VybeLangGraphService] Starting ${state.level} mode with createReactAgent: max ${tier.maxToolCalls} tools, ${tier.maxTurns} turns`);
+		console.log(`[VybeLangGraphService] Starting ${state.level} mode with createAgent: max ${tier.maxToolCalls} tools, ${tier.maxTurns} turns`);
 
 		try {
+			// Get the LangChain model
+			const modelId = state.model || 'azure/gpt-5.2';
+
 			// Build dynamic system prompt
 			const { buildDynamicSystemPrompt } = await import('./vybeDynamicPrompt.js');
 			const systemPrompt = buildDynamicSystemPrompt({
@@ -1580,19 +1738,19 @@ export class VybeLangGraphService {
 				toolCallCount: state.toolCallCount,
 				turnCount: state.turnCount,
 				messageCount: state.messages.length,
+				modelName: modelId,
 			});
-
-			// Get the LangChain model
-			const modelId = state.model || 'gemini-2.5-flash';
+			const reasoningLevel = task.reasoningLevel || 'medium';
 			console.log(`[VybeLangGraphService] ===== MODEL SELECTION =====`);
 			console.log(`[VybeLangGraphService] Requested model ID: ${modelId}`);
+			console.log(`[VybeLangGraphService] Reasoning level: ${reasoningLevel}`);
 			console.log(`[VybeLangGraphService] State model: ${state.model || 'undefined (using default)'}`);
 			console.log(`[VybeLangGraphService] Task ID: ${taskId}`);
 
 			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			let model: any;
 			try {
-				model = this.createLangChainModel(modelId);
+				model = this.createLangChainModel(modelId, reasoningLevel);
 			} catch (modelError) {
 				const errorMsg = modelError instanceof Error ? modelError.message : String(modelError);
 				console.error(`[VybeLangGraphService] Error creating model ${modelId}:`, errorMsg);
@@ -1621,7 +1779,12 @@ export class VybeLangGraphService {
 			console.log('[VybeLangGraphService] ✅ codebase_search tool included:', langchainTools.some((t: any) => t.name === 'codebase_search'));
 
 			// Parse reasoning level from modelId for direct streaming
+			// NOTE: parseReasoningLevel is only used for Gemini thinking detection
+			// For Azure/OpenAI models, reasoning level comes from task.reasoningLevel, not modelId
 			const { baseModelId: directBaseModelId, reasoningLevel: directReasoningLevel } = this.parseReasoningLevel(modelId);
+
+			// For non-Gemini models, use the actual reasoning level from the task
+			const actualReasoningLevel = task.reasoningLevel || directReasoningLevel;
 
 			// Check if this is a Gemini model that supports thinking
 			// CRITICAL: Only check for Gemini models, not Ollama or other providers
@@ -1633,7 +1796,7 @@ export class VybeLangGraphService {
 			);
 
 			console.log(`[VybeLangGraphService] ===== THINKING CHECK =====`);
-			console.log(`[VybeLangGraphService] Model: ${modelId}, BaseModel: ${directBaseModelId}, ReasoningLevel: ${directReasoningLevel}`);
+			console.log(`[VybeLangGraphService] Model: ${modelId}, BaseModel: ${directBaseModelId}, ParsedReasoningLevel: ${directReasoningLevel}, ActualReasoningLevel: ${actualReasoningLevel}`);
 			console.log(`[VybeLangGraphService] Is Gemini model: ${isGeminiModel}`);
 			console.log(`[VybeLangGraphService] Supports thinking: ${supportsThinking}`);
 			console.log(`[VybeLangGraphService] GoogleGenAI loaded: ${!!GoogleGenAI}`);
@@ -1764,16 +1927,26 @@ export class VybeLangGraphService {
 				}
 			}
 
-			// Create the ReAct agent with LangGraph's createReactAgent
-			const agent = createReactAgent({
-				llm: model,
+			// Create the ReAct agent with LangChain's createAgent
+			// Build middleware array
+			const middleware: any[] = [];
+
+			// Add tool error handler middleware
+			const toolErrorMiddleware = this.createToolErrorHandlerMiddleware(eventHandler, taskId);
+			if (toolErrorMiddleware) {
+				middleware.push(toolErrorMiddleware);
+			}
+
+			const agent = createAgent({
+				model: model,
 				tools: langchainTools,
-				checkpointSaver: this.checkpointer,
+				checkpointer: this.checkpointer, // renamed from checkpointSaver
+				systemPrompt: systemPrompt, // moved from inputMessages
+				middleware: middleware.length > 0 ? middleware : undefined,
 			});
 
-			// Create the initial messages
+			// Create the initial messages (systemPrompt is now in agent config)
 			const inputMessages = [
-				new SystemMessage(systemPrompt),
 				new HumanMessage(state.messages[0]?.content || ''),
 			];
 
@@ -1789,6 +1962,7 @@ export class VybeLangGraphService {
 
 			console.log(`[VybeLangGraphService] ===== NATIVE STREAMING STARTED =====`);
 			console.log(`[VybeLangGraphService] Using agent.stream() with streamMode: "messages"`);
+			console.log(`[VybeLangGraphService] Using createAgent (LangChain v1)`);
 			console.log(`[VybeLangGraphService] Model: ${modelId}`);
 			console.log(`[VybeLangGraphService] Task ID: ${taskId}`);
 
@@ -1801,8 +1975,20 @@ export class VybeLangGraphService {
 
 			let pendingToolApproval = false;
 			let totalTokens = 0;
+			// Track emitted content to prevent duplicates - simpler than delta calculation
+			const emittedContentSet = new Set<string>();
+			let lastEmittedContent = ''; // For delta calculation from cumulative chunks
 
-			for await (const [token, metadata] of stream) {
+			// NEW: Track summaries by index (structured approach)
+			const summaryByIndex = new Map<number, string>(); // Accumulate summaries by index
+			const emittedSummaryIndices = new Set<number>(); // Track which summary indices we've emitted
+
+			// DEPRECATED: Keep for backward compatibility with Anthropic thinking
+			let accumulatedReasoning = ''; // Accumulate reasoning summaries across chunks
+			let lastEmittedReasoning = ''; // Track last emitted reasoning to detect new reasoning parts
+			let currentReasoningPart = ''; // Track current reasoning part being built
+
+			for await (const [token] of stream) {
 				if (abortController.signal.aborted) {
 					console.log('[VybeLangGraphService] Stream aborted');
 					break;
@@ -1810,48 +1996,89 @@ export class VybeLangGraphService {
 
 				totalTokens++;
 
-				// Log metadata to understand stream structure (especially for tool calls)
-				if (metadata) {
-					const metadataStr = JSON.stringify(metadata);
-					// Log first few tokens and any that might contain tool info
-					if (totalTokens <= 10 || metadataStr.includes('tool') || metadataStr.includes('interrupt')) {
-						console.log(`[VybeLangGraphService] Token ${totalTokens} metadata:`, metadataStr.substring(0, 300));
-					}
-					// Check if metadata indicates a tool call
-					if (metadata && typeof metadata === 'object') {
-						// eslint-disable-next-line @typescript-eslint/no-explicit-any
-						const metaAny = metadata as any;
-						if (metaAny.tool_calls || metaAny.tool_call || metaAny.__interrupt__) {
-							console.log(`[VybeLangGraphService] 🔧 TOOL CALL IN METADATA:`, JSON.stringify(metadata));
-						}
-					}
-				}
-
 				// Check if this is an AI message chunk
 				if (isAIMessageChunk && isAIMessageChunk(token)) {
-					// DIAGNOSTIC: Log token structure to understand what we're getting
-					// eslint-disable-next-line @typescript-eslint/no-explicit-any
-					if (totalTokens <= 10 || (token as any).tool_call_chunks) {
-						// eslint-disable-next-line @typescript-eslint/no-explicit-any
-						const tokenAny = token as any;
-						console.log(`[VybeLangGraphService] Token ${totalTokens} structure:`, {
-							hasToolCallChunks: !!tokenAny.tool_call_chunks,
-							toolCallChunksLength: tokenAny.tool_call_chunks?.length || 0,
-							hasToolCalls: !!tokenAny.tool_calls,
-							toolCallsLength: tokenAny.tool_calls?.length || 0,
-							contentType: typeof tokenAny.content,
-							contentLength: typeof tokenAny.content === 'string' ? tokenAny.content.length : 'N/A',
-							tokenKeys: Object.keys(token || {}).slice(0, 10)
-						});
+
+					// Handle complete tool calls (not chunks - chunks are partial)
+					// Note: Tool call events are emitted from setToolExecutor when tools are actually executed
+					// We check both tool_calls (complete) and tool_call_chunks (partial) but only track complete ones
+					const completeToolCalls = token.tool_calls || [];
+					const hasCompleteToolCalls = completeToolCalls.length > 0;
+
+					// Also check if we have complete tool calls in chunks (when all chunks are assembled)
+					let completeToolCallsFromChunks: Array<{ name: string; args: Record<string, unknown>; id: string }> = [];
+					if (token.tool_call_chunks && token.tool_call_chunks.length > 0) {
+						// Group chunks by ID and check if any are complete (have both name and id)
+						const chunksById = new Map<string, { name: string; args: Record<string, unknown>; id: string }>();
+						for (const tc of token.tool_call_chunks) {
+							const chunkId = tc.id;
+							if (chunkId && tc.name) {
+								// This is a complete chunk - has both id and name
+								chunksById.set(chunkId, {
+									name: tc.name,
+									args: typeof tc.args === 'object' ? tc.args : {},
+									id: chunkId
+								});
+							}
+						}
+						completeToolCallsFromChunks = Array.from(chunksById.values());
 					}
 
-					// Handle tool call chunks
-					// Note: Tool call events are emitted from setToolExecutor when tools are actually executed
-					if (token.tool_call_chunks && token.tool_call_chunks.length > 0) {
-						console.log(`[VybeLangGraphService] 🔧 Found ${token.tool_call_chunks.length} tool call chunk(s)`);
-						for (const tc of token.tool_call_chunks) {
+					if (hasCompleteToolCalls || completeToolCallsFromChunks.length > 0) {
+						const allCompleteToolCalls = hasCompleteToolCalls ? completeToolCalls : completeToolCallsFromChunks;
+						console.log(`[VybeLangGraphService] 🔧 MODEL TOOL CALLS RECEIVED: ${allCompleteToolCalls.length} complete tool call(s)`);
+
+						// CRITICAL: Emit current reasoning part as complete BEFORE resetting
+						// This ensures the frontend finalizes the thinking block before tool calls
+						// New reasoning after tools will go to a new thinking block
+						if (currentReasoningPart.length > 0 && currentReasoningPart !== lastEmittedReasoning) {
+							eventHandler({
+								type: 'token',
+								payload: {
+									thinking: currentReasoningPart, // Emit complete current part
+								},
+								timestamp: Date.now(),
+								task_id: taskId,
+							});
+							lastEmittedReasoning = currentReasoningPart;
+						}
+
+						// Reset content tracking when tool call happens (new markdown block will start after)
+						lastEmittedContent = '';
+						// CRITICAL: Reset reasoning tracking when tool call happens - next reasoning will be a new part
+						// NEW: Clear structured summary tracking
+						summaryByIndex.clear();
+						emittedSummaryIndices.clear();
+						// DEPRECATED: Keep for backward compatibility
+						accumulatedReasoning = '';
+						lastEmittedReasoning = '';
+						currentReasoningPart = '';
+						emittedContentSet.clear(); // Clear emitted content set for new block
+
+						for (const tc of allCompleteToolCalls) {
 							const toolName = tc.name || '';
-							console.log(`[VybeLangGraphService] 🔧 Tool call chunk: ${toolName || 'unnamed'}, id: ${tc.id}`);
+							const modelToolCallId = tc.id || 'undefined';
+
+							// Validate that we have both name and id, and args is a valid object
+							const hasValidArgs = tc.args && typeof tc.args === 'object' && Object.keys(tc.args).length > 0;
+							const isValidToolCall = modelToolCallId !== 'undefined' && toolName && hasValidArgs;
+
+							if (!isValidToolCall) {
+								console.log(`[VybeLangGraphService] 🔧 ⚠️ Skipping incomplete tool call: name=${toolName}, id=${modelToolCallId}, hasValidArgs=${hasValidArgs}`);
+								continue; // Skip incomplete tool calls
+							}
+
+							console.log(`[VybeLangGraphService] 🔧 MODEL TOOL CALL: name=${toolName}, id=${modelToolCallId}`, {
+								args: typeof tc.args === 'object' ? JSON.stringify(tc.args).substring(0, 200) : String(tc.args).substring(0, 200),
+								timestamp: Date.now()
+							});
+
+							// Track tool call from model (only if we have a valid ID, name, and args)
+							toolCallIdMap.set(modelToolCallId, {
+								toolName,
+								args: typeof tc.args === 'object' ? tc.args : {},
+								timestamp: Date.now()
+							});
 
 							// Check if tool requires approval
 							if (toolName && TOOLS_REQUIRING_APPROVAL.includes(toolName)) {
@@ -1859,7 +2086,7 @@ export class VybeLangGraphService {
 								state.pendingApproval = {
 									tool: toolName,
 									args: typeof tc.args === 'object' ? tc.args : {},
-									toolCallId: tc.id || `tool_${Date.now()}`,
+									toolCallId: modelToolCallId,
 								};
 							}
 						}
@@ -1870,30 +2097,167 @@ export class VybeLangGraphService {
 					if (content) {
 						// Use extractThinkingContent for comprehensive thinking extraction
 						// This handles both OpenAI reasoning tokens and Anthropic thinking blocks
-						const { thinking, content: textContent } = this.extractThinkingContent(token);
+						const { thinking, thinkingSummaries, content: textContent } = this.extractThinkingContent(token);
 
-						// Emit thinking content if present
-						if (thinking) {
-							console.log(`[VybeLangGraphService] Emitting thinking content: ${thinking.length} chars`);
-							eventHandler({
-								type: 'token',
-								payload: {
-									thinking: thinking,
-								},
-								timestamp: Date.now(),
-								task_id: taskId,
-							});
+						// NEW: Use structured summaries if available (OpenAI Responses API)
+						// LangChain converts response.reasoning_summary_text.delta events to summary items
+						// Each delta event creates a summary array with one item containing the delta text
+						// We accumulate these deltas by summary_index on the frontend
+						if (thinkingSummaries && thinkingSummaries.length > 0) {
+							for (const summaryItem of thinkingSummaries) {
+								const index = summaryItem.index;
+								const text = summaryItem.text || '';
+
+								// Emit delta - each summaryItem.text is a delta from response.reasoning_summary_text.delta
+								// Frontend accumulates these deltas by summaryIndex
+								if (text.length > 0) {
+									const isNewSummary = !emittedSummaryIndices.has(index);
+									if (isNewSummary) {
+										emittedSummaryIndices.add(index);
+									}
+
+									eventHandler({
+										type: 'token',
+										payload: {
+											thinking: text, // Delta from response.reasoning_summary_text.delta event
+											summaryIndex: index, // From event.summary_index
+											isNewSummary: isNewSummary, // First time seeing this summary_index
+										},
+										timestamp: Date.now(),
+										task_id: taskId,
+									});
+								}
+							}
+						}
+						// DEPRECATED: Fallback to text-based approach for Anthropic thinking (backward compatibility)
+						else if (thinking) {
+							// CRITICAL: If reasoning tracking was reset (after tool call), this is definitely a new part
+							const isAfterToolCall = accumulatedReasoning.length === 0 && currentReasoningPart.length === 0;
+
+							// Check if this is a continuation of the current reasoning part or a new one
+							// Reasoning summaries are cumulative within a part, but new parts start fresh
+							// If the new thinking doesn't start with the accumulated reasoning, it's a new part
+							const isNewReasoningPart = !isAfterToolCall && accumulatedReasoning.length > 0 &&
+								!thinking.startsWith(accumulatedReasoning) &&
+								!accumulatedReasoning.endsWith(thinking.substring(0, Math.min(thinking.length, accumulatedReasoning.length)));
+
+							// Also check if thinking starts with a title pattern (new reasoning part indicator)
+							const hasTitlePattern = /^\s*\*\*[^*]+\*\*/.test(thinking.trim());
+							const isNewPartByTitle = hasTitlePattern && accumulatedReasoning.length > 0;
+
+							if (isAfterToolCall || isNewReasoningPart || isNewPartByTitle) {
+								// This is a new reasoning part - emit the previous part if it exists, then start new
+								if (currentReasoningPart.length > 0 && currentReasoningPart !== lastEmittedReasoning) {
+									console.log(`[VybeLangGraphService] ✅ Emitting complete reasoning part 1: ${currentReasoningPart.length} chars`);
+									eventHandler({
+										type: 'token',
+										payload: {
+											thinking: currentReasoningPart, // Emit complete previous part
+										},
+										timestamp: Date.now(),
+										task_id: taskId,
+									});
+									lastEmittedReasoning = currentReasoningPart;
+								}
+								// Start new reasoning part
+								currentReasoningPart = thinking;
+								accumulatedReasoning = thinking;
+								console.log(`[VybeLangGraphService] ✅ Starting new reasoning part: ${thinking.length} chars${isAfterToolCall ? ' (after tool call)' : ''}`);
+
+								// CRITICAL: Emit the first chunk of the new reasoning part immediately
+								// This ensures the frontend creates a new thinking block right away
+								eventHandler({
+									type: 'token',
+									payload: {
+										thinking: thinking, // Emit full content of new part (frontend will detect it's a new part by title pattern)
+									},
+									timestamp: Date.now(),
+									task_id: taskId,
+								});
+							} else {
+								// This is a continuation of the current reasoning part
+								// Calculate delta: new content = current thinking - accumulated reasoning
+								let reasoningDelta = thinking;
+								if (thinking.startsWith(accumulatedReasoning)) {
+									// Thinking is cumulative - extract delta
+									reasoningDelta = thinking.slice(accumulatedReasoning.length);
+								} else if (accumulatedReasoning.length > 0) {
+									// Check if this is a true continuation (new text appended)
+									// If accumulated reasoning is at the start of thinking, it's cumulative
+									if (thinking.length > accumulatedReasoning.length) {
+										reasoningDelta = thinking.slice(accumulatedReasoning.length);
+									}
+								}
+
+								if (reasoningDelta.length > 0) {
+									currentReasoningPart += reasoningDelta;
+									accumulatedReasoning = thinking; // Update accumulated to match current thinking
+									console.log(`[VybeLangGraphService] ✅ Emitting reasoning delta: ${reasoningDelta.length} chars (part total: ${currentReasoningPart.length} chars)`);
+									eventHandler({
+										type: 'token',
+										payload: {
+											thinking: reasoningDelta, // Emit delta for current part
+										},
+										timestamp: Date.now(),
+										task_id: taskId,
+									});
+								}
+							}
 						}
 
-						// Emit text content
+						// Emit text content - calculate delta from cumulative content
 						if (textContent) {
-							console.log(`[VybeLangGraphService] Emitting text content: ${textContent.length} chars: "${textContent.substring(0, 100)}${textContent.length > 100 ? '...' : ''}"`);
-							eventHandler({
-								type: 'token',
-								payload: { content: textContent },
-								timestamp: Date.now(),
-								task_id: taskId,
-							});
+							// AIMessageChunk.content is CUMULATIVE (full content each time)
+							// Calculate delta: new portion = current - previous
+							// Use raw textContent for delta calculation to preserve exact content
+							let deltaContent = textContent;
+							if (lastEmittedContent && lastEmittedContent.length > 0) {
+								// Check if current content starts with previous (cumulative check)
+								// Use exact string match to avoid slicing at wrong positions
+								if (textContent.startsWith(lastEmittedContent)) {
+									// Content is cumulative - extract only the new portion
+									deltaContent = textContent.slice(lastEmittedContent.length);
+								} else {
+									// Content doesn't start with previous - might be a new block or reset
+									// This can happen if content format changed or provider sent non-cumulative chunks
+									// Emit the full content to ensure nothing is lost
+									console.log(`[VybeLangGraphService] ⚠️ Content doesn't continue previous (prev: ${lastEmittedContent.length} chars, new: ${textContent.length} chars)`);
+									deltaContent = textContent;
+									// Reset tracking for new block
+									lastEmittedContent = '';
+									emittedContentSet.clear();
+								}
+							}
+
+							// Only emit if there's new content
+							if (deltaContent.length > 0) {
+								// Check for exact duplicate - but be less aggressive
+								// Only skip if we've seen this EXACT cumulative content before
+								// This prevents the same cumulative content from being emitted twice
+								if (emittedContentSet.has(textContent)) {
+									// Exact duplicate - skip but update tracking
+									console.log(`[VybeLangGraphService] 🚫 Skipping exact duplicate (${textContent.length} chars)`);
+									lastEmittedContent = textContent;
+									continue;
+								}
+
+								console.log(`[VybeLangGraphService] ✅ Emitting delta: ${deltaContent.length} chars, cumulative: ${textContent.length} chars`);
+								eventHandler({
+									type: 'token',
+									payload: { content: deltaContent },
+									timestamp: Date.now(),
+									task_id: taskId,
+								});
+
+								// Track the full cumulative content to prevent duplicates
+								// Use raw content for tracking to match delta calculation
+								emittedContentSet.add(textContent);
+								lastEmittedContent = textContent;
+							} else {
+								// Track even empty deltas to prevent duplicates
+								emittedContentSet.add(textContent);
+								lastEmittedContent = textContent;
+							}
 						}
 					}
 				} else {
@@ -1915,23 +2279,129 @@ export class VybeLangGraphService {
 						console.log(`[VybeLangGraphService] Non-AI token type: ${tokenType}, keys: ${Object.keys(tokenAny || {}).slice(0, 10).join(', ')}`);
 					}
 
-					// Check if this is a complete AIMessage (not a chunk) with tool_calls
-					// NOTE: We no longer emit tool.call from here - it's emitted from the executor
-					// where we have the actual args. This prevents events with empty args.
+					// Check if this is a complete AIMessage (not a chunk)
+					// ROOT CAUSE FIX: LangGraph sends both AIMessageChunk (during streaming) AND a final AIMessage (at end)
+					// The final AIMessage contains the same content that was already streamed in chunks
+					// PRODUCTION SOLUTION: Skip content from complete AIMessage - it's redundant
+					// Only process thinking content (which might only appear in complete message for some providers)
 					if (tokenType === 'AIMessage') {
 						// Extract thinking content from complete messages (for OpenAI reasoning tokens)
-						const { thinking } = this.extractThinkingContent(tokenAny);
-						if (thinking) {
-							console.log(`[VybeLangGraphService] Emitting thinking from complete AIMessage: ${thinking.length} chars`);
-							eventHandler({
-								type: 'token',
-								payload: { thinking: thinking },
-								timestamp: Date.now(),
-								task_id: taskId,
-							});
+						// This is the ONLY thing we should process from complete messages
+						const { thinking, thinkingSummaries, content: textContent } = this.extractThinkingContent(tokenAny);
+
+						// NEW: Use structured summaries if available
+						if (thinkingSummaries && thinkingSummaries.length > 0) {
+							for (const summaryItem of thinkingSummaries) {
+								const index = summaryItem.index;
+								const text = summaryItem.text || '';
+
+								// Always emit delta (not full accumulated content)
+								// Frontend will handle accumulation
+								if (text.length > 0) {
+									const isNewSummary = !emittedSummaryIndices.has(index);
+									if (isNewSummary) {
+										emittedSummaryIndices.add(index);
+									}
+
+									eventHandler({
+										type: 'token',
+										payload: {
+											thinking: text, // Always delta
+											summaryIndex: index,
+											isNewSummary: isNewSummary, // Flag for frontend
+										},
+										timestamp: Date.now(),
+										task_id: taskId,
+									});
+								}
+							}
 						}
-						if (tokenAny.tool_calls && tokenAny.tool_calls.length > 0) {
-							console.log(`[VybeLangGraphService] 🔧 Found complete AIMessage with ${tokenAny.tool_calls.length} tool call(s) - will be emitted from executor`);
+						// DEPRECATED: Fallback to text-based approach for Anthropic
+						else if (thinking) {
+							// Check if this is a new reasoning part or continuation
+							const isNewReasoningPart = accumulatedReasoning.length > 0 &&
+								!thinking.startsWith(accumulatedReasoning) &&
+								!accumulatedReasoning.endsWith(thinking.substring(0, Math.min(thinking.length, accumulatedReasoning.length)));
+							const hasTitlePattern = /^\s*\*\*[^*]+\*\*/.test(thinking.trim());
+							const isNewPartByTitle = hasTitlePattern && accumulatedReasoning.length > 0;
+
+							if (isNewReasoningPart || isNewPartByTitle) {
+								// Emit previous part if exists
+								if (currentReasoningPart.length > 0 && currentReasoningPart !== lastEmittedReasoning) {
+									console.log(`[VybeLangGraphService] ✅ Emitting complete reasoning part from AIMessage: ${currentReasoningPart.length} chars`);
+									eventHandler({
+										type: 'token',
+										payload: { thinking: currentReasoningPart },
+										timestamp: Date.now(),
+										task_id: taskId,
+									});
+									lastEmittedReasoning = currentReasoningPart;
+								}
+								// Start new part
+								currentReasoningPart = thinking;
+								accumulatedReasoning = thinking;
+							} else {
+								// Continuation - update current part
+								if (thinking.startsWith(accumulatedReasoning)) {
+									const delta = thinking.slice(accumulatedReasoning.length);
+									if (delta.length > 0) {
+										currentReasoningPart += delta;
+									}
+								} else if (thinking.length > accumulatedReasoning.length) {
+									const delta = thinking.slice(accumulatedReasoning.length);
+									if (delta.length > 0) {
+										currentReasoningPart += delta;
+									}
+								}
+								accumulatedReasoning = thinking;
+							}
+
+							// Emit the final reasoning part if it hasn't been emitted
+							if (currentReasoningPart.length > 0 && currentReasoningPart !== lastEmittedReasoning) {
+								console.log(`[VybeLangGraphService] ✅ Emitting final reasoning part from AIMessage: ${currentReasoningPart.length} chars`);
+								eventHandler({
+									type: 'token',
+									payload: { thinking: currentReasoningPart },
+									timestamp: Date.now(),
+									task_id: taskId,
+								});
+							}
+
+							// CRITICAL: Skip text content from complete AIMessage
+							// LangGraph's design sends the same content twice:
+							// 1. During streaming: AIMessageChunk tokens (cumulative content) - we process these
+							// 2. At end: Complete AIMessage (same cumulative content) - we SKIP this to prevent duplicates
+							if (textContent) {
+								const normalizedContent = textContent.trim().replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+								const wasEmitted = emittedContentSet.has(normalizedContent) ||
+									Array.from(emittedContentSet).some(emitted =>
+										normalizedContent.length > 20 && (
+											emitted === normalizedContent ||
+											emitted.includes(normalizedContent) ||
+											normalizedContent.includes(emitted)
+										)
+									);
+
+								if (wasEmitted) {
+									console.log(`[VybeLangGraphService] 🚫 Complete AIMessage: SKIPPING redundant content (already streamed in chunks, ${textContent.length} chars)`);
+									// Content was already emitted from chunks - skip it
+								} else {
+									// Edge case: Content wasn't in chunks (shouldn't happen, but handle gracefully)
+									console.log(`[VybeLangGraphService] ⚠️ Complete AIMessage: Content NOT in Set (${textContent.length} chars) - this shouldn't happen`);
+									// Still skip it - if it wasn't in chunks, it means it's new content that will come in chunks
+									// OR it's a different message entirely (which would be a new block anyway)
+								}
+							}
+							if (tokenAny.tool_calls && tokenAny.tool_calls.length > 0) {
+								console.log(`[VybeLangGraphService] 🔧 Found complete AIMessage with ${tokenAny.tool_calls.length} tool call(s) - will be emitted from executor`);
+								// Reset content tracking when tool call happens (new markdown block will start after)
+								lastEmittedContent = '';
+								// CRITICAL: Reset reasoning tracking when tool call happens - next reasoning will be a new part
+								accumulatedReasoning = '';
+								lastEmittedReasoning = '';
+								currentReasoningPart = '';
+								emittedContentSet.clear(); // Clear emitted content set for new block
+							}
 						}
 					}
 
@@ -1940,10 +2410,36 @@ export class VybeLangGraphService {
 					// where we have the actual args. This prevents duplicate events.
 					if (tokenType === 'ToolMessage' && token.content) {
 						const content = typeof token.content === 'string' ? token.content : JSON.stringify(token.content);
-						console.log(`[VybeLangGraphService] ToolMessage received: ${token.name} (id: ${token.tool_call_id})`);
-						console.log(`[VybeLangGraphService] ToolMessage content (first 200 chars): ${content.substring(0, 200)}`);
+						const toolCallId = token.tool_call_id || 'undefined';
+						const trackedCall = toolCallId !== 'undefined' ? toolCallIdMap.get(toolCallId) : undefined;
+						console.log(`[VybeLangGraphService] 🔧 TOOL MESSAGE RECEIVED: ${token.name}`, {
+							tool_call_id: toolCallId,
+							contentLength: content.length,
+							contentPreview: content.substring(0, 200),
+							wasTracked: !!trackedCall,
+							trackedToolName: trackedCall?.toolName,
+							timestamp: Date.now()
+						});
+
+						// Remove from tracking map once we receive the result
+						if (toolCallId !== 'undefined') {
+							toolCallIdMap.delete(toolCallId);
+						}
 					}
 				}
+			}
+
+			// Emit final reasoning part if it hasn't been emitted yet
+			if (currentReasoningPart.length > 0 && currentReasoningPart !== lastEmittedReasoning) {
+				console.log(`[VybeLangGraphService] ✅ Emitting final reasoning part after stream: ${currentReasoningPart.length} chars`);
+				eventHandler({
+					type: 'token',
+					payload: {
+						thinking: currentReasoningPart, // Emit complete final part
+					},
+					timestamp: Date.now(),
+					task_id: taskId,
+				});
 			}
 
 			console.log(`[VybeLangGraphService] ===== STREAMING COMPLETE =====`);
@@ -1966,10 +2462,24 @@ export class VybeLangGraphService {
 				console.log('[VybeLangGraphService] Waiting for tool approval...');
 				return;
 			}
-
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : String(error);
-			console.error('[VybeLangGraphService] Agent error:', errorMessage);
+			const errorStack = error instanceof Error ? error.stack : undefined;
+			console.error('[VybeLangGraphService] 🔧 ❌ AGENT ERROR:', errorMessage, {
+				stack: errorStack,
+				remainingToolCalls: Array.from(toolCallIdMap.entries()).map(([id, info]) => ({
+					id,
+					toolName: info.toolName,
+					age: Date.now() - info.timestamp
+				})),
+				timestamp: Date.now()
+			});
+
+			// Log any untracked tool calls (these might be causing the "No tool output found" error)
+			if (toolCallIdMap.size > 0) {
+				console.error('[VybeLangGraphService] 🔧 ⚠️ UNTRACKED TOOL CALLS (no result received):',
+					Array.from(toolCallIdMap.entries()).map(([id, info]) => `${info.toolName} (${id})`).join(', '));
+			}
 
 			eventHandler({
 				type: 'error',
@@ -1987,7 +2497,7 @@ export class VybeLangGraphService {
 		}
 	}
 
-	// Note: getModelWithTools and callLLMWithStreaming were replaced by createReactAgent.stream()
+	// Note: getModelWithTools and callLLMWithStreaming were replaced by createAgent.stream()
 	// The new approach uses LangGraph's native streaming (agent.stream() with streamMode: "messages")
 
 	/**
@@ -2011,13 +2521,11 @@ export class VybeLangGraphService {
 		return { baseModelId: modelId, reasoningLevel: null };
 	}
 
-	private createLangChainModel(modelId: string): any {
-		// Parse reasoning level from model ID
-		const { baseModelId, reasoningLevel } = this.parseReasoningLevel(modelId);
-
-		// Parse provider from base model ID
-		const provider = this.parseProvider(baseModelId);
-		console.log(`[VybeLangGraphService] createLangChainModel: modelId=${modelId}, baseModelId=${baseModelId}, reasoningLevel=${reasoningLevel}, provider=${provider}`);
+	private createLangChainModel(modelId: string, reasoningLevel: 'low' | 'medium' | 'high' | 'xhigh' = 'medium'): any {
+		// Parse provider from model ID (no longer parsing reasoning from modelId)
+		const provider = this.parseProvider(modelId);
+		const baseModelId = modelId; // Model ID is now clean, no reasoning suffix
+		console.log(`[VybeLangGraphService] createLangChainModel: modelId=${modelId}, reasoningLevel=${reasoningLevel}, provider=${provider}`);
 
 		// Get API key from settings (stored in our settings system)
 		// For now, use environment variables as fallback
@@ -2221,11 +2729,12 @@ export class VybeLangGraphService {
 			case 'openai':
 				if (ChatOpenAI && apiKeys.openai) {
 					const modelName = baseModelId.replace('openai/', '');
-					const isReasoningModel = modelName.startsWith('o1') || modelName.startsWith('o3');
+					console.log(`[VybeLangGraphService] OpenAI model creation: baseModelId=${baseModelId}, modelName=${modelName}, reasoningLevel=${reasoningLevel}`);
 					const isGPT5 = modelName.startsWith('gpt-5');
 					const isGPT52 = modelName.startsWith('gpt-5.2');
 					const isGPT51 = modelName.startsWith('gpt-5.1');
 					const isCodex = modelName.startsWith('codex');
+					console.log(`[VybeLangGraphService] Model checks: isGPT5=${isGPT5}, isGPT52=${isGPT52}, isGPT51=${isGPT51}, isCodex=${isCodex}`);
 
 					const openaiConfig: any = {
 						model: modelName, // Use base model name for API call
@@ -2233,21 +2742,13 @@ export class VybeLangGraphService {
 						streaming: true,
 					};
 
-					// Reasoning models (o1, o3) require special configuration
-					if (isReasoningModel) {
-						openaiConfig.temperature = 1; // Required for o1/o3 models
-						// Reasoning models may need streaming disabled for proper reasoning token capture
-						openaiConfig.streaming = false;
-						// Configure reasoning effort and summary
-						openaiConfig.reasoning = {
-							effort: 'high', // 'low' | 'medium' | 'high'
-							summary: 'detailed', // Include reasoning summary in response
-						};
-						console.log(`[VybeLangGraphService] Reasoning model config: ${modelName}, temperature=1, reasoning=high`);
+					// Set verbosity to 'high' for GPT-5, GPT-5.1, GPT-5.2 models and variants
+					if (isGPT52 || isGPT51 || isGPT5 || isCodex) {
+						openaiConfig.verbosity = 'high'; // High verbosity for GPT-5.x models
 					}
 
-					// GPT-5.2 and GPT-5.1 models with reasoning effort levels
-					if ((isGPT52 || isGPT51) && reasoningLevel) {
+					// GPT-5.2, GPT-5.1, GPT-5, and Codex models with reasoning effort levels
+					if ((isGPT52 || isGPT51 || isGPT5 || isCodex) && reasoningLevel) {
 						// GPT-5.2 supports: low, medium, high, xhigh
 						// GPT-5.1 supports: low, medium, high (no xhigh)
 						let effort: string;
@@ -2264,78 +2765,102 @@ export class VybeLangGraphService {
 
 						openaiConfig.reasoning = {
 							effort: effort,
-							summary: 'detailed', // Include reasoning summary in response
+							summary: 'auto', // Include reasoning summary in response
 						};
-						console.log(`[VybeLangGraphService] GPT-5 reasoning config: ${modelName}, effort=${effort}`);
-					}
 
-					// GPT-5 and Codex models with Responses API for built-in tools
-					if (isGPT5 || isCodex) {
-						openaiConfig.useResponsesApi = true;
-						console.log(`[VybeLangGraphService] Enabling Responses API for: ${modelName}`);
+						// CRITICAL: All GPT-5.x and Codex models need Responses API for reasoning to work properly
+						// This ensures reasoning parameters are actually applied and summaries are returned
+						if (isGPT52 || isGPT51 || isGPT5 || isCodex) {
+							openaiConfig.useResponsesApi = true;
+							console.log(`[VybeLangGraphService] Enabling Responses API for reasoning support: ${modelName}`);
+						}
+
+						console.log(`[VybeLangGraphService] ✅ GPT-5 reasoning config: ${modelName}, effort=${effort}, summary=auto, useResponsesApi=true`);
+						console.log(`[VybeLangGraphService] ✅ Full OpenAI config:`, JSON.stringify({
+							model: modelName,
+							reasoning: openaiConfig.reasoning,
+							useResponsesApi: openaiConfig.useResponsesApi,
+							streaming: openaiConfig.streaming
+						}, null, 2));
 					}
 
 					console.log(`[VybeLangGraphService] Creating ChatOpenAI: ${modelName}`);
-					return new ChatOpenAI(openaiConfig);
+					const model = new ChatOpenAI(openaiConfig);
+
+					// Verify reasoning parameters were set on the model instance
+					const modelAny = model as any;
+					if (openaiConfig.reasoning) {
+						console.log(`[VybeLangGraphService] ✅ Model created, checking reasoning config...`);
+						console.log(`[VybeLangGraphService] Model.reasoning:`, modelAny.reasoning);
+						console.log(`[VybeLangGraphService] Model.useResponsesApi:`, modelAny.useResponsesApi);
+						if (!modelAny.reasoning) {
+							console.error(`[VybeLangGraphService] ❌ ERROR: reasoning parameter NOT found on model instance!`);
+						}
+						if (openaiConfig.useResponsesApi && !modelAny.useResponsesApi) {
+							console.error(`[VybeLangGraphService] ❌ ERROR: useResponsesApi NOT found on model instance!`);
+						}
+					}
+
+					return model;
 				}
 				console.warn(`[VybeLangGraphService] Cannot create OpenAI model: adapter=${!!ChatOpenAI}, hasKey=${!!apiKeys.openai}`);
 				break;
 
-		case 'anthropic':
-			if (ChatAnthropic && apiKeys.anthropic) {
-				const modelName = baseModelId.replace('anthropic/', '');
-				const isOpus = modelName.includes('opus');
-				const isSonnet = modelName.includes('sonnet');
-				const isHaiku = modelName.includes('haiku');
-				// Check if this is a thinking variant (has "-thinking" suffix)
-				const hasThinking = modelName.endsWith('-thinking');
-				// Remove "-thinking" suffix to get base model name for mapping
-				const baseModelName = hasThinking ? modelName.replace('-thinking', '') : modelName;
+			case 'anthropic':
+				if (ChatAnthropic && apiKeys.anthropic) {
+					const modelName = baseModelId.replace('anthropic/', '');
+					const isOpus = modelName.includes('opus');
+					const isSonnet = modelName.includes('sonnet');
+					const isHaiku = modelName.includes('haiku');
+					// Check if this is a thinking variant (has "-thinking" suffix)
+					const hasThinking = modelName.endsWith('-thinking');
+					// Remove "-thinking" suffix to get base model name for mapping
+					const baseModelName = hasThinking ? modelName.replace('-thinking', '') : modelName;
 
-				// Map friendly names to Anthropic API model identifiers
-				// Using correct model IDs from Anthropic API
-				const anthropicModelMap: Record<string, string> = {
-					'claude-opus-4.5': 'claude-opus-4-5-20251101', // Opus 4.5
-					'claude-sonnet-4.5': 'claude-sonnet-4-5-20250929', // Sonnet 4.5
-					'claude-haiku-4.5': 'claude-haiku-4-5-20251001', // Haiku 4.5
-				};
-				const apiModelName = anthropicModelMap[baseModelName] || baseModelName;
+					// Map friendly names to Anthropic API model identifiers
+					// Using correct model IDs from Anthropic API
+					const anthropicModelMap: Record<string, string> = {
+						'claude-opus-4.5': 'claude-opus-4-5-20251101', // Opus 4.5
+						'claude-sonnet-4.5': 'claude-sonnet-4-5-20250929', // Sonnet 4.5
+						'claude-haiku-4.5': 'claude-haiku-4-5-20251001', // Haiku 4.5
+					};
+					const apiModelName = anthropicModelMap[baseModelName] || baseModelName;
 
-				const anthropicConfig: any = {
-					model: apiModelName,
-					apiKey: apiKeys.anthropic,
-					streaming: true,
-					maxTokens: 8192,
-				};
+					const anthropicConfig: any = {
+						model: apiModelName,
+						apiKey: apiKeys.anthropic,
+						streaming: true,
+						maxTokens: 8192,
+					};
 
-				// Extended thinking for models with "-thinking" suffix
-				// All Claude 4.5 models support extended thinking
-				if (hasThinking) {
-					// High effort: Use maximum budget_tokens for each model
-					// Opus: 16000, Sonnet: 8000, Haiku: 4000
-					let budgetTokens: number;
-					if (isOpus) {
-						budgetTokens = 16000; // Maximum for Opus
-					} else if (isSonnet) {
-						budgetTokens = 8000; // Maximum for Sonnet
-					} else if (isHaiku) {
-						budgetTokens = 4000; // Maximum for Haiku
-					} else {
-						budgetTokens = 8000; // Default
+					// Extended thinking for models with "-thinking" suffix
+					// All Claude 4.5 models support extended thinking
+					if (hasThinking) {
+						// High effort: Use maximum budget_tokens for each model
+						// Opus: 16000, Sonnet: 8000, Haiku: 4000
+						let budgetTokens: number;
+						if (isOpus) {
+							budgetTokens = 16000; // Maximum for Opus
+						} else if (isSonnet) {
+							budgetTokens = 8000; // Maximum for Sonnet
+						} else if (isHaiku) {
+							budgetTokens = 4000; // Maximum for Haiku
+						} else {
+							budgetTokens = 8000; // Default
+						}
+
+						anthropicConfig.thinking = {
+							type: 'enabled',
+							budget_tokens: budgetTokens,
+						};
+						console.log(`[VybeLangGraphService] Extended thinking enabled for ${apiModelName}: budget=${budgetTokens} (high effort)`);
 					}
 
-					anthropicConfig.thinking = {
-						type: 'enabled',
-						budget_tokens: budgetTokens,
-					};
-					console.log(`[VybeLangGraphService] Extended thinking enabled for ${apiModelName}: budget=${budgetTokens} (high effort)`);
+					console.log(`[VybeLangGraphService] Creating ChatAnthropic: ${apiModelName}, thinking=${hasThinking}`);
+					return new ChatAnthropic(anthropicConfig);
 				}
-
-				console.log(`[VybeLangGraphService] Creating ChatAnthropic: ${apiModelName}, thinking=${hasThinking}`);
-				return new ChatAnthropic(anthropicConfig);
-			}
-			console.warn(`[VybeLangGraphService] Cannot create Anthropic model: adapter=${!!ChatAnthropic}, hasKey=${!!apiKeys.anthropic}`);
-			break;
+				console.warn(`[VybeLangGraphService] Cannot create Anthropic model: adapter=${!!ChatAnthropic}, hasKey=${!!apiKeys.anthropic}`);
+				break;
 
 			case 'azure':
 				console.log(`[VybeLangGraphService] Azure case hit for model: ${modelId}`);
@@ -2362,9 +2887,71 @@ export class VybeLangGraphService {
 					throw new Error(`Azure API key not configured. Please set 'azure' key in Supabase secrets.`);
 				}
 
-				// Extract deployment name from model ID (e.g., "azure/gpt-5.2" -> "gpt-5.2")
-				const deploymentName = modelId.replace('azure/', '');
-				console.log(`[VybeLangGraphService] Creating AzureChatOpenAI for deployment: ${deploymentName}`);
+				// Extract deployment name from base model ID (e.g., "azure/gpt-5.2" -> "gpt-5.2")
+				// Use baseModelId to ensure we don't include reasoning suffixes
+				const deploymentName = baseModelId.replace('azure/', '');
+				const modelName = deploymentName; // Model name for API calls
+				console.log(`[VybeLangGraphService] Azure model creation: baseModelId=${baseModelId}, deploymentName=${deploymentName}, modelName=${modelName}, reasoningLevel=${reasoningLevel}`);
+
+				// Check if this is a GPT-5 model with reasoning support
+				const isGPT52 = modelName.startsWith('gpt-5.2');
+				const isGPT51 = modelName.startsWith('gpt-5.1');
+				const isGPT5 = modelName.startsWith('gpt-5');
+				const isCodex = modelName.startsWith('gpt-5') && modelName.includes('codex');
+				console.log(`[VybeLangGraphService] Azure model checks: isGPT5=${isGPT5}, isGPT52=${isGPT52}, isGPT51=${isGPT51}, isCodex=${isCodex}`);
+
+				console.log(`[VybeLangGraphService] Creating AzureChatOpenAI for deployment: ${deploymentName}, reasoningLevel: ${reasoningLevel}`);
+
+				// Build base config for AzureChatOpenAI
+				const azureBaseConfig: any = {
+					azureOpenAIApiDeploymentName: deploymentName,
+					streaming: true,
+				};
+
+				// Set verbosity to 'high' for GPT-5, GPT-5.1, GPT-5.2 models and variants
+				if (isGPT52 || isGPT51 || isGPT5 || isCodex) {
+					azureBaseConfig.verbosity = 'high'; // High verbosity for GPT-5.x models
+				}
+
+				// Add reasoning parameter if model supports reasoning (GPT-5.2, GPT-5.1, Codex variants)
+				if ((isGPT52 || isGPT51 || isGPT5 || isCodex) && reasoningLevel) {
+					// GPT-5.2 supports: low, medium, high, xhigh
+					// GPT-5.1 supports: low, medium, high (no xhigh)
+					let effort: string;
+					if (reasoningLevel === 'xhigh') {
+						if (isGPT52) {
+							effort = 'xhigh'; // Only GPT-5.2 supports xhigh
+						} else {
+							effort = 'high'; // Fallback to high for GPT-5.1
+							console.warn(`[VybeLangGraphService] Azure GPT-5.1 does not support xhigh, using high instead`);
+						}
+					} else {
+						effort = reasoningLevel; // low, medium, high
+					}
+
+					azureBaseConfig.reasoning = {
+						effort: effort,
+						summary: 'auto', // Include reasoning summary in response
+					};
+
+					// NOTE: For now, use standard Chat Completions API instead of Responses API
+					// Responses API requires different endpoint structure which is causing issues with AzureChatOpenAI
+					// Reasoning parameters should still work with Chat Completions API
+					// TODO: Re-enable Responses API once we have a working solution
+					// if (isGPT52 || isGPT51 || isGPT5 || isCodex) {
+					// 	azureBaseConfig.useResponsesApi = true;
+					// 	azureBaseConfig.model = deploymentName;
+					// 	console.log(`[VybeLangGraphService] Azure GPT-5/Codex: Enabling Responses API for reasoning support`);
+					// }
+
+					console.log(`[VybeLangGraphService] ✅ Azure GPT-5 reasoning config: ${modelName}, effort=${effort}, summary=auto, useResponsesApi=true`);
+					console.log(`[VybeLangGraphService] ✅ Full Azure config:`, JSON.stringify({
+						deploymentName: deploymentName,
+						reasoning: azureBaseConfig.reasoning,
+						useResponsesApi: azureBaseConfig.useResponsesApi,
+						streaming: azureBaseConfig.streaming
+					}, null, 2));
+				}
 
 				// For Azure AI Foundry (custom domain), use ChatOpenAI with baseURL
 				// For standard Azure OpenAI, use AzureChatOpenAI with azureOpenAIApiInstanceName
@@ -2378,68 +2965,332 @@ export class VybeLangGraphService {
 					}
 
 					if (isFoundry) {
-						// Azure AI Foundry format - use azureOpenAIEndpoint directly
-						// Endpoint: https://vybe-models-resource.services.ai.azure.com/api/projects/vybe-models
-						// AzureChatOpenAI handles the full URL construction internally
+						// Azure AI Foundry format detected, but user says to use standard Azure OpenAI endpoint
+						// Project overview says: https://vybe-models-resource.openai.azure.com/
+						// Extract instance name from endpoint or use standard format
+						// If endpoint is Foundry format, extract resource name and convert to standard
+
 						const endpoint = azureConfig.endpoint.trim().replace(/\/$/, '');
 						const apiVersion = azureConfig.apiVersion || '2024-05-01-preview';
+
+						// Extract instance name from endpoint
+						// Try to extract from Foundry format first: https://{resource}.services.ai.azure.com/...
+						let instanceName = azureConfig.instanceName;
+						if (!instanceName) {
+							const foundryMatch = endpoint.match(/https?:\/\/([^\.]+)\.services\.ai\.azure\.com/);
+							if (foundryMatch) {
+								instanceName = foundryMatch[1];
+								console.log(`[VybeLangGraphService] 🔄 Extracted instance name from Foundry endpoint: ${instanceName}`);
+							} else {
+								// Try standard format: https://{instance}.openai.azure.com
+								const standardMatch = endpoint.match(/https?:\/\/([^\.]+)\.openai\.azure\.com/);
+								if (standardMatch) {
+									instanceName = standardMatch[1];
+									console.log(`[VybeLangGraphService] 🔄 Extracted instance name from standard endpoint: ${instanceName}`);
+								}
+							}
+						}
+
+						if (!instanceName) {
+							// Default to extracting from any endpoint format
+							const match = endpoint.match(/https?:\/\/([^\/\.]+)/);
+							if (match) {
+								instanceName = match[1];
+								console.log(`[VybeLangGraphService] 🔄 Extracted instance name from endpoint: ${instanceName}`);
+							}
+						}
+
+						if (!instanceName) {
+							throw new Error(`Could not extract instance name from endpoint: ${endpoint}`);
+						}
 
 						// Extract and validate API key
 						const apiKey = azureConfig.apiKey?.trim();
 						if (!apiKey) {
-							throw new Error(`Azure API key is required for Foundry endpoint`);
+							throw new Error(`Azure API key is required`);
 						}
 
-						console.log(`[VybeLangGraphService] Azure Foundry config (using azureOpenAIEndpoint):`, {
-							endpoint: endpoint,
+						console.log(`[VybeLangGraphService] Using standard Azure OpenAI endpoint format`);
+						console.log(`[VybeLangGraphService] Config:`, {
+							instanceName: instanceName,
 							deploymentName: deploymentName,
 							hasApiKey: !!apiKey,
 							apiKeyLength: apiKey.length,
 							apiKeyPrefix: apiKey.substring(0, 10),
-							apiVersion: apiVersion
+							apiVersion: apiVersion,
+							useResponsesApi: azureBaseConfig.useResponsesApi
 						});
 
-						// Use azureOpenAIEndpoint - this is the correct parameter for Azure AI Foundry
-						// LangChain's AzureChatOpenAI will use api-key header authentication
-						return new AzureChatOpenAI({
+						// Use standard Azure OpenAI configuration with instanceName
+						// This will construct: https://{instanceName}.openai.azure.com/openai/deployments/{deploymentName}
+						const modelConfig: any = {
+							...azureBaseConfig,
 							azureOpenAIApiKey: apiKey,
-							azureOpenAIEndpoint: endpoint,
+							azureOpenAIApiInstanceName: instanceName,
 							azureOpenAIApiDeploymentName: deploymentName,
-							azureOpenAIApiVersion: apiVersion,
-							streaming: true,
+							azureOpenAIApiVersion: apiVersion
+						};
+
+						// Log the EXACT config being passed to AzureChatOpenAI
+						console.log(`[VybeLangGraphService] 🔍 EXACT CONFIG PASSED TO AzureChatOpenAI (Standard Azure OpenAI):`, JSON.stringify({
+							azureOpenAIApiInstanceName: modelConfig.azureOpenAIApiInstanceName,
+							azureOpenAIApiDeploymentName: modelConfig.azureOpenAIApiDeploymentName,
+							expectedEndpoint: `https://${instanceName}.openai.azure.com/openai/deployments/${deploymentName}`,
+							model: modelConfig.model,
+							reasoning: modelConfig.reasoning,
+							useResponsesApi: modelConfig.useResponsesApi,
+							streaming: modelConfig.streaming,
+							hasAzureOpenAIApiKey: !!modelConfig.azureOpenAIApiKey,
+							apiKeyLength: modelConfig.azureOpenAIApiKey?.length,
+							apiKeyPrefix: modelConfig.azureOpenAIApiKey?.substring(0, 10),
+							azureOpenAIApiVersion: modelConfig.azureOpenAIApiVersion
+						}, null, 2));
+
+						// Use AzureChatOpenAI with standard Azure OpenAI endpoint
+						const model = new AzureChatOpenAI(modelConfig);
+						console.log(`[VybeLangGraphService] ✅ Created AzureChatOpenAI for standard Azure OpenAI endpoint`);
+
+						// Log what was actually set on the instance
+						const modelAny = model as any;
+						console.log(`[VybeLangGraphService] 🔍 Model instance properties:`, {
+							model: modelAny.model,
+							azureOpenAIApiInstanceName: modelAny.azureOpenAIApiInstanceName,
+							azureOpenAIApiDeploymentName: modelAny.azureOpenAIApiDeploymentName,
+							reasoning: modelAny.reasoning,
+							useResponsesApi: modelAny.useResponsesApi,
+							hasAzureOpenAIApiKey: !!modelAny.azureOpenAIApiKey,
+							apiKeyLength: modelAny.azureOpenAIApiKey?.length
 						});
+
+						// Verify reasoning parameters were set on the model instance
+						if (azureBaseConfig.reasoning) {
+							console.log(`[VybeLangGraphService] ✅ Model created, checking reasoning config...`);
+							console.log(`[VybeLangGraphService] Model.reasoning:`, modelAny.reasoning);
+							console.log(`[VybeLangGraphService] Model.useResponsesApi:`, modelAny.useResponsesApi);
+							console.log(`[VybeLangGraphService] Model.model property: ${modelAny.model}`);
+							if (!modelAny.reasoning) {
+								console.error(`[VybeLangGraphService] ❌ ERROR: reasoning parameter NOT found on model instance!`);
+							}
+							if (azureBaseConfig.useResponsesApi && !modelAny.useResponsesApi) {
+								console.error(`[VybeLangGraphService] ❌ ERROR: useResponsesApi NOT found on model instance!`);
+							}
+							if (azureBaseConfig.useResponsesApi && modelAny.model !== deploymentName) {
+								console.error(`[VybeLangGraphService] ❌ ERROR: Model.model (${modelAny.model}) does not match deploymentName (${deploymentName})!`);
+							}
+						}
+
+						return model;
 					} else {
-						// Standard Azure OpenAI format (cognitiveservices.azure.com)
-						// Also use azureOpenAIEndpoint for consistency
+						// Standard Azure OpenAI format (openai.azure.com)
+						// CRITICAL: For Azure Responses API, we need to match the OpenAI SDK pattern:
+						// - baseURL: "https://{instance-name}.openai.azure.com/openai/v1/"
+						// - model: deploymentName (e.g., "gpt-5.2")
+						// - apiKey: Azure API key
+						// - reasoning: { effort: "...", summary: "..." }
+
 						const endpoint = azureConfig.endpoint.trim().replace(/\/$/, '');
 						const apiVersion = azureConfig.apiVersion || '2024-05-01-preview';
 
-						console.log(`[VybeLangGraphService] Azure standard config (using azureOpenAIEndpoint):`, {
+						// Extract instance name from endpoint URL
+						// Format: https://{instance-name}.openai.azure.com/
+						let instanceName = azureConfig.instanceName;
+						if (!instanceName && endpoint) {
+							const match = endpoint.match(/https?:\/\/([^\/\.]+)\.openai\.azure\.com/);
+							if (match) {
+								instanceName = match[1];
+								console.log(`[VybeLangGraphService] 🔄 Extracted instance name from standard endpoint: ${instanceName}`);
+							}
+						}
+
+						if (!instanceName) {
+							throw new Error(`Could not extract instance name from endpoint: ${endpoint}. Please set AZURE_ENDPOINT to https://{instance-name}.openai.azure.com`);
+						}
+
+						console.log(`[VybeLangGraphService] Azure standard config:`, {
+							instanceName: instanceName,
 							endpoint: endpoint,
 							deploymentName: deploymentName,
 							hasApiKey: !!azureConfig.apiKey,
 							apiKeyLength: azureConfig.apiKey?.length || 0,
-							apiVersion: apiVersion
+							apiVersion: apiVersion,
+							useResponsesApi: azureBaseConfig.useResponsesApi
 						});
 
-						return new AzureChatOpenAI({
-							azureOpenAIApiKey: azureConfig.apiKey?.trim(),
-							azureOpenAIEndpoint: endpoint,
-							azureOpenAIApiDeploymentName: deploymentName,
-							azureOpenAIApiVersion: apiVersion,
-							streaming: true,
+						// CRITICAL: For Azure Responses API, use ChatOpenAI (not AzureChatOpenAI)
+						// Per Azure Foundry example: use standard OpenAI SDK with baseURL set to Responses API endpoint
+						// Pattern: baseURL = "https://{instance-name}.openai.azure.com/openai/v1/"
+						// This matches the Azure Foundry example exactly
+						const responsesApiBaseURL = `https://${instanceName}.openai.azure.com/openai/v1/`;
+
+						console.log(`[VybeLangGraphService] 🔍 Using ChatOpenAI for Responses API (Azure Foundry pattern)`);
+						console.log(`[VybeLangGraphService] 🔍 Responses API baseURL: ${responsesApiBaseURL}`);
+
+						// Use ChatOpenAI with baseURL set to Responses API endpoint (exactly like Azure Foundry example)
+						// CRITICAL: Azure requires 'api-key' header, but ChatOpenAI uses 'Authorization: Bearer' when apiKey is set
+						// Solution: Set apiKey for validation, but override headers to use 'api-key' instead
+						const apiKey = azureConfig.apiKey?.trim();
+						if (!apiKey) {
+							throw new Error('Azure API key is required');
+						}
+
+						// CRITICAL: Use 'configuration' object to set baseURL and headers
+						// This ensures ChatOpenAI respects the baseURL and doesn't default to OpenAI's servers
+						const modelConfig: any = {
+							...azureBaseConfig,
+							model: deploymentName, // Deployment name as model (per Azure Foundry example)
+							useResponsesApi: true, // Explicitly set - Responses API only
+							// Use 'configuration' object to set client options (baseURL, headers, etc.)
+							configuration: {
+								baseURL: responsesApiBaseURL, // Responses API endpoint (per Azure Foundry example)
+								apiKey: apiKey, // API key (but we'll override headers to use api-key)
+								// Set defaultHeaders to use api-key instead of Authorization: Bearer
+								defaultHeaders: {
+									'api-key': apiKey // Azure requires api-key header
+								}
+							}
+						};
+
+						// Log the EXACT config being passed to ChatOpenAI
+						console.log(`[VybeLangGraphService] 🔍 EXACT CONFIG PASSED TO ChatOpenAI (Responses API):`, JSON.stringify({
+							baseURL: modelConfig.configuration?.baseURL,
+							model: modelConfig.model,
+							reasoning: modelConfig.reasoning,
+							useResponsesApi: modelConfig.useResponsesApi,
+							streaming: modelConfig.streaming,
+							hasApiKey: !!modelConfig.configuration?.apiKey,
+							apiKeyLength: modelConfig.configuration?.apiKey?.length,
+							hasApiKeyHeader: !!modelConfig.configuration?.defaultHeaders?.['api-key']
+						}, null, 2));
+
+						// Use ChatOpenAI for Responses API (matches Azure Foundry example)
+						const model = new ChatOpenAI(modelConfig);
+
+						// CRITICAL: Override client to use 'api-key' header instead of 'Authorization: Bearer'
+						// ChatOpenAI sets Authorization: Bearer when apiKey is provided, but Azure requires api-key header
+						const modelAny = model as any;
+
+						// CRITICAL: Override client to use 'api-key' header instead of 'Authorization: Bearer'
+						// Also ensure baseURL is set correctly
+						if (modelAny.client) {
+							// Ensure baseURL is set on the client
+							if (modelAny.clientConfig) {
+								modelAny.clientConfig.baseURL = responsesApiBaseURL;
+								console.log(`[VybeLangGraphService] ✅ Set baseURL in clientConfig: ${responsesApiBaseURL}`);
+							}
+
+							// Store original request method
+							const originalRequest = modelAny.client._client?.request;
+
+							if (originalRequest && modelAny.client._client) {
+								// Wrap the request method to override headers and ensure baseURL
+								modelAny.client._client.request = async function (options: any) {
+									// Ensure baseURL is set
+									if (!options.baseURL) {
+										options.baseURL = responsesApiBaseURL;
+									}
+
+									// Remove Authorization header if present
+									if (options.headers) {
+										delete options.headers['Authorization'];
+										delete options.headers['authorization'];
+										// Set api-key header
+										options.headers['api-key'] = apiKey;
+									}
+									return originalRequest.call(this, options);
+								};
+								console.log(`[VybeLangGraphService] ✅ Wrapped client._client.request to use api-key header and baseURL`);
+							}
+
+							// Also set defaultHeaders to ensure api-key is used
+							if (modelAny.clientConfig) {
+								modelAny.clientConfig.defaultHeaders = {
+									...(modelAny.clientConfig.defaultHeaders || {}),
+									'api-key': apiKey
+								};
+								// Remove Authorization from defaultHeaders
+								if (modelAny.clientConfig.defaultHeaders['Authorization']) {
+									delete modelAny.clientConfig.defaultHeaders['Authorization'];
+								}
+								console.log(`[VybeLangGraphService] ✅ Set api-key in clientConfig.defaultHeaders`);
+							}
+						}
+
+						console.log(`[VybeLangGraphService] ✅ Created ChatOpenAI for Azure Responses API`);
+
+						// Log what was actually set on the instance
+						console.log(`[VybeLangGraphService] 🔍 Model instance properties (ChatOpenAI):`, {
+							model: modelAny.model,
+							baseURL: modelAny.clientConfig?.baseURL || modelAny.baseURL,
+							reasoning: modelAny.reasoning,
+							useResponsesApi: modelAny.useResponsesApi,
+							hasApiKey: !!modelAny.apiKey,
+							hasApiKeyHeader: !!modelAny.clientConfig?.defaultHeaders?.['api-key']
 						});
+
+						// Post-creation override if still needed (though constructor should have set it)
+						if (azureBaseConfig.useResponsesApi && modelAny.model !== deploymentName) {
+							console.warn(`[VybeLangGraphService] ⚠️ Model.model (${modelAny.model}) doesn't match deploymentName (${deploymentName}), attempting override...`);
+							modelAny.model = deploymentName;
+							console.log(`[VybeLangGraphService] ✅ Overrode model property to ${deploymentName}`);
+						}
+
+						// Verify reasoning parameters were set on the model instance
+						if (azureBaseConfig.reasoning) {
+							console.log(`[VybeLangGraphService] ✅ Azure standard model created, checking reasoning config...`);
+							console.log(`[VybeLangGraphService] Model.reasoning:`, modelAny.reasoning);
+							console.log(`[VybeLangGraphService] Model.useResponsesApi:`, modelAny.useResponsesApi);
+							console.log(`[VybeLangGraphService] Model.model property: ${modelAny.model}`);
+							console.log(`[VybeLangGraphService] Model.azureOpenAIApiDeploymentName: ${modelAny.azureOpenAIApiDeploymentName}`);
+							if (!modelAny.reasoning) {
+								console.error(`[VybeLangGraphService] ❌ ERROR: reasoning parameter NOT found on Azure standard model instance!`);
+							}
+							if (azureBaseConfig.useResponsesApi && !modelAny.useResponsesApi) {
+								console.error(`[VybeLangGraphService] ❌ ERROR: useResponsesApi NOT found on Azure standard model instance!`);
+							}
+							if (azureBaseConfig.useResponsesApi && modelAny.model !== deploymentName) {
+								console.error(`[VybeLangGraphService] ❌ ERROR: Model.model (${modelAny.model}) does not match deploymentName (${deploymentName})!`);
+							}
+						}
+
+						return model;
 					}
 				} else if (azureConfig.instanceName) {
 					// Standard Azure OpenAI format
-					return new AzureChatOpenAI({
+					const model = new AzureChatOpenAI({
+						...azureBaseConfig,
 						model: deploymentName,
 						azureOpenAIApiKey: azureConfig.apiKey,
 						azureOpenAIApiInstanceName: azureConfig.instanceName,
-						azureOpenAIApiDeploymentName: deploymentName,
 						azureOpenAIApiVersion: azureConfig.apiVersion || '2024-05-01-preview',
-						streaming: true,
 					});
+
+					// CRITICAL: When using Responses API, explicitly set the model property
+					// AzureChatOpenAI may default to gpt-3.5-turbo, so we need to override it
+					const modelAny = model as any;
+					if (azureBaseConfig.useResponsesApi && azureBaseConfig.model) {
+						modelAny.model = azureBaseConfig.model;
+						console.log(`[VybeLangGraphService] ✅ Set model property to ${azureBaseConfig.model} for Responses API (instanceName)`);
+					}
+
+					// Verify reasoning parameters were set on the model instance
+					if (azureBaseConfig.reasoning) {
+						console.log(`[VybeLangGraphService] ✅ Azure instanceName model created, checking reasoning config...`);
+						console.log(`[VybeLangGraphService] Model.reasoning:`, modelAny.reasoning);
+						console.log(`[VybeLangGraphService] Model.useResponsesApi:`, modelAny.useResponsesApi);
+						console.log(`[VybeLangGraphService] Model.model property: ${modelAny.model}`);
+						console.log(`[VybeLangGraphService] Model.azureOpenAIApiDeploymentName: ${modelAny.azureOpenAIApiDeploymentName}`);
+						if (!modelAny.reasoning) {
+							console.error(`[VybeLangGraphService] ❌ ERROR: reasoning parameter NOT found on Azure instanceName model instance!`);
+						}
+						if (azureBaseConfig.useResponsesApi && !modelAny.useResponsesApi) {
+							console.error(`[VybeLangGraphService] ❌ ERROR: useResponsesApi NOT found on Azure instanceName model instance!`);
+						}
+						if (azureBaseConfig.useResponsesApi && modelAny.model !== deploymentName) {
+							console.error(`[VybeLangGraphService] ❌ ERROR: Model.model (${modelAny.model}) does not match deploymentName (${deploymentName})!`);
+						}
+					}
+
+					return model;
 				}
 
 				// Should not reach here, but just in case
@@ -2456,14 +3307,15 @@ export class VybeLangGraphService {
 	 * Parse provider from model ID.
 	 */
 	private parseProvider(modelId: string): 'gemini' | 'openai' | 'anthropic' | 'azure' {
+		// CRITICAL: Check azure/ FIRST before checking gpt- to avoid misclassification
+		// e.g., "azure/gpt-5.2" should be 'azure', not 'openai'
+		if (modelId.startsWith('azure/')) return 'azure';
 		if (modelId.startsWith('gemini')) return 'gemini';
-		// OpenAI models: gpt-*, o1*, o3*, codex*, openai/*
+		// OpenAI models: gpt-*, codex*, openai/*
 		if (modelId.startsWith('gpt-') || modelId.startsWith('openai/') ||
-			modelId.startsWith('o1') || modelId.startsWith('o3') ||
 			modelId.startsWith('codex')) return 'openai';
 		// Anthropic models: claude*, anthropic/*
 		if (modelId.startsWith('claude') || modelId.startsWith('anthropic/')) return 'anthropic';
-		if (modelId.startsWith('azure/')) return 'azure';
 		// Default to gemini for models like "gemini-2.5-pro", "gemini-3-flash-preview"
 		if (modelId.includes('gemini')) return 'gemini';
 		// Default to gemini if no match (ollama removed)
@@ -2478,22 +3330,77 @@ export class VybeLangGraphService {
 	 * Anthropic: Thinking is in content blocks with type "thinking"
 	 *
 	 * @param message - The AI message from LangChain
-	 * @returns Object with optional thinking content and the main text content
+	 * @returns Object with optional thinking content (for backward compatibility) and structured thinking summaries
 	 */
-	private extractThinkingContent(message: any): { thinking?: string; content: string } {
-		// OpenAI reasoning tokens (in additional_kwargs)
+	private extractThinkingContent(message: any): {
+		thinking?: string; // Deprecated - kept for backward compatibility
+		thinkingSummaries?: Array<{ text: string; index: number; type: string }>; // Structured summaries with index tracking
+		content: string;
+	} {
+		// OpenAI Responses API reasoning events (via LangChain conversion):
+		// - response.reasoning_summary_text.delta → additional_kwargs.reasoning.summary with one item: { text: delta, type: "summary_text", index: summary_index }
+		// - response.reasoning_summary_part.added → additional_kwargs.reasoning.summary with one item: { ...part, index: summary_index }
+		// LangChain accumulates these into message.additional_kwargs.reasoning.summary as an array
+		// Each streaming chunk may contain multiple summary items (one per delta event)
+		// We extract all summary_text items and group them by index for proper accumulation
 		if (message.additional_kwargs?.reasoning?.summary) {
-			const reasoning = message.additional_kwargs.reasoning.summary
-				.filter((item: any) => item.type === 'summary_text')
-				.map((item: any) => item.text)
-				.join('');
-			return {
-				thinking: reasoning || undefined,
-				content: typeof message.content === 'string' ? message.content : ''
-			};
+			const summary = message.additional_kwargs.reasoning.summary;
+
+			if (Array.isArray(summary) && summary.length > 0) {
+				// Extract all summary_text items
+				// In streaming, each chunk may have one delta, but we extract all available
+				// Group by index to handle multiple reasoning parts correctly
+				const summaryItems = summary
+					.filter((item: any) => item.type === 'summary_text' && item.text)
+					.sort((a: any, b: any) => {
+						// Sort by index if available, otherwise maintain order
+						const aIndex = a.index !== undefined ? a.index : 0;
+						const bIndex = b.index !== undefined ? b.index : 0;
+						return aIndex - bIndex;
+					});
+
+				if (summaryItems.length > 0) {
+					// Return structured summaries with index tracking
+					// Each summary item is separate - no joining needed
+					const thinkingSummaries = summaryItems.map((item: any) => ({
+						text: item.text || '',
+						index: item.index !== undefined ? item.index : 0,
+						type: item.type || 'summary_text'
+					}));
+
+					console.log(`[VybeLangGraphService] ✅ Extracted ${thinkingSummaries.length} structured reasoning summary item(s)`);
+
+					// For backward compatibility, also provide joined thinking string
+					// This will be removed in Phase 3
+					let reasoning = '';
+					for (let i = 0; i < summaryItems.length; i++) {
+						const item = summaryItems[i];
+						const text = item.text || '';
+
+						if (i > 0) {
+							const prevText = summaryItems[i - 1].text || '';
+							if (!prevText.endsWith('\n') && !text.startsWith('\n')) {
+								if (/^\s*\*\*/.test(text)) {
+									reasoning += '\n\n';
+								} else {
+									reasoning += '\n';
+								}
+							}
+						}
+						reasoning += text;
+					}
+
+					return {
+						thinking: reasoning, // Backward compatibility
+						thinkingSummaries, // New structured format
+						content: typeof message.content === 'string' ? message.content : ''
+					};
+				}
+			}
 		}
 
 		// Anthropic extended thinking (in content array as blocks)
+		// Anthropic doesn't use structured summaries, so keep backward compatibility
 		if (Array.isArray(message.content)) {
 			const thinkingBlocks = message.content
 				.filter((block: any) => block.type === 'thinking')
@@ -2505,12 +3412,15 @@ export class VybeLangGraphService {
 				.join('');
 			return {
 				thinking: thinkingBlocks || undefined,
+				thinkingSummaries: undefined, // Anthropic doesn't use structured summaries
 				content: textBlocks
 			};
 		}
 
 		// Standard message content
 		return {
+			thinking: undefined,
+			thinkingSummaries: undefined,
 			content: typeof message.content === 'string' ? message.content : ''
 		};
 	}
@@ -2585,8 +3495,8 @@ export class VybeLangGraphService {
 		return { apiKey, instanceName, endpoint, apiVersion };
 	}
 
-	// Note: buildLangChainMessages was removed - createReactAgent handles messages directly
-	// Note: executeTool was removed - tools are now executed by createReactAgent internally
+	// Note: buildLangChainMessages was removed - createAgent handles messages directly
+	// Note: executeTool was removed - tools are now executed by createAgent internally
 	// Note: resumeWithApproval uses native LangGraph streaming (agent.stream() with streamMode: "messages")
 
 	/**
@@ -2650,26 +3560,40 @@ export class VybeLangGraphService {
 			let result = 'Tool executed';
 			if (toolContext) {
 				switch (pendingTool.tool) {
-					case 'write_file':
-						await toolContext.fileService.writeFile(
-							toolArgs.file_path as string,
-							toolArgs.contents as string
-						);
-						result = 'File written successfully';
-						break;
-					case 'edit_file':
-						await toolContext.fileService.editFile(
+					// write_file tool removed - use edit_file for all file operations
+					case 'edit_file': {
+						const resumeEditFileResult = await toolContext.fileService.editFile(
 							toolArgs.file_path as string,
 							toolArgs.old_string as string,
 							toolArgs.new_string as string
 						);
-						result = 'File edited successfully';
+						// Parse result to check for deferred write
+						try {
+							const parsedResult = typeof resumeEditFileResult === 'string' ? JSON.parse(resumeEditFileResult) : resumeEditFileResult;
+							if (parsedResult?.deferred === true) {
+								// File write is deferred - use the message from tool or construct clear message
+								result = parsedResult.message || `File edited successfully: ${toolArgs.file_path as string}. The file system has confirmed the write operation.`;
+							} else if (parsedResult?.created === true) {
+								// New file was created immediately
+								result = `File created successfully: ${toolArgs.file_path as string}`;
+							} else {
+								// File was written immediately (shouldn't happen for existing files, but handle gracefully)
+								result = `File edited successfully: ${toolArgs.file_path as string}`;
+							}
+						} catch {
+							// If parsing fails, use the result as-is (should be a string)
+							result = typeof resumeEditFileResult === 'string' ? resumeEditFileResult : 'File edited successfully';
+						}
 						break;
+					}
 					case 'run_terminal_cmd':
 						result = await toolContext.terminalService.runCommand(
 							toolArgs.command as string,
 							toolArgs.is_background as boolean | undefined
 						);
+						break;
+					case 'delete_file':
+						result = await toolContext.fileService.deleteFile(toolArgs.target_file as string);
 						break;
 				}
 			}
@@ -2698,8 +3622,9 @@ export class VybeLangGraphService {
 
 			// Resume the agent graph using Command.resume()
 			// Get the agent and resume from checkpoint
-			const modelId = state.model || 'gemini-2.5-flash';
-			const model = this.createLangChainModel(modelId);
+			const modelId = state.model || 'azure/gpt-5.2';
+			const reasoningLevel = task.reasoningLevel || 'medium';
+			const model = this.createLangChainModel(modelId, reasoningLevel);
 			if (!model) {
 				throw new Error(`No model available: ${modelId}`);
 			}
@@ -2709,10 +3634,33 @@ export class VybeLangGraphService {
 			const toolNames = langchainTools.map((t: any) => t.name || 'unknown').join(', ');
 			console.log('[VybeLangGraphService] Created', langchainTools.length, 'LangChain tools:', toolNames);
 
-			const agent = createReactAgent({
-				llm: model,
+			// Build middleware array for resume
+			const middleware: any[] = [];
+
+			// Add tool error handler middleware
+			const toolErrorMiddleware = this.createToolErrorHandlerMiddleware(eventHandler, taskId);
+			if (toolErrorMiddleware) {
+				middleware.push(toolErrorMiddleware);
+			}
+
+			// Build system prompt for resume (same as initial creation)
+			// Note: context is not available in resumeWithApproval, use empty object
+			const { buildDynamicSystemPrompt } = await import('./vybeDynamicPrompt.js');
+			const systemPrompt = buildDynamicSystemPrompt({
+				level: state.level,
+				context: {}, // Context not available in resume, use empty object
+				toolCallCount: state.toolCallCount,
+				turnCount: state.turnCount,
+				messageCount: state.messages.length,
+				modelName: modelId,
+			});
+
+			const agent = createAgent({
+				model: model,
 				tools: langchainTools,
-				checkpointSaver: this.checkpointer,
+				checkpointer: this.checkpointer, // renamed from checkpointSaver
+				systemPrompt: systemPrompt, // moved from inputMessages
+				middleware: middleware.length > 0 ? middleware : undefined,
 			});
 
 			// Resume from the checkpoint with the tool result
@@ -2741,6 +3689,9 @@ export class VybeLangGraphService {
 
 			let pendingToolApproval = false;
 			let totalTokens = 0;
+			// Track emitted content to prevent duplicates - simpler than delta calculation
+			const emittedContentSet = new Set<string>();
+			let lastEmittedContent = ''; // For delta calculation from cumulative chunks
 
 			for await (const [token, _metadata] of stream) {
 				if (task.abortController.signal.aborted) {
@@ -2820,13 +3771,39 @@ export class VybeLangGraphService {
 						}
 
 						if (textContent) {
-							// Emit content directly without duplicate detection
-							eventHandler({
-								type: 'token',
-								payload: { content: textContent },
-								timestamp: Date.now(),
-								task_id: taskId,
-							});
+							// CRITICAL: Check if this exact content was already emitted (prevent duplicates)
+							if (emittedContentSet.has(textContent)) {
+								console.log(`[VybeLangGraphService] Resume: 🚫 SKIPPING duplicate content (${textContent.length} chars)`);
+								continue; // Skip this token entirely
+							}
+
+							// AIMessageChunk.content is CUMULATIVE (full content each time)
+							// Calculate delta: new portion = current - previous
+							let deltaContent = textContent;
+							if (lastEmittedContent && textContent.startsWith(lastEmittedContent)) {
+								// Content is cumulative - extract only the new portion
+								deltaContent = textContent.slice(lastEmittedContent.length);
+							} else if (lastEmittedContent && lastEmittedContent.length > 0) {
+								// Content doesn't start with previous - might be a new block or reset
+								console.log(`[VybeLangGraphService] Resume: ⚠️ Content doesn't continue previous (prev: ${lastEmittedContent.length} chars, new: ${textContent.length} chars)`);
+								lastEmittedContent = '';
+								deltaContent = textContent;
+							}
+
+							// Only emit if there's new content
+							if (deltaContent.length > 0) {
+								console.log(`[VybeLangGraphService] Resume: ✅ Emitting text delta: ${deltaContent.length} chars (cumulative: ${textContent.length} chars)`);
+								eventHandler({
+									type: 'token',
+									payload: { content: deltaContent },
+									timestamp: Date.now(),
+									task_id: taskId,
+								});
+								// Track the full cumulative content to prevent duplicates
+								emittedContentSet.add(textContent);
+								// Update last emitted to the full cumulative content
+								lastEmittedContent = textContent;
+							}
 						}
 					}
 				}

@@ -41,12 +41,13 @@ import type { SolveTaskParams, AgentTaskState } from '../common/vybeAgentTypes.j
 // Tool registry - needed for browser-side tool execution via IPC
 import { VybeToolRegistry, getToolRegistry } from './tools/vybeToolRegistry.js';
 import { createReadFileTool } from './tools/vybeReadFileTool.js';
-import { createWriteFileTool } from './tools/vybeWriteFileTool.js';
+// write_file tool removed - use edit_file for all file operations
 import { createListDirTool } from './tools/vybeListDirTool.js';
 import { createGrepTool } from './tools/vybeGrepTool.js';
 import { createTerminalTool } from './tools/vybeTerminalTool.js';
 import { createEditFileTool } from './tools/vybeEditFileTool.js';
 import { createCodebaseSearchTool } from './tools/vybeCodebaseSearchTool.js';
+import { createDeleteFileTool } from './tools/vybeDeleteFileTool.js';
 
 // LangGraph Client - Uses IPC to communicate with main process
 // LangChain packages are loaded in main process, not browser
@@ -246,7 +247,7 @@ export class VybeAgentServiceImpl extends Disposable implements IVybeAgentServic
 	 */
 	private registerTools(): void {
 		this.toolRegistry.register(createReadFileTool(this.fileService, this.workspaceService));
-		this.toolRegistry.register(createWriteFileTool(this.textFileService, this.workspaceService));
+		// write_file tool removed - use edit_file for all file operations (create, overwrite, edit)
 		this.toolRegistry.register(createListDirTool(this.fileService, this.workspaceService));
 		this.toolRegistry.register(createGrepTool(this.searchService, this.workspaceService));
 		this.toolRegistry.register(createTerminalTool(this.terminalService, this.terminalGroupService, this.workspaceService, this.storageService));
@@ -260,6 +261,10 @@ export class VybeAgentServiceImpl extends Disposable implements IVybeAgentServic
 			this.voyageService,
 			this.pineconeStore,
 			this.configurationService,
+			this.workspaceService
+		));
+		this.toolRegistry.register(createDeleteFileTool(
+			this.fileService,
 			this.workspaceService
 		));
 
@@ -281,7 +286,7 @@ export class VybeAgentServiceImpl extends Disposable implements IVybeAgentServic
 
 		const workspaceRoot = workspaceFolder.uri;
 
-		this.logService.info(`[VybeAgentService] Starting LangGraph task: ${taskId}`);
+		// Removed noisy log: task start
 		return this.solveTaskWithLangGraph(params, taskId, workspaceRoot.fsPath);
 	}
 
@@ -310,6 +315,7 @@ export class VybeAgentServiceImpl extends Disposable implements IVybeAgentServic
 				goal: params.goal,
 				model: params.modelId, // Pass selected model to LangGraph
 				level: params.agentLevel || 'L2', // Pass budget tier (L1/L2/L3)
+				reasoningLevel: params.reasoningLevel || 'medium', // Pass reasoning level (defaults to medium)
 				context: {
 					workspaceRoot,
 					activeFile,

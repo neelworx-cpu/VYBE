@@ -73,6 +73,7 @@ interface LangGraphStartRequest {
 	goal: string;
 	model?: string; // Selected model ID (e.g., 'gemini-2.5-pro', 'gemini-2.5-flash', 'ollama:qwen3-coder')
 	level?: 'L1' | 'L2' | 'L3'; // Budget tier level
+	reasoningLevel?: 'low' | 'medium' | 'high' | 'xhigh'; // Reasoning effort level (defaults to 'medium')
 	context?: {
 		workspaceRoot?: string;
 		activeFile?: string;
@@ -169,11 +170,14 @@ export function registerVybeIpcHandlers(): void {
 				{ id: 'claude-3-5-haiku-20241022', displayName: 'Claude 3.5 Haiku', description: 'Fast and efficient', provider: 'anthropic', supportsTools: true, supportsReasoning: false },
 			],
 			azure: [
-				{ id: 'azure/gpt-5.2', displayName: 'GPT-5.2 (Azure)', description: 'Latest GPT-5.2 model via Azure', provider: 'azure', supportsTools: true, supportsReasoning: false },
-				{ id: 'azure/gpt-5.1-codex-max', displayName: 'GPT-5.1 Codex Max (Azure)', description: 'Maximum capability codex model via Azure', provider: 'azure', supportsTools: true, supportsReasoning: false },
-				{ id: 'azure/gpt-5.1', displayName: 'GPT-5.1 (Azure)', description: 'GPT-5.1 model via Azure', provider: 'azure', supportsTools: true, supportsReasoning: false },
-				{ id: 'azure/gpt-5.1-codex', displayName: 'GPT-5.1 Codex (Azure)', description: 'Codex model via Azure', provider: 'azure', supportsTools: true, supportsReasoning: false },
-				{ id: 'azure/gpt-5.1-codex-mini', displayName: 'GPT-5.1 Codex Mini (Azure)', description: 'Lightweight codex model via Azure', provider: 'azure', supportsTools: true, supportsReasoning: false },
+				{ id: 'azure/gpt-5.2', displayName: 'GPT-5.2 (Azure)', description: 'Latest GPT-5.2 model via Azure', provider: 'azure', supportsTools: true, supportsReasoning: true },
+				{ id: 'azure/gpt-5.2-codex', displayName: 'GPT-5.2 Codex (Azure)', description: 'GPT-5.2 Codex model via Azure', provider: 'azure', supportsTools: true, supportsReasoning: true },
+				{ id: 'azure/gpt-5.1-codex-max', displayName: 'GPT-5.1 Codex Max (Azure)', description: 'Maximum capability codex model via Azure', provider: 'azure', supportsTools: true, supportsReasoning: true },
+				{ id: 'azure/gpt-5.1', displayName: 'GPT-5.1 (Azure)', description: 'GPT-5.1 model via Azure', provider: 'azure', supportsTools: true, supportsReasoning: true },
+				{ id: 'azure/gpt-5.1-codex', displayName: 'GPT-5.1 Codex (Azure)', description: 'Codex model via Azure', provider: 'azure', supportsTools: true, supportsReasoning: true },
+				{ id: 'azure/gpt-5.1-codex-mini', displayName: 'GPT-5.1 Codex Mini (Azure)', description: 'Lightweight codex model via Azure', provider: 'azure', supportsTools: true, supportsReasoning: true },
+				{ id: 'azure/gpt-5', displayName: 'GPT-5 (Azure)', description: 'GPT-5 model via Azure', provider: 'azure', supportsTools: true, supportsReasoning: true },
+				{ id: 'azure/gpt-5-codex', displayName: 'GPT-5 Codex (Azure)', description: 'GPT-5 Codex model via Azure', provider: 'azure', supportsTools: true, supportsReasoning: true },
 			],
 		};
 
@@ -188,9 +192,9 @@ export function registerVybeIpcHandlers(): void {
 
 	// Start a LangGraph agent task
 	validatedIpcMain.handle(IPC_CHANNELS.LANGGRAPH_START, async (event: IpcMainInvokeEvent, request: LangGraphStartRequest) => {
-		const { taskId, goal, model, level, context } = request;
+		const { taskId, goal, model, level, reasoningLevel = 'medium', context } = request;
 
-		console.log('[VybeIpcHandlers] Starting LangGraph task:', taskId, 'with model:', model || 'default', 'level:', level || 'L2');
+		// Removed noisy log: task start
 
 		// Create tool context that calls back to browser for execution
 		const toolContext: ToolContext = {
@@ -209,6 +213,8 @@ export function registerVybeIpcHandlers(): void {
 					executeToolInBrowser(event, taskId, 'list_dir', { target_directory: path }),
 				codebaseSearch: (query: string, directories?: string[]) =>
 					executeToolInBrowser(event, taskId, 'codebase_search', { query, target_directories: directories }),
+				deleteFile: (targetFile: string) =>
+					executeToolInBrowser(event, taskId, 'delete_file', { target_file: targetFile }),
 			},
 			terminalService: {
 				runCommand: (command: string, isBackground?: boolean) =>
@@ -225,9 +231,9 @@ export function registerVybeIpcHandlers(): void {
 			}
 		};
 
-		// Start the task (pass model and level through)
+		// Start the task (pass model, level, and reasoningLevel through)
 		langGraphService.startTask(
-			{ taskId, goal, model, level, context },
+			{ taskId, goal, model, level, reasoningLevel, context },
 			eventHandler,
 			toolContext
 		).catch(error => {
