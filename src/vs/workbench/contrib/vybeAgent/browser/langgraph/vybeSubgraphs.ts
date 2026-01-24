@@ -5,7 +5,7 @@
 
 import { StateGraph, START, END, MemorySaver, Annotation } from '@langchain/langgraph';
 import { BaseMessage, HumanMessage, AIMessage } from '@langchain/core/messages';
-import { readFileTool, writeFileTool, editFileTool, grepTool, codebaseSearchTool } from './vybeToolAdapter.js';
+import { readFileTool, editFileTool, grepTool, codebaseSearchTool } from './vybeToolAdapter.js';
 import { defaultModel } from './vybeModelSelector.js';
 
 // =====================================================
@@ -45,7 +45,7 @@ Your responsibilities:
 - Handle edge cases and error scenarios
 - Use appropriate types and interfaces
 
-Available tools: read_file, write_file, edit_file, grep
+Available tools: read_file, edit_file, grep
 
 Guidelines:
 - Read existing code before making changes
@@ -53,7 +53,7 @@ Guidelines:
 - Preserve existing functionality
 - Add comments for complex logic`;
 
-const coderTools = [readFileTool, writeFileTool, editFileTool, grepTool];
+const coderTools = [readFileTool, editFileTool, grepTool];
 
 async function coderExecute(state: SubgraphState): Promise<Partial<SubgraphState>> {
 	const model = defaultModel.bindTools(coderTools);

@@ -308,7 +308,7 @@ export function createGuardrailsMiddleware() {
 			}
 
 			// Check file operations
-			if ((name === 'write_file' || name === 'edit_file') && (args.file_path || args.target_file)) {
+			if (name === 'edit_file' && (args.file_path || args.target_file)) {
 				const filePath = args.file_path || args.target_file || '';
 				const result = checkFilePath(filePath, 'write');
 				if (!result.allowed) {

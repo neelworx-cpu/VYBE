@@ -46,6 +46,7 @@ export interface LangGraphStartRequest {
 	goal: string;
 	model?: string; // Selected model ID (e.g., 'kimi-k2-thinking', 'gemini-2.0-flash')
 	level?: 'L1' | 'L2' | 'L3'; // Budget tier (L1=Quick, L2=Standard, L3=Deep)
+	reasoningLevel?: 'low' | 'medium' | 'high' | 'xhigh'; // Reasoning effort level (defaults to 'medium')
 	context?: {
 		workspaceRoot?: string;
 		activeFile?: string;

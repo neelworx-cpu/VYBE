@@ -372,10 +372,7 @@ export const vybeMiddlewareStack = [
 				allowedDecisions: ['approve', 'reject', 'edit'],
 				description: 'Terminal command requires user approval',
 			},
-			write_file: {
-				allowedDecisions: ['approve', 'reject'],
-				description: 'File write requires approval',
-			},
+			// write_file tool removed - use edit_file for all file operations
 			edit_file: {
 				allowedDecisions: ['approve', 'reject'],
 				description: 'File edit requires approval',

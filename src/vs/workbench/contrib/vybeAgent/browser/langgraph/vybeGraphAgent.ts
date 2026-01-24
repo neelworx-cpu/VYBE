@@ -144,26 +144,39 @@ async function executeTools(
 	const errors: Array<{ tool: string; message: string }> = [];
 
 	for (const toolCall of toolCalls) {
+		// Ensure tool call has an ID - generate one if missing
+		const toolCallId = toolCall.id || `tool_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
 		const tool = allVybeTools.find((t: { name: string }) => t.name === toolCall.name);
 
 		if (!tool) {
 			toolResults.push({
 				role: 'tool',
 				content: `Tool ${toolCall.name} not found`,
-				tool_call_id: toolCall.id,
+				tool_call_id: toolCallId,
 			} as unknown as BaseMessage);
 			continue;
 		}
 
 		// Check for HITL interrupt
-		if (config.enableHITL && (toolCall.name === 'run_terminal_cmd' || toolCall.name === 'write_file' || toolCall.name === 'edit_file')) {
-			// Return interrupt state
+		// edit_file: Requires HITL when creating new files (old_string empty and file doesn't exist)
+		// delete_file: Always requires HITL (destructive)
+		// run_terminal_cmd: Always requires HITL
+		const isNewFileEdit = toolCall.name === 'edit_file' &&
+			(toolCall.args as { old_string?: string })?.old_string?.trim() === '';
+		if (config.enableHITL && (toolCall.name === 'run_terminal_cmd' || toolCall.name === 'delete_file' || isNewFileEdit)) {
+			// Return interrupt state with any results collected so far
 			return {
+				messages: toolResults.length > 0 ? toolResults : undefined,
 				pendingApproval: {
 					tool: toolCall.name,
 					args: toolCall.args,
-					toolCallId: toolCall.id || 'unknown',
+					toolCallId: toolCallId,
 				},
+				filesRead: filesRead.length > 0 ? filesRead : undefined,
+				filesModified: filesModified.length > 0 ? filesModified : undefined,
+				toolsUsed: toolsUsed.length > 0 ? toolsUsed : undefined,
+				errors: errors.length > 0 ? errors : undefined,
 			};
 		}
 
@@ -187,15 +200,29 @@ async function executeTools(
 				const filePath = args.target_file || args.file_path || '';
 				if (toolCall.name === 'read_file') {
 					filesRead.push(filePath);
-				} else if (toolCall.name === 'write_file' || toolCall.name === 'edit_file') {
+				} else if (toolCall.name === 'edit_file') {
 					filesModified.push(filePath);
+				}
+			}
+
+			// Ensure result is always a valid string
+			let resultContent: string;
+			if (result === undefined || result === null) {
+				resultContent = 'Tool executed successfully with no output';
+			} else if (typeof result === 'string') {
+				resultContent = result;
+			} else {
+				try {
+					resultContent = JSON.stringify(result);
+				} catch (stringifyError) {
+					resultContent = `Tool executed but result could not be serialized: ${stringifyError instanceof Error ? stringifyError.message : String(stringifyError)}`;
 				}
 			}
 
 			toolResults.push({
 				role: 'tool',
-				content: typeof result === 'string' ? result : JSON.stringify(result),
-				tool_call_id: toolCall.id,
+				content: resultContent,
+				tool_call_id: toolCallId,
 			} as unknown as BaseMessage);
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : String(error);
@@ -203,7 +230,7 @@ async function executeTools(
 			toolResults.push({
 				role: 'tool',
 				content: `Error: ${errorMessage}`,
-				tool_call_id: toolCall.id,
+				tool_call_id: toolCallId,
 			} as unknown as BaseMessage);
 		}
 	}

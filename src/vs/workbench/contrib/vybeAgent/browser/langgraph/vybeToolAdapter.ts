@@ -64,26 +64,8 @@ export const readFileTool = tool(
 );
 
 /**
- * Write contents to a file
+ * write_file tool removed - use edit_file for all file operations (create, overwrite, edit)
  */
-export const writeFileTool = tool(
-	async (input: { file_path: string; contents: string }, config) => {
-		const context = config?.configurable?.context as VybeToolContext;
-		if (!context?.fileService) {
-			throw new Error('File service not available in context');
-		}
-		await context.fileService.writeFile(input.file_path, input.contents);
-		return `Successfully wrote ${input.contents.length} characters to ${input.file_path}`;
-	},
-	{
-		name: 'write_file',
-		description: 'Write contents to a file, creating it if it doesn\'t exist or overwriting if it does.',
-		schema: z.object({
-			file_path: z.string().describe('Path to the file to write'),
-			contents: z.string().describe('The full contents to write'),
-		}),
-	}
-);
 
 /**
  * Edit a file by replacing old_string with new_string
@@ -245,7 +227,7 @@ export const shellTool = tool(
 
 export const allVybeTools = [
 	readFileTool,
-	writeFileTool,
+	// write_file tool removed - use edit_file for all file operations
 	editFileTool,
 	grepTool,
 	listDirTool,

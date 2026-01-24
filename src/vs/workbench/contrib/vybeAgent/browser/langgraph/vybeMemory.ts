@@ -146,7 +146,7 @@ export function updateStateWithToolResult(
 	if (details?.filePath) {
 		if (toolName === 'read_file') {
 			updates.filesRead = [...state.filesRead, details.filePath];
-		} else if (toolName === 'write_file' || toolName === 'edit_file') {
+		} else if (toolName === 'edit_file') {
 			updates.filesModified = [...state.filesModified, details.filePath];
 		}
 	}
