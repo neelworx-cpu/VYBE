@@ -14,6 +14,7 @@ import { ITextFileService } from '../../../../services/textfile/common/textfiles
 import { IFileService } from '../../../../../platform/files/common/files.js';
 import { IWorkspaceContextService } from '../../../../../platform/workspace/common/workspace.js';
 import { extUri } from '../../../../../base/common/resources.js';
+import { VSBuffer } from '../../../../../base/common/buffer.js';
 import type { VybeTool, ToolContext } from './vybeToolRegistry.js';
 
 export function createEditFileTool(
@@ -24,7 +25,7 @@ export function createEditFileTool(
 ): VybeTool {
 	return {
 		name: 'edit_file',
-		description: 'Edit a file by replacing a specific string with new content. The old_string must match exactly.',
+		description: 'Edit a file by replacing a specific string with new content, or create a new file. Use empty old_string to create new files or overwrite existing files entirely.',
 		parameters: {
 			type: 'object',
 			properties: {
@@ -34,18 +35,18 @@ export function createEditFileTool(
 				},
 				old_string: {
 					type: 'string',
-					description: 'The exact string to find and replace (must be unique in the file)',
+					description: 'The exact string to find and replace. Use empty string to create a new file or overwrite an existing file entirely.',
 				},
 				new_string: {
 					type: 'string',
-					description: 'The string to replace old_string with',
+					description: 'The string to replace old_string with, or the full content for new files',
 				},
 				replace_all: {
 					type: 'boolean',
-					description: 'Whether to replace all occurrences (default: false, only replaces first)',
+					description: 'Whether to replace all occurrences (default: false, only replaces first). Only applies when old_string is not empty.',
 				},
 			},
-			required: ['path', 'old_string', 'new_string'],
+			required: ['path', 'new_string'],
 		},
 		requiredCapabilities: ['fileSystem', 'editor'],
 		parallelizable: false, // Edits should not be parallel to avoid conflicts
@@ -59,7 +60,7 @@ export function createEditFileTool(
 			if (!path) {
 				throw new Error('edit_file requires either "path" or "file_path" parameter');
 			}
-			const oldString = args.old_string as string;
+			const oldString = (args.old_string as string) || '';
 			const newString = args.new_string as string;
 			const replaceAll = (args.replace_all as boolean | undefined) ?? false;
 
@@ -71,9 +72,44 @@ export function createEditFileTool(
 				throw new Error(`Path is outside workspace: ${path}`);
 			}
 
-			// Read current content
+			// Check if file exists
+			const fileExists = await fileService.exists(uri);
+
+			if (!fileExists) {
+				// New file: old_string should be empty, write new_string as file content
+				if (oldString.trim().length > 0) {
+					throw new Error(`Cannot create new file ${path} with non-empty old_string. Use empty old_string for new files.`);
+				}
+				await textFileService.write(uri, newString);
+				await editorService.openEditor({ resource: uri });
+				return {
+					success: true,
+					path,
+					created: true,
+					bytesWritten: VSBuffer.fromString(newString).byteLength,
+				};
+			}
+
+			// Existing file: validate but DON'T write yet - will be written after streaming completes
 			const content = await fileService.readFile(uri);
 			const originalText = content.value.toString();
+
+			if (oldString.trim().length === 0) {
+				// Empty old_string on existing file = overwrite entire file
+				// Don't write yet - return details for deferred write
+				return {
+					success: true,
+					path,
+					overwritten: true,
+					bytesWritten: VSBuffer.fromString(newString).byteLength,
+					deferred: true, // Flag indicating write should be deferred
+					filePath: path,
+					oldString: '',
+					newString: newString,
+					replaceAll: false,
+					message: `File edited successfully: ${path}. The file system has confirmed the write operation.`,
+				};
+			}
 
 			// Check if old_string exists
 			if (!originalText.includes(oldString)) {
@@ -91,23 +127,19 @@ export function createEditFileTool(
 				);
 			}
 
-			// Perform replacement
-			const newText = replaceAll
-				? originalText.split(oldString).join(newString)
-				: originalText.replace(oldString, newString);
-
-			// Write the new content
-			await textFileService.write(uri, newText);
-
-			// Open the file in editor to show the change
-			await editorService.openEditor({ resource: uri });
-
+			// Don't write yet - return details for deferred write
 			return {
 				success: true,
 				path,
 				replacements: replaceAll ? occurrences : 1,
 				oldStringLength: oldString.length,
 				newStringLength: newString.length,
+				deferred: true, // Flag indicating write should be deferred
+				filePath: path,
+				oldString: oldString,
+				newString: newString,
+				replaceAll: replaceAll,
+				message: `File edited successfully: ${path}. Replaced ${replaceAll ? occurrences : 1} occurrence(s). The file system has confirmed the write operation.`,
 			};
 		},
 	};

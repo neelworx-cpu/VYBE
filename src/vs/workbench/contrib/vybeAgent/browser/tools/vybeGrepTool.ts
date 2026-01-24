@@ -106,18 +106,42 @@ export function createGrepTool(
 		cacheable: false, // Search results can change frequently
 
 		async execute(args: Record<string, unknown>, context: ToolContext): Promise<unknown> {
+			// Cursor format: pattern is required
 			const originalPattern = args.pattern as string;
+			if (!originalPattern) {
+				throw new Error('grep requires "pattern" parameter');
+			}
 
 			// Analyze pattern - check if it needs multiline mode for ^ or $ anchors
-			const { normalized: pattern, wasNormalized, needsMultiline } = normalizeGrepPattern(originalPattern);
+			// Use multiline parameter if provided, otherwise auto-detect
+			const multilineParam = args.multiline as boolean | undefined;
+			const { normalized: pattern, wasNormalized, needsMultiline: autoDetectedMultiline } = normalizeGrepPattern(originalPattern);
+			const needsMultiline = multilineParam !== undefined ? multilineParam : autoDetectedMultiline;
 
 			const path = args.path as string | undefined;
-			const rawGlob = args.glob as string | undefined;
+			const glob = args.glob as string | undefined;
 			// Normalize glob pattern to ensure it matches files in subdirectories
-			const glob = rawGlob ? normalizeGlobPattern(rawGlob) : undefined;
-			const caseSensitive = (args.caseSensitive as boolean | undefined) ?? false;
+			const normalizedGlob = glob ? normalizeGlobPattern(glob) : undefined;
+
+			// Cursor uses -i (case insensitive), VYBE uses caseSensitive (opposite logic)
+			const caseInsensitive = args["-i"] as boolean | undefined;
+			const caseSensitive = caseInsensitive === true ? false : (caseInsensitive === false ? true : false);
+
 			// Use VS Code's default maxResults (20000) to match Cursor's behavior
-			const maxResults = (args.maxResults as number | undefined) ?? DEFAULT_MAX_SEARCH_RESULTS;
+			// head_limit overrides maxResults if provided
+			const headLimit = args.head_limit as number | undefined;
+			const maxResults = headLimit ?? ((args.maxResults as number | undefined) ?? DEFAULT_MAX_SEARCH_RESULTS);
+
+			// Context lines
+			const beforeLines = args["-B"] as number | undefined;
+			const afterLines = args["-A"] as number | undefined;
+			const contextLines = args["-C"] as number | undefined;
+
+			// File type filter
+			const fileType = args.type as string | undefined;
+
+			// Output mode
+			const outputMode = args.output_mode as "content" | "files_with_matches" | "count" | undefined;
 
 			console.log(`[VybeGrepTool] 🔍 Executing grep:`, {
 				originalPattern,
@@ -125,10 +149,15 @@ export function createGrepTool(
 				wasNormalized,
 				needsMultiline,
 				path: path || '(workspace root)',
-				glob: glob || '(all files)',
-				rawGlob: rawGlob || '(none)',
+				glob: normalizedGlob || '(all files)',
 				caseSensitive,
 				maxResults,
+				headLimit,
+				beforeLines,
+				afterLines,
+				contextLines,
+				fileType,
+				outputMode,
 				workspaceRoot: context.workspaceRoot.path
 			});
 
@@ -159,9 +188,13 @@ export function createGrepTool(
 				maxResults,
 			};
 
-			// Add file pattern filter if specified
-			if (glob) {
-				query.folderQueries![0].includePattern = { [glob]: true };
+			// Add file pattern filter if specified (glob or file type)
+			if (normalizedGlob) {
+				query.folderQueries![0].includePattern = { [normalizedGlob]: true };
+			} else if (fileType) {
+				// Convert file type to glob pattern (e.g., "ts" -> "*.ts")
+				const typeGlob = `**/*.${fileType}`;
+				query.folderQueries![0].includePattern = { [typeGlob]: true };
 			}
 
 			try {

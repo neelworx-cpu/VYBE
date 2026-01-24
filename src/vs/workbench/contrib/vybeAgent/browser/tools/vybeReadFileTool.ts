@@ -47,17 +47,21 @@ export function createReadFileTool(
 		async execute(args: Record<string, unknown>, context: ToolContext): Promise<unknown> {
 			// Support both parameter naming conventions:
 			// - 'path' (legacy browser tool)
-			// - 'target_file' (LangGraph tool definition)
+			// - 'target_file' (LangGraph/Cursor tool definition)
 			const path = (args.target_file ?? args.path) as string;
 			if (!path) {
 				throw new Error('read_file requires either "path" or "target_file" parameter');
 			}
 
-			// Support both line range conventions:
-			// - 'startLine'/'endLine' (legacy)
-			// - 'offset'/'limit' (LangGraph)
-			const startLine = (args.offset ?? args.startLine) as number | undefined;
-			const endLine = (args.limit ?? args.endLine) as number | undefined;
+			// Support multiple line range conventions:
+			// - Cursor format: 'start_line_one_indexed'/'end_line_one_indexed_inclusive'
+			// - VYBE format: 'offset'/'limit'
+			// - Legacy: 'startLine'/'endLine'
+			const startLine = (args.start_line_one_indexed ?? args.offset ?? args.startLine) as number | undefined;
+			const endLine = (args.end_line_one_indexed_inclusive ?? args.limit ?? args.endLine) as number | undefined;
+
+			// Handle should_read_entire_file flag
+			const shouldReadEntireFile = args.should_read_entire_file as boolean | undefined;
 
 			// Resolve path - handles both absolute and relative paths correctly
 			const uri = extUri.resolvePath(context.workspaceRoot, path);
@@ -71,8 +75,8 @@ export function createReadFileTool(
 			const content = await fileService.readFile(uri);
 			let text = content.value.toString();
 
-			// Apply line range if specified
-			if (startLine !== undefined || endLine !== undefined) {
+			// Apply line range if specified (unless should_read_entire_file is true)
+			if (!shouldReadEntireFile && (startLine !== undefined || endLine !== undefined)) {
 				const lines = text.split('\n');
 				const start = Math.max(1, startLine ?? 1) - 1; // Convert to 0-based
 				const end = endLine !== undefined ? Math.min(lines.length, endLine) : lines.length;

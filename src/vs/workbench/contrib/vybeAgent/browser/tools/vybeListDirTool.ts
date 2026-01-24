@@ -27,24 +27,32 @@ export function createListDirTool(
 ): VybeTool {
 	return {
 		name: 'list_dir',
-		description: 'List the contents of a directory. Returns an array of file and directory names with their types. Always use the actual directory name or path - never use "." unless explicitly listing the workspace root.',
+		description: 'Lists files and directories in a given path. The target_directory parameter can be relative to the workspace root or absolute. You can optionally provide an array of glob patterns to ignore with the "ignore_globs" parameter. Other details: The result does not display dot-files and dot-directories. IMPORTANT: Always use the actual directory name or path - never use "." unless explicitly listing the workspace root.',
 		parameters: {
 			type: 'object',
 			properties: {
-				path: {
+				target_directory: {
 					type: 'string',
-					description: 'Directory name or relative path to list. Use the actual directory name (e.g., "void", "src", "void/src"). Only use "." if explicitly listing the workspace root. For multi-root workspaces, you can use workspace folder names directly (e.g., "void" to list the void workspace folder).',
+					description: 'Path to directory to list contents of. Always use the actual directory name or path (e.g., "src", "src/components"). Never use "." unless explicitly listing the workspace root.',
 				},
+				ignore_globs: {
+					type: 'array',
+					items: {
+						type: 'string',
+					},
+					description: 'Optional array of glob patterns to ignore. All patterns match anywhere in the target directory. Patterns not starting with "**/" are automatically prepended with "**/". Examples: "*.js" (becomes "**/*.js") - ignore all .js files, "**/node_modules/**" - ignore all node_modules directories, "**/test/**/test_*.ts" - ignore all test_*.ts files in any test directory.',
+				},
+				// Internal-only parameters (not in Cursor spec, but kept for backward compatibility)
 				recursive: {
 					type: 'boolean',
-					description: 'Whether to list contents recursively (default: false)',
+					description: '[INTERNAL] Whether to list contents recursively (default: false)',
 				},
 				maxDepth: {
 					type: 'number',
-					description: 'Maximum depth for recursive listing (default: 3)',
+					description: '[INTERNAL] Maximum depth for recursive listing (default: 3)',
 				},
 			},
-			required: ['path'],
+			required: ['target_directory'],
 		},
 		requiredCapabilities: ['fileSystem'],
 		parallelizable: true,
@@ -53,9 +61,14 @@ export function createListDirTool(
 
 		async execute(args: Record<string, unknown>, context: ToolContext): Promise<unknown> {
 			// Support both parameter naming conventions:
-			// - 'path' (legacy browser tool)
-			// - 'target_directory' (LangGraph tool definition)
-			const path = (args.target_directory ?? args.path ?? '.') as string;
+			// - Cursor format: 'target_directory' (required)
+			// - Legacy: 'path', 'relative_workspace_path'
+			const path = (args.target_directory ?? args.relative_workspace_path ?? args.path) as string;
+			if (!path || path === '.') {
+				throw new Error('target_directory is required. Do not use "." - use the actual directory name or path (e.g., "src", "src/components").');
+			}
+
+			const ignoreGlobs = args.ignore_globs as string[] | undefined;
 			const recursive = args.recursive as boolean | undefined;
 			const maxDepth = (args.maxDepth as number | undefined) ?? 3;
 
@@ -74,7 +87,7 @@ export function createListDirTool(
 					for (const folder of workspace.folders) {
 						// Check if absolute path matches workspace folder URI exactly
 						if (pathUri.fsPath === folder.uri.fsPath || pathUri.path === folder.uri.path) {
-							console.log(`[vybeListDirTool] Matched absolute path to workspace folder: "${path}" -> ${folder.uri.fsPath}`);
+							// Removed noisy log: path matching
 							baseRoot = folder.uri;
 							actualPath = '.';
 							matchedFolder = true;
@@ -112,7 +125,7 @@ export function createListDirTool(
 				}
 			}
 
-			console.log(`[vybeListDirTool] Listing directory: path="${path}", baseRoot=${baseRoot.fsPath}, actualPath="${actualPath}"`);
+			// Removed noisy log: directory listing
 
 			// Resolve path - handles both absolute and relative paths correctly
 			const uri = actualPath === '.' ? baseRoot : extUri.resolvePath(baseRoot, actualPath);
@@ -131,6 +144,38 @@ export function createListDirTool(
 
 			const entries: DirectoryEntry[] = [];
 
+			// Helper to check if a path matches any ignore glob pattern
+			const shouldIgnore = (entryPath: string): boolean => {
+				if (!ignoreGlobs || ignoreGlobs.length === 0) {
+					return false;
+				}
+
+				// Normalize path separators
+				const normalizedPath = entryPath.replace(/\\/g, '/');
+
+				for (const glob of ignoreGlobs) {
+					// Normalize glob pattern - add **/ prefix if not present
+					let normalizedGlob = glob;
+					if (!normalizedGlob.startsWith('**/')) {
+						normalizedGlob = `**/${normalizedGlob}`;
+					}
+
+					// Simple glob matching (can be enhanced with proper glob library if needed)
+					const globRegex = new RegExp(
+						normalizedGlob
+							.replace(/\./g, '\\.')
+							.replace(/\*\*/g, '.*')
+							.replace(/\*/g, '[^/]*')
+					);
+
+					if (globRegex.test(normalizedPath)) {
+						return true;
+					}
+				}
+
+				return false;
+			};
+
 			// Helper to process directory entries
 			const processEntries = async (dirStat: typeof stat, currentDepth: number): Promise<void> => {
 				if (!dirStat.children) {
@@ -148,6 +193,11 @@ export function createListDirTool(
 						// Calculate relative path from the base root
 						const relativePath = child.resource.path.substring(baseRoot.path.length + 1);
 						entryName = relativePath || child.name;
+					}
+
+					// Check if this entry should be ignored
+					if (shouldIgnore(entryName)) {
+						continue;
 					}
 
 					entries.push({

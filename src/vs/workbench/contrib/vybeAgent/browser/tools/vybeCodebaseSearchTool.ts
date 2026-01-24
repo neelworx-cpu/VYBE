@@ -62,8 +62,11 @@ export function createCodebaseSearchTool(
 		cacheable: false, // Search results can change as codebase evolves
 
 		async execute(args: Record<string, unknown>, context: ToolContext): Promise<unknown> {
+			// explanation is required by Cursor's schema but not used in implementation (for future use)
+			void (args.explanation as string | undefined);
 			const query = args.query as string;
-			const targetDirectories = args.target_directories as string[] | undefined;
+			// Cursor requires target_directories (can be empty array), VYBE had it optional
+			const targetDirectories = (args.target_directories as string[] | undefined) ?? [];
 			const maxResults = (args.maxResults as number | undefined) ?? 20;
 
 			console.log(`[VybeCodebaseSearchTool] 🔍 Executing codebase search:`, {
