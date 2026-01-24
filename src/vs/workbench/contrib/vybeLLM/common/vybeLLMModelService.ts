@@ -32,6 +32,7 @@ const STATIC_CLOUD_MODELS: Array<{
 	providerLabel: string;
 	description: string;
 	hasThinking: boolean;
+	supportsReasoning?: boolean;
 }> = [
 		// Gemini Models - via @langchain/google-genai
 		// Gemini 2.5 (dynamic reasoning)
@@ -45,26 +46,28 @@ const STATIC_CLOUD_MODELS: Array<{
 		{ id: 'gemini-3-flash-preview-medium', label: 'Gemini 3 Flash Medium', provider: 'gemini', providerLabel: 'Gemini', description: "Google's latest flagship model, great for daily use.", hasThinking: true },
 		{ id: 'gemini-3-flash-preview-low', label: 'Gemini 3 Flash Low', provider: 'gemini', providerLabel: 'Gemini', description: "Google's latest flagship model, great for daily use.", hasThinking: true },
 
-		// Azure OpenAI Models (via @langchain/openai AzureChatOpenAI)
-		{ id: 'azure/gpt-5.2', label: 'GPT-5.2 (Azure)', provider: 'azure', providerLabel: 'Azure OpenAI', description: 'Latest GPT-5.2 model', hasThinking: false },
-		{ id: 'azure/gpt-5.1', label: 'GPT-5.1 (Azure)', provider: 'azure', providerLabel: 'Azure OpenAI', description: 'GPT-5.1 model', hasThinking: false },
+	// Azure OpenAI Models (via @langchain/openai AzureChatOpenAI)
+		// Azure GPT-5 models support reasoning (effort via L/M/H/xH buttons)
+		{ id: 'azure/gpt-5.2', label: 'GPT 5.2 (Azure)', provider: 'azure', providerLabel: 'Azure OpenAI', description: "Azure OpenAI's GPT-5.2 model", hasThinking: true, supportsReasoning: true },
+		{ id: 'azure/gpt-5.1', label: 'GPT 5.1 (Azure)', provider: 'azure', providerLabel: 'Azure OpenAI', description: "Azure OpenAI's GPT-5.1 model", hasThinking: true, supportsReasoning: true },
+		{ id: 'azure/gpt-5', label: 'GPT 5 (Azure)', provider: 'azure', providerLabel: 'Azure OpenAI', description: "Azure OpenAI's GPT-5 model", hasThinking: true, supportsReasoning: true },
+		// Azure Codex (reasoning tokens supported; icon hidden via UI rule)
+		{ id: 'azure/gpt-5.2-codex', label: 'GPT 5.2 Codex (Azure)', provider: 'azure', providerLabel: 'Azure OpenAI', description: "Azure OpenAI's GPT-5.2 Codex model", hasThinking: true, supportsReasoning: true },
+		{ id: 'azure/gpt-5.1-codex-max', label: 'GPT 5.1 Codex Max (Azure)', provider: 'azure', providerLabel: 'Azure OpenAI', description: "Azure OpenAI's GPT-5.1 Codex Max model", hasThinking: true, supportsReasoning: true },
+		{ id: 'azure/gpt-5.1-codex', label: 'GPT 5.1 Codex (Azure)', provider: 'azure', providerLabel: 'Azure OpenAI', description: "Azure OpenAI's GPT-5.1 Codex model", hasThinking: true, supportsReasoning: true },
+		{ id: 'azure/gpt-5.1-codex-mini', label: 'GPT 5.1 Codex Mini (Azure)', provider: 'azure', providerLabel: 'Azure OpenAI', description: "Azure OpenAI's GPT-5.1 Codex Mini model", hasThinking: true, supportsReasoning: true },
+		{ id: 'azure/gpt-5-codex', label: 'GPT 5 Codex (Azure)', provider: 'azure', providerLabel: 'Azure OpenAI', description: "Azure OpenAI's GPT-5 Codex model", hasThinking: true, supportsReasoning: true },
 
 		// OpenAI Direct API Models (via @langchain/openai ChatOpenAI)
-		// GPT 5.2 variants (supports xhigh)
-		{ id: 'openai/gpt-5.2-xhigh', label: 'GPT 5.2 XHigh', provider: 'openai', providerLabel: 'OpenAI', description: "OpenAI's latest flagship model. Good for planning, debugging, coding and more.", hasThinking: true },
-		{ id: 'openai/gpt-5.2-high', label: 'GPT 5.2 High', provider: 'openai', providerLabel: 'OpenAI', description: "OpenAI's latest flagship model. Good for planning, debugging, coding and more.", hasThinking: true },
-		{ id: 'openai/gpt-5.2-medium', label: 'GPT 5.2 Medium', provider: 'openai', providerLabel: 'OpenAI', description: "OpenAI's latest flagship model. Good for planning, debugging, coding and more.", hasThinking: true },
-		{ id: 'openai/gpt-5.2-low', label: 'GPT 5.2 Low', provider: 'openai', providerLabel: 'OpenAI', description: "OpenAI's latest flagship model. Good for planning, debugging, coding and more.", hasThinking: true },
-		// GPT 5.1 variants (no xhigh)
-		{ id: 'openai/gpt-5.1-high', label: 'GPT 5.1 High', provider: 'openai', providerLabel: 'OpenAI', description: "OpenAI's flagship model. Good for planning, debugging, coding and more.", hasThinking: true },
-		{ id: 'openai/gpt-5.1-medium', label: 'GPT 5.1 Medium', provider: 'openai', providerLabel: 'OpenAI', description: "OpenAI's flagship model. Good for planning, debugging, coding and more.", hasThinking: true },
-		{ id: 'openai/gpt-5.1-low', label: 'GPT 5.1 Low', provider: 'openai', providerLabel: 'OpenAI', description: "OpenAI's flagship model. Good for planning, debugging, coding and more.", hasThinking: true },
-		// Legacy models (keep for compatibility)
-		{ id: 'openai/o3', label: 'o3', provider: 'openai', providerLabel: 'OpenAI', description: 'Advanced reasoning model', hasThinking: true },
-		{ id: 'openai/o3-mini', label: 'o3-mini', provider: 'openai', providerLabel: 'OpenAI', description: 'Fast reasoning model', hasThinking: true },
-		{ id: 'openai/codex-5.1-max', label: 'Codex 5.1 Max', provider: 'openai', providerLabel: 'OpenAI', description: 'Maximum capability code model', hasThinking: false },
-		{ id: 'openai/codex-5.1', label: 'Codex 5.1', provider: 'openai', providerLabel: 'OpenAI', description: 'Advanced code generation', hasThinking: false },
-		{ id: 'openai/codex-5.1-mini', label: 'Codex 5.1 Mini', provider: 'openai', providerLabel: 'OpenAI', description: 'Fast code model', hasThinking: false },
+		// OpenAI GPT-5 models support reasoning (effort via L/M/H/xH buttons)
+		{ id: 'openai/gpt-5.2', label: 'GPT 5.2', provider: 'openai', providerLabel: 'OpenAI', description: "OpenAI's latest flagship model", hasThinking: true, supportsReasoning: true },
+		{ id: 'openai/gpt-5.1', label: 'GPT 5.1', provider: 'openai', providerLabel: 'OpenAI', description: "OpenAI's flagship model", hasThinking: true, supportsReasoning: true },
+		{ id: 'openai/gpt-5', label: 'GPT 5', provider: 'openai', providerLabel: 'OpenAI', description: "OpenAI's GPT-5 model", hasThinking: true, supportsReasoning: true },
+		{ id: 'openai/gpt-5.2-codex', label: 'GPT 5.2 Codex', provider: 'openai', providerLabel: 'OpenAI', description: 'GPT-5.2 Codex model', hasThinking: true, supportsReasoning: true },
+		{ id: 'openai/gpt-5.1-codex-max', label: 'GPT 5.1 Codex Max', provider: 'openai', providerLabel: 'OpenAI', description: 'GPT-5.1 Codex Max model', hasThinking: true, supportsReasoning: true },
+		{ id: 'openai/gpt-5.1-codex', label: 'GPT 5.1 Codex', provider: 'openai', providerLabel: 'OpenAI', description: 'GPT-5.1 Codex model', hasThinking: true, supportsReasoning: true },
+		{ id: 'openai/gpt-5.1-codex-mini', label: 'GPT 5.1 Codex Mini', provider: 'openai', providerLabel: 'OpenAI', description: 'GPT-5.1 Codex Mini model', hasThinking: true, supportsReasoning: true },
+		{ id: 'openai/gpt-5-codex', label: 'GPT 5 Codex', provider: 'openai', providerLabel: 'OpenAI', description: 'GPT-5 Codex model', hasThinking: true, supportsReasoning: true },
 
 		// Anthropic Claude 4.5 Models (via @langchain/anthropic ChatAnthropic)
 		// Opus 4.5 - Regular (high effort, no thinking)
@@ -79,7 +82,7 @@ const STATIC_CLOUD_MODELS: Array<{
 		{ id: 'anthropic/claude-haiku-4.5', label: 'Haiku 4.5', provider: 'anthropic', providerLabel: 'Anthropic', description: "Anthropic's lightest model, cheaper and faster (high effort)", hasThinking: false },
 		// Haiku 4.5 - Thinking (high effort with extended thinking)
 		{ id: 'anthropic/claude-haiku-4.5-thinking', label: 'Haiku 4.5 (Thinking)', provider: 'anthropic', providerLabel: 'Anthropic', description: "Anthropic's lightest model with extended thinking (high effort)", hasThinking: true },
-	];
+];
 
 export interface VybeModel {
 	id: string; // Format: "provider:modelName" (e.g., "gemini-2.5-pro", "openai/gpt-5.2")
@@ -88,6 +91,7 @@ export interface VybeModel {
 	providerLabel: string; // "Gemini", "OpenAI", "Anthropic", "Azure"
 	isLocal: boolean; // Always false for frontier cloud models
 	hasThinking?: boolean; // For reasoning support
+	supportsReasoning?: boolean; // For reasoning level support (L/M/H/xH buttons)
 	description?: string;
 	enabled: boolean; // Can be enabled/disabled in settings
 }
@@ -264,6 +268,7 @@ export class VybeLLMModelService extends Disposable implements IVybeLLMModelServ
 			providerLabel: m.providerLabel,
 			isLocal: false,
 			hasThinking: m.hasThinking,
+			supportsReasoning: m.supportsReasoning || false,
 			description: m.description,
 			enabled: true,
 		}));

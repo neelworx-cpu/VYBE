@@ -183,7 +183,8 @@ export function renderModelsTab(
 							}));
 
 							// Thinking icon for models with thinking (aligned with text baseline)
-							if (model.hasThinking) {
+							const showThinkingIcon = !!model.hasThinking && !model.id.toLowerCase().includes('codex');
+							if (showThinkingIcon) {
 								const iconContainer = DOM.append(modelLabelContainer, DOM.$('span'));
 								iconContainer.style.cssText = `
 									display: inline-flex;
