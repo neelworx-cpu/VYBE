@@ -134,7 +134,7 @@ export class ExtHostIndexing implements ExtHostIndexingShape {
 	async $pineconeGetNamespaceStats(namespace: string): Promise<{ vectorCount: number; dimension: number }> {
 		const service = await this.getPineconeService();
 		const stats = await service.getNamespaceStats(namespace);
-			return {
+		return {
 			vectorCount: stats.vectorCount,
 			dimension: stats.dimension,
 		};

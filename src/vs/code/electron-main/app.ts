@@ -571,6 +571,24 @@ export class CodeApplication extends Disposable {
 					const { setSharedApiKey } = await import('../../workbench/contrib/vybeAgent/electron-main/vybeLangGraphService.js');
 					setSharedApiKey(provider, apiKey);
 					this.logService.info(`[VYBE MCP] API key stored in LangGraph shared store for ${provider}`);
+
+					// For Azure, also store endpoint and API version if provided
+					if (provider.toLowerCase() === 'azure') {
+						const endpoint = data.endpoint || data.azure_endpoint || data.azureEndpoint;
+						const apiVersion = data.apiVersion || data.azure_api_version || data.api_version || data.azureApiVersion;
+
+						if (endpoint) {
+							setSharedApiKey('azure_endpoint', endpoint);
+							this.logService.info(`[VYBE MCP] Azure endpoint stored: ${endpoint.substring(0, 50)}...`);
+						} else {
+							this.logService.warn(`[VYBE MCP] No Azure endpoint found in response. Response keys:`, Object.keys(data));
+						}
+
+						if (apiVersion) {
+							setSharedApiKey('azure_api_version', apiVersion);
+							this.logService.info(`[VYBE MCP] Azure API version stored: ${apiVersion}`);
+						}
+					}
 				} catch (e) {
 					this.logService.debug(`[VYBE MCP] Could not store key in LangGraph (may not be initialized yet)`);
 				}

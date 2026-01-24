@@ -981,7 +981,7 @@ export function createApiFactoryAndRegisterActors(accessor: ServicesAccessor): I
 
 		// namespace: workspace
 
-		const workspace: typeof vscode.workspace = {
+		const workspace = {
 			get rootPath() {
 				extHostApiDeprecation.report('workspace.rootPath', extension,
 					`Please use 'workspace.workspaceFolders' instead. More details: https://aka.ms/vscode-eliminating-rootpath`);
@@ -1282,13 +1282,13 @@ export function createApiFactoryAndRegisterActors(accessor: ServicesAccessor): I
 				checkProposedApiEnabled(extension, 'canonicalUriProvider');
 				return extHostWorkspace.provideCanonicalUri(uri, options, token);
 			},
-			decode(content: Uint8Array, options?: { uri?: vscode.Uri; encoding?: string }) {
+			decode: (content: Uint8Array, options?: { uri?: vscode.Uri; encoding?: string }) => {
 				return extHostWorkspace.decode(content, options);
 			},
-			encode(content: string, options?: { uri?: vscode.Uri; encoding?: string }) {
+			encode: (content: string, options?: { uri?: vscode.Uri; encoding?: string }) => {
 				return extHostWorkspace.encode(content, options);
 			},
-		};
+		} as typeof vscode.workspace;
 
 		// namespace: scm
 		const scm: typeof vscode.scm = {

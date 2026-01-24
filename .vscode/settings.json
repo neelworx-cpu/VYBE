@@ -212,4 +212,12 @@
 	"azureMcp.serverMode": "all",
 	"azureMcp.readOnly": true,
 	"chat.tools.terminal.outputLocation": "none",
+	"cSpell.words": [
+		"genai",
+		"langchain",
+		"langgraph",
+		"Supabase",
+		"Vybe",
+		"xhigh"
+	],
 }
