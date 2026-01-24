@@ -69,10 +69,14 @@ export class VybeChatPlanDocumentPart extends VybeChatContentPart {
 		// During streaming, always start collapsed showing summary
 		this.currentContent = this.isStreaming ? '' : contentWithoutTitle;
 		this.content = this.currentContent;
-		this.modelState = content.modelState || {
+		this.modelState = content.modelState ? {
+			...content.modelState,
+			reasoningLevel: content.modelState.reasoningLevel || 'medium'
+		} : {
 			isAutoEnabled: true,
 			isMaxModeEnabled: false,
-			selectedModelId: 'composer-1'
+			selectedModelId: '', // Empty when auto mode is enabled
+			reasoningLevel: 'medium'
 		};
 		this.container = this.createDomNode();
 
@@ -1247,7 +1251,6 @@ export class VybeChatPlanDocumentPart extends VybeChatContentPart {
 
 	private getModelLabel(modelId: string): string {
 		const modelMap: Record<string, string> = {
-			'composer-1': 'Composer 1',
 			'opus-4.5': 'Opus 4.5',
 			'sonnet-4.5': 'Sonnet 4.5',
 			'gpt-5.1-codex-high': 'GPT-5.1 Codex High',
@@ -1444,7 +1447,10 @@ export class VybeChatPlanDocumentPart extends VybeChatContentPart {
 		}
 
 		if (data.modelState !== undefined) {
-			this.modelState = data.modelState;
+			this.modelState = {
+				...data.modelState,
+				reasoningLevel: data.modelState.reasoningLevel || 'medium'
+			};
 			// Update model dropdown button label
 			if (this.modelDropdownButton) {
 				// eslint-disable-next-line no-restricted-syntax

@@ -154,8 +154,10 @@ export class VybeChatTerminalPart extends VybeChatContentPart {
 		topHeader.style.cssText = `
 			display: flex;
 			justify-content: space-between;
-			background: var(--vscode-titleBar-activeBackground);
-			padding: 6px 8px;
+			align-items: center;
+			padding: 0 8px;
+			height: 28px;
+			box-sizing: border-box;
 		`;
 
 		// Left side - command summary

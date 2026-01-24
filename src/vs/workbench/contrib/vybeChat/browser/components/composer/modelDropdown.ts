@@ -21,6 +21,7 @@ export interface ModelDropdownState {
 	isAutoEnabled: boolean;
 	isMaxModeEnabled: boolean;
 	selectedModelId: string;
+	reasoningLevel: 'low' | 'medium' | 'high' | 'xhigh';
 }
 
 export class ModelDropdown extends Disposable {
@@ -39,8 +40,11 @@ export class ModelDropdown extends Disposable {
 	private state: ModelDropdownState = {
 		isAutoEnabled: true,
 		isMaxModeEnabled: false,
-		selectedModelId: '' // Will be set to first available model when Auto is off
+		selectedModelId: '', // Will be set to first available model when Auto is off
+		reasoningLevel: 'medium' // Default reasoning level
 	};
+
+	private selectedReasoningLevel: 'low' | 'medium' | 'high' | 'xhigh' = 'medium';
 
 	// Cloud models (hardcoded for now - can be moved to a service later)
 	private readonly cloudModels: ModelItem[] = [];
@@ -65,15 +69,14 @@ export class ModelDropdown extends Disposable {
 		// Load local models if service is available
 		if (this.modelService) {
 			this._register(this.modelService.onDidModelsChange(() => {
-				// Only update if dropdown is open and not being hidden
-				if (this.dropdownContainer && !this.isHiding && this.contentArea) {
+				// Always refresh the models list when models change (even if dropdown is closed)
+				// This ensures the dropdown shows correct models when opened next time
 					this.loadLocalModels().then(() => {
-						// Double-check dropdown is still open before rendering
+					// Only re-render if dropdown is currently open and not being hidden
 						if (this.dropdownContainer && !this.isHiding && this.contentArea) {
 							this.renderContent();
 						}
 					});
-				}
 			}));
 		}
 
@@ -124,6 +127,22 @@ export class ModelDropdown extends Disposable {
 	private getAllModels(): ModelItem[] {
 		// Combine cloud and local models
 		return [...this.cloudModels, ...this.localModels];
+	}
+
+	/**
+	 * Check if a model supports reasoning levels (L/M/H/xH buttons)
+	 */
+	private modelSupportsReasoning(modelId: string): boolean {
+		const fullModel = this.modelCache.get(modelId);
+		return fullModel?.supportsReasoning === true;
+	}
+
+	/**
+	 * Check if a model supports xhigh reasoning (only GPT-5.2 models)
+	 */
+	private modelSupportsXHigh(modelId: string): boolean {
+		// Only models with "5.2" in the name support xhigh
+		return modelId.includes('5.2');
 	}
 
 	async show(currentState: ModelDropdownState, openDownward: boolean = false, alignRight: boolean = false): Promise<void> {
@@ -247,8 +266,8 @@ export class ModelDropdown extends Disposable {
 			gap: 0px;
 			position: fixed;
 			visibility: visible;
-			width: 200px;
-			min-width: 170px;
+			width: 260px;
+			min-width: 221px;
 			transform-origin: ${alignRight ? 'right' : 'left'} bottom;
 			box-shadow: 0 0 8px 2px rgba(0, 0, 0, 0.12);
 			z-index: 2548;
@@ -881,7 +900,8 @@ export class ModelDropdown extends Disposable {
 		`;
 
 		// Thinking icon if model has thinking (aligned with text baseline)
-		if (model.hasThinking) {
+		const showThinkingIcon = !!model.hasThinking && !model.id.toLowerCase().includes('codex');
+		if (showThinkingIcon) {
 			const iconContainer = append(labelTextWrapper, $('div'));
 			iconContainer.style.cssText = `
 				flex-shrink: 0;
@@ -914,16 +934,99 @@ export class ModelDropdown extends Disposable {
 			`;
 		}
 
-		// Right side - checkmark if selected
+		// Right side - reasoning buttons (if supported) or checkmark if selected
 		const rightSide = append(mainRow, $('.model-right'));
 		rightSide.style.cssText = `
 			display: flex;
 			align-items: center;
 			gap: 6px;
 			height: 17px;
+			margin-left: auto;
+			flex-shrink: 0;
 		`;
 
-		if (isSelected) {
+		// Add reasoning level buttons for models that support reasoning
+		const supportsReasoning = this.modelSupportsReasoning(model.id);
+		if (supportsReasoning) {
+			const reasoningButtonsContainer = append(rightSide, $('.model-reasoning-buttons'));
+			reasoningButtonsContainer.style.cssText = `
+				display: flex;
+				align-items: center;
+				gap: 4px;
+				flex-shrink: 0;
+			`;
+
+			// Define reasoning levels: L (low), M (medium), H (high), xH (xhigh)
+			const reasoningLevels: Array<{ id: 'low' | 'medium' | 'high' | 'xhigh'; label: string }> = [
+				{ id: 'low', label: 'L' },
+				{ id: 'medium', label: 'M' },
+				{ id: 'high', label: 'H' },
+			];
+
+			// Only add xH for 5.2 models
+			if (this.modelSupportsXHigh(model.id)) {
+				reasoningLevels.push({ id: 'xhigh', label: 'xH' });
+			}
+
+			reasoningLevels.forEach(level => {
+				const isLevelSelected = this.selectedReasoningLevel === level.id;
+				const levelButton = append(reasoningButtonsContainer, $('span.model-reasoning-button'));
+				levelButton.textContent = level.label;
+				levelButton.setAttribute('data-level', level.id);
+				levelButton.setAttribute('data-selected', isLevelSelected ? 'true' : 'false');
+				levelButton.style.cssText = `
+					font-size: 11px;
+					line-height: 14px;
+					padding: 1px 4px;
+					border-radius: 3px;
+					cursor: pointer;
+					user-select: none;
+					color: ${isLevelSelected ? '#3ecf8e' : (isDarkTheme ? 'rgba(228, 228, 228, 0.7)' : 'rgba(51, 51, 51, 0.7)')};
+					font-weight: ${isLevelSelected ? '600' : '400'};
+					transition: color 0.15s ease;
+				`;
+
+				// Hover effect - don't change color if selected (keep vybe green)
+				this._register(addDisposableListener(levelButton, 'mouseenter', () => {
+					const isSelected = levelButton.getAttribute('data-selected') === 'true';
+					if (!isSelected) {
+						levelButton.style.color = isDarkTheme ? 'rgba(228, 228, 228, 0.9)' : 'rgba(51, 51, 51, 0.9)';
+					}
+				}));
+
+				this._register(addDisposableListener(levelButton, 'mouseleave', () => {
+					const isSelected = levelButton.getAttribute('data-selected') === 'true';
+					if (!isSelected) {
+						levelButton.style.color = isDarkTheme ? 'rgba(228, 228, 228, 0.7)' : 'rgba(51, 51, 51, 0.7)';
+					}
+				}));
+
+				// Click handler - fire reasoning level select but don't close dropdown
+				this._register(addDisposableListener(levelButton, 'click', (e) => {
+					e.stopPropagation(); // Prevent model selection
+					e.preventDefault();
+
+					// Update selected reasoning level
+					this.selectedReasoningLevel = level.id;
+					this.state.reasoningLevel = level.id;
+
+					// Update button states
+					reasoningLevels.forEach(l => {
+						const btn = reasoningButtonsContainer.querySelector(`[data-level="${l.id}"]`) as HTMLElement;
+						if (btn) {
+							const isSelected = l.id === level.id;
+							btn.setAttribute('data-selected', isSelected ? 'true' : 'false');
+							btn.style.color = isSelected ? '#3ecf8e' : (isDarkTheme ? 'rgba(228, 228, 228, 0.7)' : 'rgba(51, 51, 51, 0.7)');
+							btn.style.fontWeight = isSelected ? '600' : '400';
+						}
+					});
+
+					// Fire state change event
+					this._onStateChange.fire({ ...this.state });
+				}));
+			});
+		} else if (isSelected) {
+			// Show checkmark for non-reasoning models
 			const checkmark = append(rightSide, $('span.codicon.codicon-check'));
 			checkmark.style.cssText = `
 				font-size: 10px;
@@ -969,6 +1072,15 @@ export class ModelDropdown extends Disposable {
 			// Update state: when a model is manually selected, auto mode should be disabled
 			this.state.isAutoEnabled = false;
 			this.state.selectedModelId = model.id;
+
+			// If selecting a reasoning-capable model, ensure reasoning level is set (default to medium)
+			if (this.modelSupportsReasoning(model.id)) {
+				// Keep current reasoning level if already set, otherwise default to medium
+				if (!this.selectedReasoningLevel) {
+					this.selectedReasoningLevel = 'medium';
+				}
+				this.state.reasoningLevel = this.selectedReasoningLevel;
+			}
 
 			// Hide dropdown FIRST to prevent any re-opening
 			this.hide();

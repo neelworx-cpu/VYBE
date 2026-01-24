@@ -1006,5 +1006,29 @@ export class QuestionnaireToolbar extends Disposable {
 		this.updateStepper();
 		this.updateVisibility();
 	}
+
+	/**
+	 * Get all selected answers as question-answer pairs.
+	 * Returns array of { questionId, questionText, answerText } for questions that have been answered.
+	 */
+	public getSelectedAnswers(): Array<{ questionId: string; questionText: string; answerText: string }> {
+		const answers: Array<{ questionId: string; questionText: string; answerText: string }> = [];
+
+		for (const question of this.questions) {
+			if (question.selectedOptionId) {
+				// Find the selected option to get its label
+				const selectedOption = question.options.find(opt => opt.id === question.selectedOptionId);
+				if (selectedOption) {
+					answers.push({
+						questionId: question.id,
+						questionText: question.text,
+						answerText: selectedOption.label
+					});
+				}
+			}
+		}
+
+		return answers;
+	}
 }
 

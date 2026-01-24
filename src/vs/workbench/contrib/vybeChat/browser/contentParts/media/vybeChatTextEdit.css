@@ -18,7 +18,7 @@
 	display: flex;
 	justify-content: space-between;
 	align-items: center;
-	padding: 0 8px 0 6px; /* Left 6px, Right 8px */
+	padding: 0 8px; /* Left 8px, Right 8px */
 	height: 28px;
 	box-sizing: border-box;
 	cursor: pointer;
@@ -287,31 +287,31 @@
 	background-color: transparent !important;
 }
 
-/* Diff gutter colors */
+/* Diff gutter colors - force VYBE colors */
 .vybe-chat-response-area .text-edit-block .monaco-diff-editor .gutter-insert {
-	background: var(--vscode-diffEditor-insertedLineBackground, rgba(155, 185, 85, 0.2));
+	background: rgba(62, 207, 142, 0.2) !important;
 }
 
 .vybe-chat-response-area .text-edit-block .monaco-diff-editor .gutter-delete {
-	background: var(--vscode-diffEditor-removedLineBackground, rgba(255, 0, 0, 0.2));
+	background: rgba(191, 0, 0, 0.2) !important;
 }
 
-/* Diff line colors */
+/* Diff line colors - force VYBE colors (background behind the code) */
 .vybe-chat-response-area .text-edit-block .monaco-diff-editor .line-insert {
-	background: var(--vscode-diffEditor-insertedLineBackground, rgba(155, 185, 85, 0.2));
+	background: rgba(62, 207, 142, 0.2) !important;
 }
 
 .vybe-chat-response-area .text-edit-block .monaco-diff-editor .line-delete {
-	background: var(--vscode-diffEditor-removedLineBackground, rgba(255, 0, 0, 0.2));
+	background: rgba(191, 0, 0, 0.2) !important;
 }
 
-/* Diff character colors (inline changes) */
+/* Diff character colors (inline changes) - disabled to match Cursor (only line-level backgrounds) */
 .vybe-chat-response-area .text-edit-block .monaco-diff-editor .char-insert {
-	background: var(--vscode-diffEditor-insertedTextBackground, rgba(155, 185, 85, 0.4));
+	background: transparent !important;
 }
 
 .vybe-chat-response-area .text-edit-block .monaco-diff-editor .char-delete {
-	background: var(--vscode-diffEditor-removedTextBackground, rgba(255, 0, 0, 0.4));
+	background: transparent !important;
 }
 
 /* Diagonal fill for unchanged areas */

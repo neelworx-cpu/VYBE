@@ -47,6 +47,10 @@ export class VybeChatTextEditPart extends VybeChatContentPart {
 	private iconElement: HTMLElement | null = null;
 	private loadingSpinner: HTMLElement | null = null;
 	private hoverChevron: HTMLElement | null = null;
+	private confirmationRow: HTMLElement | null = null;  // Second header row for Accept/Reject buttons
+	private acceptButton: HTMLElement | null = null;
+	private rejectButton: HTMLElement | null = null;
+	private deleteStatusIcon: HTMLElement | null = null;  // Red close icon shown after delete is accepted
 
 	private readonly LINE_HEIGHT = 18;
 	private readonly INITIAL_HEIGHT = 90; // ~5 lines * 18px (~4 lines of diff visible)
@@ -92,16 +96,22 @@ export class VybeChatTextEditPart extends VybeChatContentPart {
 		// Header
 		this.headerElement = this.createHeader();
 
+		// Check if this requires confirmation (write_file new files or delete_file)
+		const requiresConfirmation = this.currentContent.requiresConfirmation === true;
+		const isPendingApproval = requiresConfirmation && this.currentContent.approvalState === 'pending';
+
 		// Header separator (1px line)
 		this.headerSeparator = $('div');
 		this.headerSeparator.style.height = '1px';
 		this.headerSeparator.style.background = 'var(--cursor-stroke-secondary)';
 		this.headerSeparator.style.width = '100%';
-		this.headerSeparator.style.display = 'block'; // Shown by default (starts expanded)
+		// Hide separator if pending approval (no content area to separate)
+		this.headerSeparator.style.display = isPendingApproval ? 'none' : 'block';
 
 		// Content area
 		this.contentArea = $('.composer-code-block-content');
-		this.contentArea.style.display = 'block'; // Shown by default
+		// Hide content area if pending approval (only show after acceptance)
+		this.contentArea.style.display = isPendingApproval ? 'none' : 'block';
 		this.contentArea.setAttribute('data-expanded', 'true');
 		// Add padding-bottom only if expand bar will exist (NOT during streaming)
 		const totalDiffLines = this.currentContent.addedLines + this.currentContent.deletedLines;
@@ -136,7 +146,10 @@ export class VybeChatTextEditPart extends VybeChatContentPart {
 		this.diffEditorContainer.style.marginBottom = '0';
 
 		// Create streaming editor or diff editor based on state
-		if (this.currentContent.isStreaming) {
+		// If pending approval, don't create any editor yet (will be created when accept is clicked)
+		if (isPendingApproval) {
+			// Don't create editor yet - will be created when accept is clicked
+		} else if (this.currentContent.isStreaming) {
 			this.createStreamingEditor(this.diffEditorContainer);
 		} else {
 			this.createDiffEditor(this.diffEditorContainer);
@@ -147,7 +160,8 @@ export class VybeChatTextEditPart extends VybeChatContentPart {
 		this.contentArea.appendChild(this.diffBlock);
 
 		// Expand bar (absolute positioned at bottom) - only if more than 4 lines of diff
-		this.expandMoreButton = this.createExpandButton();
+		// Don't create expand bar if pending approval (no content to expand)
+		this.expandMoreButton = isPendingApproval ? null : this.createExpandButton();
 
 		// Assemble main container
 		codeBlockContainer.appendChild(this.headerElement);
@@ -161,11 +175,21 @@ export class VybeChatTextEditPart extends VybeChatContentPart {
 		wrapper.appendChild(codeBlockContainer);
 		outerContainer.appendChild(wrapper);
 
+		// Register hover effects AFTER all elements are created (contentArea now exists)
+		// Only register if NOT pending approval (for new files, will be registered in handleAccept)
+		if (!isPendingApproval) {
+			this.registerHeaderHoverEffects();
+		}
+
 		return outerContainer;
 	}
 
 	private createHeader(): HTMLElement {
 		const header = $('.composer-code-block-header');
+
+		// Check if this requires confirmation (write_file new files or delete_file)
+		const requiresConfirmation = this.currentContent.requiresConfirmation === true;
+		const isPendingApproval = requiresConfirmation && this.currentContent.approvalState === 'pending';
 
 		// File info (styling in CSS)
 		const fileInfo = $('.composer-code-block-file-info');
@@ -175,6 +199,14 @@ export class VybeChatTextEditPart extends VybeChatContentPart {
 		const iconWrapper = $('.show-file-icons');
 		const iconContainer = $('div');
 		iconContainer.style.cssText = 'position: relative; height: 100%; width: 100%; display: flex; align-items: center; justify-content: center;';
+
+		// Create hover chevron first (always present, works during streaming too)
+		// Always chevron-down, rotates 90 degrees when collapsed
+		this.hoverChevron = $('span.codicon.codicon-chevron-down');
+		this.hoverChevron.style.cssText = 'font-size: 12px; color: var(--vscode-foreground); opacity: 0; position: absolute; pointer-events: none; transition: opacity 0.15s ease, transform 0.15s ease; transform-origin: center;';
+		// Set initial rotation based on collapsed state
+		this.hoverChevron.style.transform = this.isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)';
+		iconContainer.appendChild(this.hoverChevron);
 
 		// If loading, show spinner; otherwise show file icon
 		if (this.currentContent.isLoading) {
@@ -194,13 +226,7 @@ export class VybeChatTextEditPart extends VybeChatContentPart {
 			this.iconElement.style.height = '100%';
 			this.iconElement.style.transition = 'opacity 0.15s ease';
 
-			// Hover chevron (hidden by default, shows on header hover)
-			// Starts as chevron-down (for slightly expanded state)
-			this.hoverChevron = $('span.codicon.codicon-chevron-down');
-			this.hoverChevron.style.cssText = 'font-size: 12px; color: var(--vscode-foreground); opacity: 0; position: absolute; pointer-events: none; transition: opacity 0.15s ease;';
-
 			iconContainer.appendChild(this.iconElement);
-			iconContainer.appendChild(this.hoverChevron);
 		}
 
 		iconWrapper.appendChild(iconContainer);
@@ -212,21 +238,25 @@ export class VybeChatTextEditPart extends VybeChatContentPart {
 		filenameBidi.textContent = this.currentContent.fileName;
 		filenameSpan.appendChild(filenameBidi);
 
-		// Stats (styling in CSS)
+		// Stats (styling in CSS) - only show after streaming is complete (not in pending approval)
 		const statsSpan = $('span.composer-code-block-status');
 		const statsInner = $('span');
 		const statsContainer = $('div');
+		statsContainer.setAttribute('data-stats-inner', 'true'); // Mark for later updates
 
-		if (this.currentContent.addedLines > 0) {
-			const addedSpan = $('span.diff-stat-added');
-			addedSpan.textContent = `+${this.currentContent.addedLines}`;
-			statsContainer.appendChild(addedSpan);
-		}
+		// Only show stats if NOT pending approval AND NOT streaming (stats appear after AI streams and completes)
+		if (!isPendingApproval && !this.currentContent.isStreaming) {
+			if (this.currentContent.addedLines > 0) {
+				const addedSpan = $('span.diff-stat-added');
+				addedSpan.textContent = `+${this.currentContent.addedLines}`;
+				statsContainer.appendChild(addedSpan);
+			}
 
-		if (this.currentContent.deletedLines > 0) {
-			const deletedSpan = $('span.diff-stat-deleted');
-			deletedSpan.textContent = `-${this.currentContent.deletedLines}`;
-			statsContainer.appendChild(deletedSpan);
+			if (this.currentContent.deletedLines > 0) {
+				const deletedSpan = $('span.diff-stat-deleted');
+				deletedSpan.textContent = `-${this.currentContent.deletedLines}`;
+				statsContainer.appendChild(deletedSpan);
+			}
 		}
 
 		statsInner.appendChild(statsContainer);
@@ -241,6 +271,8 @@ export class VybeChatTextEditPart extends VybeChatContentPart {
 		actionsContainer.style.cssText = 'overflow: hidden; display: flex; justify-content: flex-end; align-items: center; position: relative;';
 		const actionsInner = $('div');
 		actionsInner.style.cssText = 'display: flex; justify-content: flex-end; justify-self: flex-end; flex-shrink: 0; position: relative; align-items: center;';
+
+		// Operation type text moved to bottom row (confirmation row)
 
 		// 6 hidden button slots (for future: Apply, Delete, etc.)
 		for (let i = 0; i < 6; i++) {
@@ -257,51 +289,264 @@ export class VybeChatTextEditPart extends VybeChatContentPart {
 		fileInfo.appendChild(statsSpan);
 		fileInfo.appendChild(statusSpan);
 
-		header.appendChild(fileInfo);
-		header.appendChild(actionsOuterWrapper);
+		if (isPendingApproval) {
+			// Make header double height (56px = 2 * 28px) and stack rows vertically
+			header.style.height = '56px';
+			header.style.flexDirection = 'column';
+			header.style.justifyContent = 'flex-start';
+			header.style.padding = '0'; // Remove padding from header, add to rows
+			header.style.gap = '0'; // No gap between rows
+			header.style.margin = '0'; // No margin
+			header.style.lineHeight = '1'; // Prevent line-height from affecting height
+			header.style.borderRadius = '8px'; // Fully rounded when no content area
+			header.style.borderBottom = 'none'; // No border when no content area below
 
-		// Add hover effect (show chevron instead of icon in all states)
-		if (!this.currentContent.isLoading) {
-			this._register(addDisposableListener(header, 'mouseenter', () => {
-				// Update chevron direction based on current state
-				if (this.hoverChevron) {
-					if (this.isCollapsed) {
-						this.hoverChevron.className = 'codicon codicon-chevron-right';
-					} else {
-						this.hoverChevron.className = 'codicon codicon-chevron-down';
-					}
-				}
+			// Wrap first row (fileInfo + actions) in a container to maintain original layout
+			const firstRow = $('div');
+			firstRow.style.cssText = `
+				display: flex;
+				justify-content: space-between;
+				align-items: center;
+				padding: 0 8px;
+				height: 28px;
+				min-height: 28px;
+				max-height: 28px;
+				width: 100%;
+				box-sizing: border-box;
+				margin: 0;
+				line-height: 1;
+			`;
+			firstRow.appendChild(fileInfo);
+			firstRow.appendChild(actionsOuterWrapper);
 
-				// Show chevron on hover in all states
-				if (this.iconElement && this.hoverChevron) {
-					this.iconElement.style.opacity = '0';
-					this.hoverChevron.style.opacity = '0.7';
-				}
-			}));
+			header.appendChild(firstRow);
 
-			this._register(addDisposableListener(header, 'mouseleave', () => {
-				if (this.iconElement && this.hoverChevron) {
-					this.iconElement.style.opacity = '1';
-					this.hoverChevron.style.opacity = '0';
-				}
-			}));
-
-			// Single click header to toggle collapsed/slightly expanded
-			this._register(addDisposableListener(header, 'click', () => {
-				if (this.isCollapsed) {
-					// Expand to slightly expanded state
-					this.setCollapsed(false);
-				} else if (this.isFullyExpanded) {
-					// Collapse from fully expanded to slightly expanded
-					this.collapseToInitial();
-				} else {
-					// Collapse from slightly expanded to collapsed
-					this.setCollapsed(true);
-				}
-			}));
+			// Create and append confirmation row (second row with Accept/Reject buttons)
+			this.confirmationRow = this.createConfirmationRow();
+			header.appendChild(this.confirmationRow);
+		} else {
+			// Normal layout: fileInfo and actionsOuterWrapper directly in header
+			header.appendChild(fileInfo);
+			header.appendChild(actionsOuterWrapper);
 		}
 
+		// Don't register hover effects here - contentArea doesn't exist yet
+		// Will be registered in createDomNode() after all elements are created
+
 		return header;
+	}
+
+	private registerHeaderHoverEffects(): void {
+		if (!this.headerElement) return;
+
+		// Show chevron/hover effects when content area exists (including during streaming)
+		this._register(addDisposableListener(this.headerElement, 'mouseenter', () => {
+			// Only show hover chevron if content area exists (works during streaming too)
+			if (!this.contentArea) {
+				return;
+			}
+
+			// Update chevron rotation based on current collapsed state
+			if (this.hoverChevron) {
+				this.hoverChevron.style.transform = this.isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)';
+			}
+
+			// Show chevron on hover - hide icon (file icon or loading spinner) and show chevron
+			if (this.hoverChevron) {
+				// Hide file icon if visible
+				if (this.iconElement && this.iconElement.style.display !== 'none' && this.iconElement.parentNode) {
+					this.iconElement.style.opacity = '0';
+				}
+				// Hide loading spinner if visible
+				if (this.loadingSpinner && this.loadingSpinner.parentNode) {
+					this.loadingSpinner.style.opacity = '0';
+				}
+				// Show hover chevron
+				this.hoverChevron.style.opacity = '0.7';
+			}
+		}));
+
+		this._register(addDisposableListener(this.headerElement, 'mouseleave', () => {
+			if (this.hoverChevron) {
+				this.hoverChevron.style.opacity = '0';
+			}
+			// Restore file icon if visible
+			if (this.iconElement && this.iconElement.style.display !== 'none' && this.iconElement.parentNode) {
+				this.iconElement.style.opacity = '1';
+			}
+			// Restore loading spinner if visible
+			if (this.loadingSpinner && this.loadingSpinner.parentNode) {
+				this.loadingSpinner.style.opacity = '0.7';
+			}
+		}));
+
+		// Single click header to toggle collapsed/slightly expanded (works during streaming too)
+		this._register(addDisposableListener(this.headerElement, 'click', (e: MouseEvent) => {
+			// Don't toggle if clicking on Accept/Reject buttons (they handle their own clicks)
+			const target = e.target as HTMLElement;
+			if (target.closest('.anysphere-button') || target.closest('.anysphere-text-button')) {
+				return;
+			}
+
+			// Allow collapsing/expanding even during loading (streaming)
+			if (!this.contentArea) {
+				return;
+			}
+
+			if (this.isCollapsed) {
+				// Expand to slightly expanded state
+				this.setCollapsed(false);
+			} else if (this.isFullyExpanded) {
+				// Collapse from fully expanded to slightly expanded
+				this.collapseToInitial();
+			} else {
+				// Collapse from slightly expanded to collapsed
+				this.setCollapsed(true);
+			}
+
+			// Update chevron rotation after state change
+			if (this.hoverChevron) {
+				this.hoverChevron.style.transform = this.isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)';
+			}
+		}));
+	}
+
+	private createConfirmationRow(): HTMLElement {
+		// Second row of header with Accept/Reject buttons - match terminal control row structure
+		const confirmationRow = $('div');
+		confirmationRow.style.cssText = `
+			display: flex;
+			justify-content: space-between;
+			align-items: center;
+			padding: 0 8px;
+			height: 28px;
+			min-height: 28px;
+			max-height: 28px;
+			width: 100%;
+			box-sizing: border-box;
+			margin: 0;
+			line-height: 1;
+		`;
+
+		// Left side - operation type text (Delete / Create file)
+		const leftControls = $('div');
+		leftControls.style.cssText = 'display: flex; align-items: center; flex: 0 0 auto;';
+
+		// Determine if it's create or delete based on content
+		// Delete: originalContent has content, modifiedContent is empty
+		// Create: originalContent is empty, modifiedContent has content
+		// Use explicit flags if available, otherwise infer from content
+		const isDelete = this.currentContent.isDelete ?? (this.currentContent.originalContent.trim().length > 0 && this.currentContent.modifiedContent.trim().length === 0);
+		const isCreate = this.currentContent.isCreate ?? (this.currentContent.originalContent.trim().length === 0 && this.currentContent.modifiedContent.trim().length > 0);
+
+		const operationText = $('span');
+		if (isDelete) {
+			operationText.textContent = 'Delete';
+		} else if (isCreate) {
+			operationText.textContent = 'Create file';
+		} else {
+			operationText.textContent = 'Modify file'; // Fallback
+		}
+		operationText.style.cssText = `
+			font-size: 12px;
+			line-height: 16px;
+			color: var(--cursor-text-secondary);
+			opacity: 0.4;
+			white-space: nowrap;
+		`;
+		leftControls.appendChild(operationText);
+
+		// Right side - buttons container (match terminal statusRow)
+		const buttonContainer = $('div');
+		buttonContainer.style.cssText = `
+			display: flex;
+			gap: 4px;
+			align-items: center;
+			flex: 0 0 auto;
+		`;
+
+		// Reject button - match terminal Skip button styling
+		this.rejectButton = $('.anysphere-text-button');
+		this.rejectButton.textContent = 'Reject';
+		this.rejectButton.style.cssText = `
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			gap: 4px;
+			padding: 0 6px;
+			border-radius: 4px;
+			cursor: pointer;
+			font-size: 12px;
+			line-height: 16px;
+			min-height: 20px;
+			background: transparent;
+			color: var(--cursor-text-secondary);
+			border: none;
+		`;
+		this._register(addDisposableListener(this.rejectButton, 'mouseenter', () => {
+			if (this.rejectButton) {
+				this.rejectButton.style.backgroundColor = 'var(--vscode-list-hoverBackground)';
+			}
+		}));
+		this._register(addDisposableListener(this.rejectButton, 'mouseleave', () => {
+			if (this.rejectButton) {
+				this.rejectButton.style.backgroundColor = 'transparent';
+			}
+		}));
+
+		// Reject button click handler
+		this._register(addDisposableListener(this.rejectButton, 'click', (e: MouseEvent) => {
+			e.stopPropagation(); // Prevent bubbling to header click handler
+			this.handleReject();
+		}));
+
+		// Accept button - match terminal Run button styling exactly
+		this.acceptButton = $('.anysphere-button');
+		this.acceptButton.style.cssText = `
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			gap: 4px;
+			padding: 0 6px;
+			border-radius: 4px;
+			cursor: pointer;
+			font-size: 12px;
+			line-height: 16px;
+			min-height: 20px;
+			background: #3ecf8e;
+			color: white;
+			border: none;
+		`;
+		const acceptText = $('span');
+		acceptText.textContent = 'Accept';
+		this.acceptButton.appendChild(acceptText);
+
+		this._register(addDisposableListener(this.acceptButton, 'mouseenter', () => {
+			if (this.acceptButton) {
+				this.acceptButton.style.backgroundColor = '#35b87d';
+			}
+		}));
+		this._register(addDisposableListener(this.acceptButton, 'mouseleave', () => {
+			if (this.acceptButton) {
+				this.acceptButton.style.backgroundColor = '#3ecf8e';
+			}
+		}));
+
+		// Accept button click handler
+		this._register(addDisposableListener(this.acceptButton, 'click', (e: MouseEvent) => {
+			e.stopPropagation(); // Prevent bubbling to header click handler
+			this.handleAccept();
+		}));
+		// TODO: Add click handler for HITL resume
+
+		buttonContainer.appendChild(this.rejectButton);
+		buttonContainer.appendChild(this.acceptButton);
+
+		// Assemble row - left side (empty) + right side (buttons)
+		confirmationRow.appendChild(leftControls);
+		confirmationRow.appendChild(buttonContainer);
+
+		return confirmationRow;
 	}
 
 	private createStreamingEditor(parent: HTMLElement): void {
@@ -407,13 +652,123 @@ export class VybeChatTextEditPart extends VybeChatContentPart {
 		const STREAM_DELAY_MS = 70; // 70ms per line
 
 		// Stream one line at a time with variable speed
-		const streamNextLine = () => {
+		const streamNextLine = async () => {
 			if (currentLineIndex >= lines.length) {
-				// Streaming complete
+				// Streaming complete - transition to diff view
 				console.log('[TextEdit Streaming] Complete!');
 				if (this.streamingIntervalId) {
 					clearInterval(this.streamingIntervalId);
 					this.streamingIntervalId = null;
+				}
+
+				// Update state: streaming complete, now show diff
+				this.currentContent.isStreaming = false;
+				this.currentContent.isLoading = false;
+
+				// Respect user's choice: if they collapsed it during streaming, keep it collapsed
+				// Only update chevron rotation to match current state (don't force expansion)
+				if (this.hoverChevron) {
+					this.hoverChevron.style.transform = this.isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)';
+				}
+
+				// Replace streaming editor with diff editor
+				if (this.streamingEditor && this.diffEditorContainer) {
+					// Clear container first
+					while (this.diffEditorContainer.firstChild) {
+						this.diffEditorContainer.removeChild(this.diffEditorContainer.firstChild);
+					}
+
+					// Dispose existing diff editor if it exists
+					if (this.diffEditor) {
+						const oldModel = this.diffEditor.getModel();
+						if (oldModel) {
+							oldModel.original?.dispose();
+							oldModel.modified?.dispose();
+						}
+						this.diffEditor.dispose();
+						this.diffEditor = null;
+					}
+
+					// Create diff editor first (will check for existing models)
+					this.createDiffEditor(this.diffEditorContainer);
+
+					// Now dispose streaming editor and its model AFTER diff editor is set up
+					const streamingModel = this.streamingEditor.getModel();
+					this.streamingEditor.dispose();
+					this.streamingEditor = null;
+
+					// Dispose streaming model AFTER diff editor has its models set
+					if (streamingModel) {
+						// Small delay to ensure diff editor is fully initialized
+						setTimeout(() => {
+							streamingModel.dispose();
+						}, 100);
+					}
+
+					// Show stats now that streaming is complete
+					this.updateStatsDisplay();
+
+					// Show expand bar if content is longer than initial height
+					const totalDiffLines = this.currentContent.addedLines + this.currentContent.deletedLines;
+					if (totalDiffLines > this.MIN_LINES_FOR_EXPAND_BAR && !this.expandMoreButton) {
+						this.expandMoreButton = this.createExpandButton();
+						if (this.expandMoreButton) {
+							const codeBlockContainer = this.domNode.querySelector('.composer-code-block-container');
+							if (codeBlockContainer) {
+								codeBlockContainer.appendChild(this.expandMoreButton);
+							}
+						}
+						// Add padding for expand bar
+						if (this.contentArea) {
+							this.contentArea.style.paddingBottom = '16px';
+						}
+					}
+
+					// Restore file icon (remove loading spinner, create file icon if needed)
+					const iconSpan = this.headerElement?.querySelector('.composer-primary-toolcall-icon');
+					const iconWrapper = iconSpan?.querySelector('.show-file-icons');
+					const iconContainer = iconWrapper?.querySelector('div') as HTMLElement;
+
+					if (iconContainer) {
+						// Remove loading spinner
+						if (this.loadingSpinner && this.loadingSpinner.parentNode) {
+							this.loadingSpinner.parentNode.removeChild(this.loadingSpinner);
+							this.loadingSpinner = null;
+						}
+
+						// Create file icon if it doesn't exist
+						if (!this.iconElement) {
+							const filePath = this.currentContent.filePath || `/file/${this.currentContent.fileName}`;
+							const fileUri = URI.file(filePath);
+							const iconClasses = getIconClasses(this.modelService, this.languageService, fileUri, FileKind.FILE);
+
+							this.iconElement = $('div.monaco-icon-label.file-icon');
+							const classString = Array.isArray(iconClasses) ? iconClasses.join(' ') : iconClasses;
+							this.iconElement.className = `monaco-icon-label file-icon ${classString}`;
+							this.iconElement.style.height = '100%';
+							this.iconElement.style.transition = 'opacity 0.15s ease';
+
+							// Insert before hover chevron (hover chevron should be last)
+							if (this.hoverChevron && this.hoverChevron.parentNode === iconContainer) {
+								iconContainer.insertBefore(this.iconElement, this.hoverChevron);
+							} else {
+								iconContainer.appendChild(this.iconElement);
+							}
+						} else {
+							// File icon exists, just make sure it's visible
+							this.iconElement.style.display = '';
+							this.iconElement.style.opacity = '1';
+						}
+					}
+
+					// Call onFinalized callback after streaming completes (for file write)
+					if (this.currentContent.onFinalized) {
+						try {
+							await this.currentContent.onFinalized();
+						} catch (error) {
+							console.error('[TextEdit] Error in onFinalized callback:', error);
+						}
+					}
 				}
 				return;
 			}
@@ -444,11 +799,16 @@ export class VybeChatTextEditPart extends VybeChatContentPart {
 			}
 
 			// Schedule next line with consistent delay
-			this.streamingIntervalId = setTimeout(streamNextLine, STREAM_DELAY_MS) as any;
+			// Wrap in async IIFE to handle async callback
+			this.streamingIntervalId = setTimeout(async () => {
+				await streamNextLine();
+			}, STREAM_DELAY_MS) as any;
 		};
 
 		// Start streaming with initial delay
-		this.streamingIntervalId = setTimeout(streamNextLine, 300) as any; // 300ms delay before starting
+		this.streamingIntervalId = setTimeout(async () => {
+			await streamNextLine();
+		}, 300) as any; // 300ms delay before starting
 	}
 
 	private createDiffEditor(parent: HTMLElement): void {
@@ -496,17 +856,34 @@ export class VybeChatTextEditPart extends VybeChatContentPart {
 		const originalUri = URI.parse(`vybe-chat-original:///${this.uniqueId}/${this.currentContent.fileName}`);
 		const modifiedUri = URI.parse(`vybe-chat-modified:///${this.uniqueId}/${this.currentContent.fileName}`);
 
-		const originalModel = this.modelService.createModel(this.currentContent.originalContent, this.languageService.createById(languageId), originalUri);
-		const modifiedModel = this.modelService.createModel(this.currentContent.modifiedContent, this.languageService.createById(languageId), modifiedUri);
+		// Check if models already exist, if so update them, otherwise create new ones
+		let originalModel = this.modelService.getModel(originalUri);
+		let modifiedModel = this.modelService.getModel(modifiedUri);
+
+		if (originalModel) {
+			// Model exists, update it
+			originalModel.setValue(this.currentContent.originalContent);
+		} else {
+			// Model doesn't exist, create it
+			originalModel = this.modelService.createModel(this.currentContent.originalContent, this.languageService.createById(languageId), originalUri);
+			this._register(originalModel);
+		}
+
+		if (modifiedModel) {
+			// Model exists, update it
+			modifiedModel.setValue(this.currentContent.modifiedContent);
+		} else {
+			// Model doesn't exist, create it
+			modifiedModel = this.modelService.createModel(this.currentContent.modifiedContent, this.languageService.createById(languageId), modifiedUri);
+			this._register(modifiedModel);
+		}
 
 		this.diffEditor.setModel({
 			original: originalModel,
 			modified: modifiedModel
 		});
 
-		// Register models for disposal
-		this._register(originalModel);
-		this._register(modifiedModel);
+		// Models are already registered if they were newly created
 
 		// DON'T register diff editor - we'll dispose it manually in proper order
 		// this._register(this.diffEditor);
@@ -636,14 +1013,50 @@ export class VybeChatTextEditPart extends VybeChatContentPart {
 	}
 
 	public setCollapsed(collapsed: boolean): void {
+		console.log('[setCollapsed] Called with:', { collapsed, currentIsCollapsed: this.isCollapsed, isFullyExpanded: this.isFullyExpanded });
+
 		this.isCollapsed = collapsed;
 
-		if (this.headerSeparator) {
-			this.headerSeparator.style.display = collapsed ? 'none' : 'block';
+		// Update chevron rotation when state changes
+		if (this.hoverChevron) {
+			this.hoverChevron.style.transform = this.isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)';
 		}
 
-		if (this.contentArea) {
-			this.contentArea.style.display = collapsed ? 'none' : 'block';
+		// Find content area in DOM to ensure we have the right reference
+		const codeBlockContainer = this.domNode?.querySelector('.composer-code-block-container');
+		const contentAreaInDom = codeBlockContainer?.querySelector('.composer-code-block-content') as HTMLElement;
+		const contentAreaToUse = contentAreaInDom || this.contentArea;
+
+		if (this.headerSeparator) {
+			if (collapsed) {
+				this.headerSeparator.style.display = 'none';
+			} else {
+				this.headerSeparator.style.setProperty('display', 'block', 'important');
+			}
+		}
+
+		if (contentAreaToUse) {
+			if (collapsed) {
+				contentAreaToUse.style.display = 'none';
+				console.log('[setCollapsed] Hiding content area');
+			} else {
+				// Use !important when showing to ensure it's visible
+				contentAreaToUse.style.removeProperty('display');
+				contentAreaToUse.style.setProperty('display', 'block', 'important');
+				contentAreaToUse.style.setProperty('visibility', 'visible', 'important');
+				// Ensure it has a minimum height so it's actually visible
+				contentAreaToUse.style.setProperty('min-height', '1px', 'important');
+				console.log('[setCollapsed] Showing content area:', {
+					inlineDisplay: contentAreaToUse.style.display,
+					computedDisplay: window.getComputedStyle(contentAreaToUse).display,
+					computedHeight: window.getComputedStyle(contentAreaToUse).height,
+					computedVisibility: window.getComputedStyle(contentAreaToUse).visibility
+				});
+			}
+			// Update stored reference
+			this.contentArea = contentAreaToUse;
+		} else {
+			console.warn('[setCollapsed] Content area not found!');
 		}
 
 		if (this.expandMoreButton) {
@@ -651,7 +1064,8 @@ export class VybeChatTextEditPart extends VybeChatContentPart {
 		}
 
 		// When expanding from collapsed, always go to slightly expanded state
-		if (!collapsed && this.isFullyExpanded) {
+		// BUT: Don't collapse if we're in streaming state - user wants to see the stream!
+		if (!collapsed && this.isFullyExpanded && !this.currentContent.isStreaming) {
 			this.collapseToInitial();
 		}
 	}
@@ -723,32 +1137,166 @@ export class VybeChatTextEditPart extends VybeChatContentPart {
 	}
 
 	updateContent(newContent: IVybeChatTextEditContent): void {
+		const wasStreaming = this.currentContent.isStreaming === true;
+		const isNowStreaming = newContent.isStreaming === true;
+		const isFinalizing = wasStreaming && !isNowStreaming;
+
+		// Update current content
 		this.currentContent = newContent;
+
+		// If we're transitioning from streaming to finalized, finalize streaming first
+		// Also handle case where updateContent is called with isStreaming: false before streaming animation starts
+		if (isFinalizing && this.streamingEditor && !this.diffEditor) {
+			// Stop streaming animation if it's running
+			if (this.streamingIntervalId) {
+				clearInterval(this.streamingIntervalId);
+				this.streamingIntervalId = null;
+			}
+
+			// Update state
+			this.currentContent.isStreaming = false;
+			this.currentContent.isLoading = false;
+
+			// Replace streaming editor with diff editor
+			if (this.diffEditorContainer) {
+				// Clear container first
+				while (this.diffEditorContainer.firstChild) {
+					this.diffEditorContainer.removeChild(this.diffEditorContainer.firstChild);
+				}
+
+				// Dispose streaming editor and its model
+				const streamingModel = this.streamingEditor.getModel();
+				this.streamingEditor.dispose();
+				this.streamingEditor = null;
+
+				// Create diff editor
+				this.createDiffEditor(this.diffEditorContainer);
+
+				// Dispose streaming model AFTER diff editor is set up
+				if (streamingModel) {
+					setTimeout(() => {
+						streamingModel.dispose();
+					}, 100);
+				}
+
+				// Show stats now that streaming is complete
+				this.updateStatsDisplay();
+
+				// Show expand bar if content is longer than initial height
+				const totalDiffLines = this.currentContent.addedLines + this.currentContent.deletedLines;
+				if (totalDiffLines > this.MIN_LINES_FOR_EXPAND_BAR && !this.expandMoreButton) {
+					this.expandMoreButton = this.createExpandButton();
+					if (this.expandMoreButton) {
+						const codeBlockContainer = this.domNode.querySelector('.composer-code-block-container');
+						if (codeBlockContainer) {
+							codeBlockContainer.appendChild(this.expandMoreButton);
+						}
+					}
+					// Add padding for expand bar
+					if (this.contentArea) {
+						this.contentArea.style.paddingBottom = '16px';
+					}
+				}
+
+				// Restore file icon (remove loading spinner, create file icon if needed)
+				const iconSpan = this.headerElement?.querySelector('.composer-primary-toolcall-icon');
+				const iconWrapper = iconSpan?.querySelector('.show-file-icons');
+				const iconContainer = iconWrapper?.querySelector('div') as HTMLElement;
+
+				if (iconContainer) {
+					// Remove loading spinner
+					if (this.loadingSpinner && this.loadingSpinner.parentNode) {
+						this.loadingSpinner.parentNode.removeChild(this.loadingSpinner);
+						this.loadingSpinner = null;
+					}
+
+					// Create file icon if it doesn't exist
+					if (!this.iconElement) {
+						const filePath = this.currentContent.filePath || `/file/${this.currentContent.fileName}`;
+						const fileUri = URI.file(filePath);
+						const iconClasses = getIconClasses(this.modelService, this.languageService, fileUri, FileKind.FILE);
+
+						this.iconElement = $('div.monaco-icon-label.file-icon');
+						const classString = Array.isArray(iconClasses) ? iconClasses.join(' ') : iconClasses;
+						this.iconElement.className = `monaco-icon-label file-icon ${classString}`;
+						this.iconElement.style.height = '100%';
+						this.iconElement.style.transition = 'opacity 0.15s ease';
+
+						// Insert before hover chevron (hover chevron should be last)
+						if (this.hoverChevron && this.hoverChevron.parentNode === iconContainer) {
+							iconContainer.insertBefore(this.iconElement, this.hoverChevron);
+						} else {
+							iconContainer.appendChild(this.iconElement);
+						}
+					} else {
+						// File icon exists, just make sure it's visible
+						this.iconElement.style.display = '';
+						this.iconElement.style.opacity = '1';
+					}
+				}
+
+				// Call onFinalized callback after streaming completes (for file write)
+				if (this.currentContent.onFinalized) {
+					this.currentContent.onFinalized().catch((error) => {
+						console.error('[TextEdit] Error in onFinalized callback:', error);
+					});
+				}
+			}
+		}
+
+		// Update diff editor if it exists
 		if (this.diffEditor) {
 			// Get old models to dispose them
 			const oldModel = this.diffEditor.getModel();
 
 			const languageId = newContent.language || this.detectLanguageFromFilename(newContent.fileName);
 
-			const originalUri = URI.parse(`vybe-chat-original:///${this.uniqueId}-update/${newContent.fileName}`);
-			const modifiedUri = URI.parse(`vybe-chat-modified:///${this.uniqueId}-update/${newContent.fileName}`);
+			// Use same URIs as initial creation to reuse models if they exist
+			const originalUri = URI.parse(`vybe-chat-original:///${this.uniqueId}/${newContent.fileName}`);
+			const modifiedUri = URI.parse(`vybe-chat-modified:///${this.uniqueId}/${newContent.fileName}`);
 
-			const originalModel = this.modelService.createModel(newContent.originalContent, this.languageService.createById(languageId), originalUri);
-			const modifiedModel = this.modelService.createModel(newContent.modifiedContent, this.languageService.createById(languageId), modifiedUri);
+			// Check if models already exist, if so update them, otherwise create new ones
+			let originalModel = this.modelService.getModel(originalUri);
+			let modifiedModel = this.modelService.getModel(modifiedUri);
+
+			if (originalModel) {
+				// Model exists, update it
+				originalModel.setValue(newContent.originalContent);
+			} else {
+				// Model doesn't exist, create it
+				originalModel = this.modelService.createModel(newContent.originalContent, this.languageService.createById(languageId), originalUri);
+				this._register(originalModel);
+			}
+
+			if (modifiedModel) {
+				// Model exists, update it
+				modifiedModel.setValue(newContent.modifiedContent);
+			} else {
+				// Model doesn't exist, create it
+				modifiedModel = this.modelService.createModel(newContent.modifiedContent, this.languageService.createById(languageId), modifiedUri);
+				this._register(modifiedModel);
+			}
 
 			this.diffEditor.setModel({
 				original: originalModel,
 				modified: modifiedModel
 			});
 
-			// Dispose old models AFTER setting new ones
+			// Dispose old models AFTER setting new ones (only if they're different)
 			if (oldModel) {
-				oldModel.original?.dispose();
-				oldModel.modified?.dispose();
+				if (oldModel.original && oldModel.original !== originalModel) {
+					oldModel.original.dispose();
+				}
+				if (oldModel.modified && oldModel.modified !== modifiedModel) {
+					oldModel.modified.dispose();
+				}
 			}
-
-			this._register(originalModel);
-			this._register(modifiedModel);
+		} else if (isNowStreaming && this.streamingEditor) {
+			// Update streaming content if we're still streaming
+			const model = this.streamingEditor.getModel();
+			if (model && newContent.streamingContent) {
+				model.setValue(newContent.streamingContent);
+			}
 		}
 	}
 
@@ -794,8 +1342,488 @@ export class VybeChatTextEditPart extends VybeChatContentPart {
 		this.iconElement = null;
 		this.loadingSpinner = null;
 		this.hoverChevron = null;
+		this.deleteStatusIcon = null;
 
 		// Now dispose registered disposables (models, event listeners)
 		super.dispose();
+	}
+
+	private handleAccept(): void {
+		// Update approval state to accepted
+		this.currentContent.approvalState = 'accepted';
+
+		// Determine if it's delete operation
+		const isDelete = this.currentContent.originalContent.trim().length > 0 && this.currentContent.modifiedContent.trim().length === 0;
+
+		if (isDelete) {
+			// For delete: remove confirmation row, show red close icon next to filename
+			if (!this.headerElement) return;
+
+			// Remove confirmation row from DOM completely
+			if (this.confirmationRow && this.confirmationRow.parentNode) {
+				this.confirmationRow.parentNode.removeChild(this.confirmationRow);
+			}
+
+			// Reset header to normal height and layout
+			this.headerElement.style.height = '';
+			this.headerElement.style.flexDirection = '';
+			this.headerElement.style.justifyContent = '';
+			this.headerElement.style.padding = '';
+			this.headerElement.style.gap = '';
+			this.headerElement.style.margin = '';
+			this.headerElement.style.lineHeight = '';
+			this.headerElement.style.borderRadius = '';
+			this.headerElement.style.borderBottom = '';
+
+			// Rebuild header structure to normal layout (fileInfo + actions directly in header)
+			// Find and extract fileInfo and actionsOuterWrapper from firstRow
+			const firstRow = this.headerElement.querySelector('div');
+			if (firstRow && firstRow.parentNode === this.headerElement) {
+				// Get fileInfo and actionsOuterWrapper from firstRow
+				const fileInfo = firstRow.querySelector('.composer-code-block-file-info') as HTMLElement;
+				// actionsOuterWrapper is the last direct child div of firstRow
+				const actionsOuterWrapper = Array.from(firstRow.children).find(
+					child => child !== fileInfo && child.tagName === 'DIV'
+				) as HTMLElement;
+
+				if (fileInfo && actionsOuterWrapper) {
+					// Remove firstRow completely
+					firstRow.remove();
+
+					// Clear header by removing all children manually (avoid innerHTML for TrustedHTML)
+					while (this.headerElement.firstChild) {
+						this.headerElement.removeChild(this.headerElement.firstChild);
+					}
+
+					// Rebuild in correct order
+					// fileInfo first (left side), then actionsOuterWrapper (right side)
+					this.headerElement.appendChild(fileInfo);
+					this.headerElement.appendChild(actionsOuterWrapper);
+
+					// Ensure header has proper flex layout (should be set by CSS, but ensure it)
+					this.headerElement.style.display = 'flex';
+					this.headerElement.style.justifyContent = 'space-between';
+					this.headerElement.style.alignItems = 'center';
+				}
+			}
+
+			// Add red close icon next to filename
+			this.addDeleteStatusIcon();
+		} else {
+			// For create: hide confirmation row, show content area, start streaming
+			if (!this.headerElement) return;
+
+			// Remove confirmation row from DOM completely
+			if (this.confirmationRow && this.confirmationRow.parentNode) {
+				this.confirmationRow.parentNode.removeChild(this.confirmationRow);
+			}
+
+			// Reset header to normal height and layout
+			this.headerElement.style.height = '';
+			this.headerElement.style.flexDirection = '';
+			this.headerElement.style.justifyContent = '';
+			this.headerElement.style.padding = '';
+			this.headerElement.style.gap = '';
+			this.headerElement.style.margin = '';
+			this.headerElement.style.lineHeight = '';
+			this.headerElement.style.borderRadius = '';
+			this.headerElement.style.borderBottom = '';
+
+			// Rebuild header structure to normal layout (fileInfo + actions directly in header)
+			// Find and extract fileInfo and actionsOuterWrapper from firstRow
+			const firstRow = this.headerElement.querySelector('div');
+			if (firstRow && firstRow.parentNode === this.headerElement) {
+				// Get fileInfo and actionsOuterWrapper from firstRow
+				const fileInfo = firstRow.querySelector('.composer-code-block-file-info') as HTMLElement;
+				// actionsOuterWrapper is the last direct child div of firstRow
+				const actionsOuterWrapper = Array.from(firstRow.children).find(
+					child => child !== fileInfo && child.tagName === 'DIV'
+				) as HTMLElement;
+
+				if (fileInfo && actionsOuterWrapper) {
+					// Remove firstRow completely
+					firstRow.remove();
+
+					// Clear header by removing all children manually (avoid innerHTML for TrustedHTML)
+					while (this.headerElement.firstChild) {
+						this.headerElement.removeChild(this.headerElement.firstChild);
+					}
+
+					// Rebuild in correct order
+					// fileInfo first (left side), then actionsOuterWrapper (right side)
+					this.headerElement.appendChild(fileInfo);
+					this.headerElement.appendChild(actionsOuterWrapper);
+
+					// Ensure header has proper flex layout (should be set by CSS, but ensure it)
+					this.headerElement.style.display = 'flex';
+					this.headerElement.style.justifyContent = 'space-between';
+					this.headerElement.style.alignItems = 'center';
+				}
+			}
+
+			// FIRST: Set state to expanded BEFORE doing anything else
+			this.isCollapsed = false;
+			this.isFullyExpanded = false;
+
+			// Find content area in DOM (it might be in the codeBlockContainer)
+			const codeBlockContainer = this.domNode?.querySelector('.composer-code-block-container');
+			const contentAreaInDom = codeBlockContainer?.querySelector('.composer-code-block-content') as HTMLElement;
+
+			// Use DOM element if found, otherwise use stored reference
+			const contentAreaToShow = contentAreaInDom || this.contentArea;
+
+			// Debug: Log what we found
+			console.log('[TextEdit Accept] Content area found:', {
+				hasContentArea: !!this.contentArea,
+				hasContentAreaInDom: !!contentAreaInDom,
+				contentAreaToShow: !!contentAreaToShow,
+				isCollapsed: this.isCollapsed,
+				contentAreaDisplay: contentAreaToShow?.style.display,
+				contentAreaComputedDisplay: contentAreaToShow ? window.getComputedStyle(contentAreaToShow).display : 'N/A'
+			});
+
+			// Show content area and all containers BEFORE creating streaming editor
+			// Remove ALL display-related styles first, then set to block with !important
+			if (contentAreaToShow) {
+				// Remove all display-related inline styles
+				contentAreaToShow.style.removeProperty('display');
+				contentAreaToShow.style.removeProperty('visibility');
+				contentAreaToShow.style.removeProperty('opacity');
+				contentAreaToShow.style.removeProperty('height');
+				// Set to block with !important
+				contentAreaToShow.style.setProperty('display', 'block', 'important');
+				contentAreaToShow.style.setProperty('visibility', 'visible', 'important');
+				contentAreaToShow.style.setProperty('opacity', '1', 'important');
+				// Update stored reference
+				this.contentArea = contentAreaToShow;
+
+				console.log('[TextEdit Accept] After setting display:', {
+					inlineDisplay: contentAreaToShow.style.display,
+					computedDisplay: window.getComputedStyle(contentAreaToShow).display,
+					isVisible: window.getComputedStyle(contentAreaToShow).display !== 'none'
+				});
+			} else {
+				console.error('[TextEdit Accept] Content area not found!', {
+					hasDomNode: !!this.domNode,
+					hasCodeBlockContainer: !!codeBlockContainer,
+					hasStoredContentArea: !!this.contentArea
+				});
+			}
+			if (this.headerSeparator) {
+				this.headerSeparator.style.removeProperty('display');
+				this.headerSeparator.style.setProperty('display', 'block', 'important');
+			}
+			if (this.diffBlock) {
+				this.diffBlock.style.removeProperty('display');
+				this.diffBlock.style.removeProperty('visibility');
+				this.diffBlock.style.setProperty('display', 'block', 'important');
+				this.diffBlock.style.setProperty('visibility', 'visible', 'important');
+			}
+			if (this.diffEditorContainer) {
+				this.diffEditorContainer.style.removeProperty('display');
+				this.diffEditorContainer.style.removeProperty('visibility');
+				this.diffEditorContainer.style.setProperty('display', 'block', 'important');
+				this.diffEditorContainer.style.setProperty('visibility', 'visible', 'important');
+			}
+
+			// Also ensure parent containers are visible
+			if (codeBlockContainer && codeBlockContainer instanceof HTMLElement) {
+				codeBlockContainer.style.setProperty('display', 'block', 'important');
+			}
+
+			// Start streaming the content
+			// Set streamingContent to modifiedContent for create file
+			this.currentContent.streamingContent = this.currentContent.modifiedContent;
+			this.currentContent.isStreaming = true;
+			this.currentContent.isLoading = true;
+
+			// Update icon to loading spinner and ensure hover chevron exists
+			// Find the icon container in the rebuilt header
+			const iconSpan = this.headerElement?.querySelector('.composer-primary-toolcall-icon');
+			const iconWrapper = iconSpan?.querySelector('.show-file-icons');
+			const iconContainer = iconWrapper?.querySelector('div') as HTMLElement;
+
+			if (iconContainer) {
+				// Clear existing content
+				while (iconContainer.firstChild) {
+					iconContainer.removeChild(iconContainer.firstChild);
+				}
+
+				// Create hover chevron first (always present, works during streaming)
+				// Since isCollapsed is now false, chevron should be at 0deg (expanded state)
+				this.hoverChevron = $('span.codicon.codicon-chevron-down');
+				this.hoverChevron.style.cssText = 'font-size: 12px; color: var(--vscode-foreground); opacity: 0; position: absolute; pointer-events: none; transition: opacity 0.15s ease, transform 0.15s ease; transform-origin: center;';
+				this.hoverChevron.style.transform = 'rotate(0deg)'; // Expanded state
+				iconContainer.appendChild(this.hoverChevron);
+
+				// Create loading spinner
+				this.loadingSpinner = $('span.codicon.codicon-loading.codicon-modifier-spin');
+				this.loadingSpinner.style.cssText = 'font-size: 16px; color: var(--vscode-foreground); opacity: 0.7;';
+				iconContainer.appendChild(this.loadingSpinner);
+
+				// Clear iconElement reference since we're showing spinner
+				this.iconElement = null;
+			}
+
+			// Dispose existing diff editor if it exists (from initial creation)
+			if (this.diffEditor && this.diffEditorContainer) {
+				const oldModel = this.diffEditor.getModel();
+				if (oldModel) {
+					oldModel.original?.dispose();
+					oldModel.modified?.dispose();
+				}
+				this.diffEditor.dispose();
+				this.diffEditor = null;
+
+				// Clear container
+				while (this.diffEditorContainer.firstChild) {
+					this.diffEditorContainer.removeChild(this.diffEditorContainer.firstChild);
+				}
+			}
+
+			// Create streaming editor (will be created fresh)
+			if (this.diffEditorContainer) {
+				// Ensure diffEditorContainer and diffBlock are visible BEFORE creating editor
+				this.diffEditorContainer.style.setProperty('display', 'block', 'important');
+				this.diffEditorContainer.style.setProperty('visibility', 'visible', 'important');
+				this.diffEditorContainer.style.setProperty('min-height', '90px', 'important'); // Ensure it has height
+
+				if (this.diffBlock) {
+					this.diffBlock.style.setProperty('display', 'block', 'important');
+					this.diffBlock.style.setProperty('visibility', 'visible', 'important');
+					this.diffBlock.style.setProperty('min-height', '90px', 'important'); // Ensure it has height
+				}
+
+				this.createStreamingEditor(this.diffEditorContainer);
+			}
+
+			// Call setCollapsed to ensure everything is in sync (state already set above)
+			// But first, ensure content area is still visible (double-check)
+			if (this.contentArea) {
+				this.contentArea.style.setProperty('display', 'block', 'important');
+				this.contentArea.style.setProperty('visibility', 'visible', 'important');
+				this.contentArea.style.setProperty('min-height', '90px', 'important'); // Ensure it has height
+			}
+			if (this.headerSeparator) {
+				this.headerSeparator.style.setProperty('display', 'block', 'important');
+			}
+
+			// Ensure parent container is also visible (reuse the one we found earlier)
+			const codeBlockContainerForVisibility = this.domNode?.querySelector('.composer-code-block-container');
+			if (codeBlockContainerForVisibility && codeBlockContainerForVisibility instanceof HTMLElement) {
+				codeBlockContainerForVisibility.style.setProperty('display', 'block', 'important');
+				codeBlockContainerForVisibility.style.setProperty('visibility', 'visible', 'important');
+			}
+
+			this.setCollapsed(false);
+
+			// After setCollapsed, force visibility again to ensure it sticks
+			if (this.contentArea) {
+				this.contentArea.style.setProperty('display', 'block', 'important');
+				this.contentArea.style.setProperty('visibility', 'visible', 'important');
+				this.contentArea.style.setProperty('min-height', '90px', 'important');
+			}
+			if (this.headerSeparator) {
+				this.headerSeparator.style.setProperty('display', 'block', 'important');
+			}
+			if (this.diffBlock) {
+				this.diffBlock.style.setProperty('display', 'block', 'important');
+				this.diffBlock.style.setProperty('visibility', 'visible', 'important');
+				this.diffBlock.style.setProperty('min-height', '90px', 'important');
+			}
+			if (this.diffEditorContainer) {
+				this.diffEditorContainer.style.setProperty('display', 'block', 'important');
+				this.diffEditorContainer.style.setProperty('visibility', 'visible', 'important');
+				this.diffEditorContainer.style.setProperty('min-height', '90px', 'important');
+			}
+
+			// Re-register hover effects on the rebuilt header (so chevron shows on hover during streaming)
+			this.registerHeaderHoverEffects();
+		}
+
+		// TODO: Resume LangGraph HITL with toolCallId
+	}
+
+	private handleReject(): void {
+		// Update approval state to rejected
+		this.currentContent.approvalState = 'rejected';
+
+		// Determine if it's delete operation
+		const isDelete = this.currentContent.originalContent.trim().length > 0 && this.currentContent.modifiedContent.trim().length === 0;
+
+		if (isDelete) {
+			// For delete: hide confirmation row, show circle-slash icon next to filename
+			if (!this.headerElement) return;
+
+			// Remove confirmation row from DOM completely
+			if (this.confirmationRow && this.confirmationRow.parentNode) {
+				this.confirmationRow.parentNode.removeChild(this.confirmationRow);
+			}
+
+			// Reset header to normal height and layout
+			this.headerElement.style.height = '';
+			this.headerElement.style.flexDirection = '';
+			this.headerElement.style.justifyContent = '';
+			this.headerElement.style.padding = '';
+			this.headerElement.style.gap = '';
+			this.headerElement.style.margin = '';
+			this.headerElement.style.lineHeight = '';
+			this.headerElement.style.borderRadius = '';
+			this.headerElement.style.borderBottom = '';
+
+			// Rebuild header structure to normal layout (fileInfo + actions directly in header)
+			// Find and extract fileInfo and actionsOuterWrapper from firstRow
+			const firstRow = this.headerElement.querySelector('div');
+			if (firstRow && firstRow.parentNode === this.headerElement) {
+				// Get fileInfo and actionsOuterWrapper from firstRow
+				const fileInfo = firstRow.querySelector('.composer-code-block-file-info') as HTMLElement;
+				// actionsOuterWrapper is the last direct child div of firstRow
+				const actionsOuterWrapper = Array.from(firstRow.children).find(
+					child => child !== fileInfo && child.tagName === 'DIV'
+				) as HTMLElement;
+
+				if (fileInfo && actionsOuterWrapper) {
+					// Remove firstRow completely
+					firstRow.remove();
+
+					// Clear header by removing all children manually (avoid innerHTML for TrustedHTML)
+					while (this.headerElement.firstChild) {
+						this.headerElement.removeChild(this.headerElement.firstChild);
+					}
+
+					// Rebuild in correct order
+					// fileInfo first (left side), then actionsOuterWrapper (right side)
+					this.headerElement.appendChild(fileInfo);
+					this.headerElement.appendChild(actionsOuterWrapper);
+
+					// Ensure header has proper flex layout (should be set by CSS, but ensure it)
+					this.headerElement.style.display = 'flex';
+					this.headerElement.style.justifyContent = 'space-between';
+					this.headerElement.style.alignItems = 'center';
+				}
+			}
+
+			// Add circle-slash icon next to filename (for rejected delete)
+			this.addRejectStatusIcon();
+		} else {
+			// For create: hide confirmation row (no icon needed for rejected create)
+			if (!this.headerElement) return;
+
+			// Remove confirmation row from DOM completely
+			if (this.confirmationRow && this.confirmationRow.parentNode) {
+				this.confirmationRow.parentNode.removeChild(this.confirmationRow);
+			}
+
+			// Reset header to normal height and layout
+			this.headerElement.style.height = '';
+			this.headerElement.style.flexDirection = '';
+			this.headerElement.style.justifyContent = '';
+			this.headerElement.style.padding = '';
+			this.headerElement.style.gap = '';
+			this.headerElement.style.margin = '';
+			this.headerElement.style.lineHeight = '';
+			this.headerElement.style.borderRadius = '';
+			this.headerElement.style.borderBottom = '';
+
+			// Rebuild header structure to normal layout (fileInfo + actions directly in header)
+			// Find and extract fileInfo and actionsOuterWrapper from firstRow
+			const firstRow = this.headerElement.querySelector('div');
+			if (firstRow && firstRow.parentNode === this.headerElement) {
+				// Get fileInfo and actionsOuterWrapper from firstRow
+				const fileInfo = firstRow.querySelector('.composer-code-block-file-info') as HTMLElement;
+				// actionsOuterWrapper is the last direct child div of firstRow
+				const actionsOuterWrapper = Array.from(firstRow.children).find(
+					child => child !== fileInfo && child.tagName === 'DIV'
+				) as HTMLElement;
+
+				if (fileInfo && actionsOuterWrapper) {
+					// Remove firstRow completely
+					firstRow.remove();
+
+					// Clear header by removing all children manually (avoid innerHTML for TrustedHTML)
+					while (this.headerElement.firstChild) {
+						this.headerElement.removeChild(this.headerElement.firstChild);
+					}
+
+					// Rebuild in correct order
+					// fileInfo first (left side), then actionsOuterWrapper (right side)
+					this.headerElement.appendChild(fileInfo);
+					this.headerElement.appendChild(actionsOuterWrapper);
+
+					// Ensure header has proper flex layout (should be set by CSS, but ensure it)
+					this.headerElement.style.display = 'flex';
+					this.headerElement.style.justifyContent = 'space-between';
+					this.headerElement.style.alignItems = 'center';
+				}
+			}
+			// Add circle-slash icon next to filename (for rejected create, same as delete)
+			this.addRejectStatusIcon();
+		}
+
+		// TODO: Resume LangGraph HITL with toolCallId (rejected state)
+	}
+
+	private addDeleteStatusIcon(): void {
+		// Find the filename span to add icon after it
+		const fileInfo = this.headerElement?.querySelector('.composer-code-block-file-info');
+		if (!fileInfo) return;
+
+		// Create red close icon
+		this.deleteStatusIcon = $('span.codicon.codicon-close');
+		this.deleteStatusIcon.style.cssText = `
+			font-size: 14px;
+			color: #f48771;
+			flex-shrink: 0;
+		`;
+
+		// Insert after filename span
+		const filenameSpan = fileInfo.querySelector('.composer-code-block-filename');
+		if (filenameSpan && filenameSpan.parentNode) {
+			filenameSpan.parentNode.insertBefore(this.deleteStatusIcon, filenameSpan.nextSibling);
+		}
+	}
+
+	private addRejectStatusIcon(): void {
+		// Find the filename span to add icon after it
+		const fileInfo = this.headerElement?.querySelector('.composer-code-block-file-info');
+		if (!fileInfo) return;
+
+		// Create circle-slash icon (for rejected)
+		this.deleteStatusIcon = $('span.codicon.codicon-circle-slash');
+		this.deleteStatusIcon.style.cssText = `
+			font-size: 14px;
+			color: #f48771;
+			flex-shrink: 0;
+		`;
+
+		// Insert after filename span
+		const filenameSpan = fileInfo.querySelector('.composer-code-block-filename');
+		if (filenameSpan && filenameSpan.parentNode) {
+			filenameSpan.parentNode.insertBefore(this.deleteStatusIcon, filenameSpan.nextSibling);
+		}
+	}
+
+	private updateStatsDisplay(): void {
+		// Update stats display after streaming completes
+		const statsContainer = this.headerElement?.querySelector('[data-stats-inner]');
+		if (!statsContainer) return;
+
+		// Clear existing stats
+		while (statsContainer.firstChild) {
+			statsContainer.removeChild(statsContainer.firstChild);
+		}
+
+		// Add new stats based on current content
+		if (this.currentContent.addedLines > 0) {
+			const addedSpan = $('span.diff-stat-added');
+			addedSpan.textContent = `+${this.currentContent.addedLines}`;
+			statsContainer.appendChild(addedSpan);
+		}
+
+		if (this.currentContent.deletedLines > 0) {
+			const deletedSpan = $('span.diff-stat-deleted');
+			deletedSpan.textContent = `-${this.currentContent.deletedLines}`;
+			statsContainer.appendChild(deletedSpan);
+		}
 	}
 }

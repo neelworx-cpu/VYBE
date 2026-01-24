@@ -27,6 +27,7 @@ import { VybeChatTodoPart } from '../../contentParts/vybeChatTodoPart.js';
 import { VybeChatTodoItemPart } from '../../contentParts/vybeChatTodoItemPart.js';
 import { VybeChatPhaseIndicatorPart } from '../../contentParts/vybeChatPhaseIndicatorPart.js';
 import { VybeChatToolPart } from '../../contentParts/vybeChatToolPart.js';
+import { VybeChatReferencePart } from '../../contentParts/vybeChatReferencePart.js';
 import type { ContentBlock } from '../../../common/streaming_event_types.js';
 import { IMarkdownRendererService } from '../../../../../../platform/markdown/browser/markdownRenderer.js';
 import { IModelService } from '../../../../../../editor/common/services/model.js';
@@ -725,8 +726,14 @@ export class MessagePage extends Disposable {
 
 		// Check if part already exists (for streaming updates)
 		const existingIndex = this.contentPartsData.findIndex(d => {
-			// For thinking/codeBlock, only one of each kind should exist during streaming
-			if (d.kind === contentData.kind && (d.kind === 'thinking' || d.kind === 'codeBlock')) {
+			// For thinking parts, only match if it's still streaming (not finalized)
+			// This allows multiple thinking parts - one per reasoning part
+			if (d.kind === 'thinking' && contentData.kind === 'thinking') {
+				const thinkingData = d as IVybeChatThinkingContent;
+				return thinkingData.isStreaming === true; // Only match if still streaming
+			}
+			// For codeBlock, only one of each kind should exist during streaming
+			if (d.kind === contentData.kind && d.kind === 'codeBlock') {
 				return true;
 			}
 			// For markdown, only match if IDs are the same (allows multiple markdown blocks)
@@ -1024,7 +1031,7 @@ export class MessagePage extends Disposable {
 			}
 
 			case 'codeBlock': {
-				if (!this.instantiationService || !this.modelService || !this.languageService || !this.clipboardService) {
+				if (!this.instantiationService || !this.modelService || !this.languageService || !this.clipboardService || !this.editorService || !this.workspaceContextService) {
 					return null;
 				}
 				const codeBlockPart = this._register(new VybeChatCodeBlockPart(
@@ -1033,7 +1040,9 @@ export class MessagePage extends Disposable {
 					this.instantiationService,
 					this.modelService,
 					this.languageService,
-					this.clipboardService
+					this.clipboardService,
+					this.editorService,
+					this.workspaceContextService
 				));
 
 				// Wire up streaming callback for smart scrolling
@@ -1076,6 +1085,22 @@ export class MessagePage extends Disposable {
 				}
 
 				return terminalPart;
+			}
+
+			case 'reference': {
+				if (!this.instantiationService || !this.modelService || !this.languageService || !this.clipboardService || !this.editorService || !this.workspaceContextService) {
+					return null;
+				}
+				const referencePart = this._register(new VybeChatReferencePart(
+					contentData,
+					this.instantiationService,
+					this.modelService,
+					this.languageService,
+					this.clipboardService,
+					this.editorService,
+					this.workspaceContextService
+				));
+				return referencePart;
 			}
 
 			case 'readingFiles': {
@@ -1229,27 +1254,253 @@ export class MessagePage extends Disposable {
 	/**
 	 * Append chunk to thinking part (creates if doesn't exist).
 	 */
-	public appendThinkingChunk(chunk: string): void {
-		// Track when thinking started (for duration calculation)
-		if (this.thinkingStartTime === null) {
-			this.thinkingStartTime = Date.now();
+	// Track summaries by index (for structured summaries from OpenAI Responses API)
+	// CURSOR-STYLE: Keep one streaming block open until interrupted by non-thinking content
+	private summaryByIndex = new Map<number, string>(); // Global accumulation by index
+	private currentBlockSummaryIndices = new Set<number>(); // Track which summary indices are in the CURRENT streaming block
+
+	private buildCombinedContentForBlock(indices: number[]): string {
+		// Combine summaries for a specific block, sorted by index
+		const sortedIndices = [...indices].sort((a, b) => a - b);
+		let combinedContent = '';
+		for (let i = 0; i < sortedIndices.length; i++) {
+			const index = sortedIndices[i];
+			const summaryText = this.summaryByIndex.get(index) || '';
+			if (summaryText.trim().length > 0) {
+				if (i > 0 && combinedContent.length > 0) {
+					// Add spacing between summaries
+					combinedContent += '\n\n';
+				}
+				combinedContent += summaryText;
+			}
+		}
+		return combinedContent;
+	}
+
+	public appendThinkingChunk(chunk: string, summaryIndex?: number): void {
+		// CURSOR-STYLE: Keep one streaming thinking block open until interrupted
+		if (summaryIndex !== undefined) {
+			// 1. Accumulate delta by index (global accumulation)
+			const existing = this.summaryByIndex.get(summaryIndex) || '';
+			const accumulated = existing + chunk;
+			this.summaryByIndex.set(summaryIndex, accumulated);
+
+			// 2. Find or create the streaming thinking block
+			let lastStreamingPart: VybeChatThinkingPart | undefined;
+			let lastStreamingIndex = -1;
+			for (let i = this.contentParts.length - 1; i >= 0; i--) {
+				const p = this.contentParts[i];
+				if (p.kind !== 'thinking') continue;
+				const contentData = this.contentPartsData[i] as IVybeChatThinkingContent | undefined;
+				if (contentData && contentData.isStreaming === true) {
+					lastStreamingPart = p as VybeChatThinkingPart;
+					lastStreamingIndex = i;
+					break;
+				}
+			}
+
+			// 3. If no streaming block exists, start NEW block (clear indices)
+			if (!lastStreamingPart) {
+				this.currentBlockSummaryIndices.clear();
+				this.currentBlockSummaryIndices.add(summaryIndex);
+			} else {
+				// 4. Add index to current block if new
+				if (!this.currentBlockSummaryIndices.has(summaryIndex)) {
+					this.currentBlockSummaryIndices.add(summaryIndex);
+				}
+			}
+
+			// 5. Build content from current block indices only
+			const blockIndices = Array.from(this.currentBlockSummaryIndices);
+			const combinedContent = this.buildCombinedContentForBlock(blockIndices);
+			this.accumulatedThinking = combinedContent;
+
+			// 6. Update streaming block
+			if (lastStreamingPart) {
+				if (lastStreamingPart.updateContent) {
+					const thinkingContent: IVybeChatThinkingContent = {
+						kind: 'thinking',
+						value: this.accumulatedThinking,
+						isStreaming: true
+					};
+					lastStreamingPart.updateContent(thinkingContent);
+					if (lastStreamingIndex >= 0 && lastStreamingIndex < this.contentPartsData.length) {
+						this.contentPartsData[lastStreamingIndex] = thinkingContent;
+					}
+				}
+			} else {
+				// Create new streaming block
+				if (this.thinkingStartTime === null) {
+					this.thinkingStartTime = Date.now();
+				}
+				this.thinkingFinalized = false;
+
+				const contentData: IVybeChatThinkingContent = {
+					kind: 'thinking',
+					value: this.accumulatedThinking,
+					isStreaming: true
+				};
+				this.addContentPart(contentData);
+			}
+			return; // Structured approach handled, exit early
 		}
 
-		this.accumulatedThinking += chunk;
+		// DEPRECATED: Fallback to text-based approach for backward compatibility (Anthropic, etc.)
+		// CRITICAL: Check if THIS CHUNK starts a new reasoning part
+		// New reasoning parts start with a title pattern like "**Title**"
+		// We check the chunk itself, not the accumulated result, to avoid splitting a single reasoning part
+		const chunkStartsWithTitle = /^\s*\*\*[^*]+\*\*/.test(chunk.trim());
 
-		// Find or create thinking part
-		let existingPart = this.contentParts.find(p => p.kind === 'thinking') as VybeChatThinkingPart | undefined;
+		// CRITICAL: Check if chunk is just punctuation/whitespace (very small, no title pattern)
+		const isJustPunctuation = chunk.trim().length <= 3 && !chunkStartsWithTitle && /^[\s\.,;:!?\-]*$/.test(chunk.trim());
 
-		if (!existingPart) {
-			// Create new thinking part
+		// CRITICAL: Check if accumulated thinking contains a title pattern anywhere (not just at start)
+		// This helps determine if a new title chunk is a continuation (same block) or new part (new block)
+		const accumulatedHasTitle = /\*\*[^*]+\*\*/.test(this.accumulatedThinking);
+
+		// CRITICAL: A new reasoning part is detected if:
+		// 1. This chunk starts with a title pattern AND we already have accumulated thinking that doesn't contain a title (replacing old part)
+		// 2. OR this chunk starts with a title pattern AND accumulation is empty (first part or after finalized)
+		// 3. OR we're after a finalized thinking block and accumulation is empty AND chunk is NOT just punctuation (new turn)
+		// NOTE: If accumulated has a title and new chunk has title, it's a continuation (same block, add spacing)
+		const isNewReasoningPart = chunkStartsWithTitle && this.accumulatedThinking.length > 0 && !accumulatedHasTitle;
+		const isFirstReasoningPart = chunkStartsWithTitle && this.accumulatedThinking.length === 0;
+		const isAfterFinalized = this.thinkingFinalized && this.accumulatedThinking.length === 0 && !isJustPunctuation;
+
+		if (isNewReasoningPart || isFirstReasoningPart || isAfterFinalized) {
+			// This is a new reasoning part - finalize the previous one if it exists and is still streaming
+			if (this.accumulatedThinking.length > 0) {
+				// Find and finalize the current streaming thinking part
+				for (let i = 0; i < this.contentParts.length; i++) {
+					const p = this.contentParts[i];
+					if (p.kind !== 'thinking') continue;
+					const contentData = this.contentPartsData[i] as IVybeChatThinkingContent | undefined;
+					if (contentData && contentData.isStreaming === true) {
+						// Finalize this part before starting a new one
+						const finalizedContent: IVybeChatThinkingContent = {
+							kind: 'thinking',
+							value: this.accumulatedThinking,
+							isStreaming: false,
+							duration: this.thinkingStartTime !== null ? Math.max(Date.now() - this.thinkingStartTime, 1000) : 1000
+						};
+						if (p.updateContent) {
+							p.updateContent(finalizedContent);
+						}
+						this.contentPartsData[i] = finalizedContent;
+						break;
+					}
+				}
+			}
+
+			// CRITICAL: For new reasoning parts, the chunk contains the FULL content
+			// Set accumulation directly to the chunk (don't append)
+			this.accumulatedThinking = chunk;
+			this.thinkingStartTime = Date.now();
+			this.thinkingFinalized = false;
+		} else {
+			// CRITICAL: If this is just punctuation and we have no accumulated thinking,
+			// ALWAYS try to append it to the last finalized thinking block (even if markdown/tools appeared in between)
+			// This ensures punctuation stays with its reasoning part
+			if (this.accumulatedThinking.length === 0 && isJustPunctuation) {
+				// Find the last finalized thinking block (search backwards through all content parts)
+				for (let i = this.contentParts.length - 1; i >= 0; i--) {
+					const p = this.contentParts[i];
+					if (p.kind !== 'thinking') continue;
+					const contentData = this.contentPartsData[i] as IVybeChatThinkingContent | undefined;
+					if (contentData && contentData.isStreaming === false) {
+						// Found last finalized thinking block - append punctuation to it
+						const updatedContent: IVybeChatThinkingContent = {
+							kind: 'thinking',
+							value: contentData.value + chunk,
+							isStreaming: false,
+							duration: contentData.duration
+						};
+						if (p.updateContent) {
+							p.updateContent(updatedContent);
+						}
+						this.contentPartsData[i] = updatedContent;
+						return; // Don't create new block or update accumulation
+					}
+				}
+				// If no finalized thinking block found, ignore the punctuation chunk (don't create empty block)
+				return;
+			}
+
+			// Track when thinking started (for duration calculation)
+			if (this.thinkingStartTime === null) {
+				this.thinkingStartTime = Date.now();
+			}
+
+			// CRITICAL: If chunk starts with a title pattern and we already have accumulated thinking,
+			// this is a new reasoning summary within the same thinking block - add spacing for proper separation
+			// This is a continuation but contains a new title, so we need to separate it from previous content
+			if (chunkStartsWithTitle && this.accumulatedThinking.length > 0) {
+				// Remove ALL trailing whitespace (including newlines) and ensure we have exactly double newline before the new title
+				// This ensures proper separation regardless of what the accumulated thinking ends with
+				const trimmed = this.accumulatedThinking.replace(/\s+$/, ''); // Remove all trailing whitespace
+				if (trimmed.length > 0) {
+					// CRITICAL: Ensure the accumulated thinking ends with a newline, then add another newline
+					// This guarantees the title will be in a separate paragraph
+					// Check if it already ends with newline
+					if (trimmed.endsWith('\n')) {
+						// Already has newline, add one more for blank line
+						this.accumulatedThinking = trimmed + '\n';
+					} else {
+						// No newline, add double newline
+						this.accumulatedThinking = trimmed + '\n\n';
+					}
+				} else {
+					// If after trimming we have nothing, just set to double newline
+					this.accumulatedThinking = '\n\n';
+				}
+			}
+
+			// Append chunk to accumulation (continuation of current part)
+			this.accumulatedThinking += chunk;
+		}
+
+		// CRITICAL: If this is a new reasoning part, ALWAYS create a new block (don't look for existing)
+		// Otherwise, look for existing streaming part to update
+		let existingPart: VybeChatThinkingPart | undefined;
+
+		if (isNewReasoningPart || isFirstReasoningPart || isAfterFinalized) {
+			// This is a new reasoning part - ALWAYS create a new block
 			const contentData: IVybeChatThinkingContent = {
 				kind: 'thinking',
 				value: this.accumulatedThinking,
 				isStreaming: true
 			};
 			existingPart = this.addContentPart(contentData) as VybeChatThinkingPart | undefined;
+			if (existingPart) {
+				console.log(`[MessagePage] ✅ Created new thinking block for new reasoning part (${this.accumulatedThinking.length} chars)`);
+			}
+		} else {
+			// This is a continuation - find existing streaming part
+			for (let i = 0; i < this.contentParts.length; i++) {
+				const p = this.contentParts[i];
+				if (p.kind !== 'thinking') continue;
+				// Check content data to see if it's still streaming (isStreaming is private)
+				const contentData = this.contentPartsData[i] as IVybeChatThinkingContent | undefined;
+				if (contentData && contentData.isStreaming === true) {
+					existingPart = p as VybeChatThinkingPart;
+					break;
+				}
+			}
+
+			if (!existingPart) {
+				// No existing streaming part found - create new one
+				const contentData: IVybeChatThinkingContent = {
+					kind: 'thinking',
+					value: this.accumulatedThinking,
+					isStreaming: true
+				};
+				existingPart = this.addContentPart(contentData) as VybeChatThinkingPart | undefined;
+				if (existingPart) {
+				}
+			}
 		}
 
+		// Update the part with current accumulated content
 		if (existingPart && existingPart.updateContent) {
 			const thinkingContent: IVybeChatThinkingContent = {
 				kind: 'thinking',
@@ -1258,12 +1509,19 @@ export class MessagePage extends Disposable {
 			};
 			existingPart.updateContent(thinkingContent);
 			// Update data tracking - ensure it's always updated
-			const index = this.contentPartsData.findIndex(d => d.kind === 'thinking');
-			if (index >= 0) {
-				this.contentPartsData[index] = thinkingContent;
+			// Find the index of THIS specific thinking part (there may be multiple if previous was finalized)
+			const partIndex = this.contentParts.findIndex(p => p === existingPart);
+			if (partIndex >= 0 && partIndex < this.contentPartsData.length) {
+				this.contentPartsData[partIndex] = thinkingContent;
 			} else {
-				// If not found, add it (shouldn't happen, but be safe)
-				this.contentPartsData.push(thinkingContent);
+				// Fallback: find by kind (shouldn't happen, but be safe)
+				const index = this.contentPartsData.findIndex(d => d.kind === 'thinking' && (d as IVybeChatThinkingContent).isStreaming === true);
+				if (index >= 0) {
+					this.contentPartsData[index] = thinkingContent;
+				} else {
+					// If not found, add it
+					this.contentPartsData.push(thinkingContent);
+				}
 			}
 		}
 	}
@@ -1274,14 +1532,39 @@ export class MessagePage extends Disposable {
 	 * Only calculates duration ONCE - subsequent calls are no-ops.
 	 */
 	public finalizeThinking(): void {
+		// CURSOR-STYLE: Clear current block indices when finalizing
+		// This allows a new thinking block to start fresh when thinking resumes
+
+		// CRITICAL: Remove finalized block's indices from summaryByIndex to prevent cross-block contamination
+		// When a new block starts, it should only see summaries that arrive during its lifetime
+		for (const index of this.currentBlockSummaryIndices) {
+			this.summaryByIndex.delete(index);
+		}
+
+		this.currentBlockSummaryIndices.clear();
+
 		// CRITICAL: Only finalize once - prevent duration from increasing during text streaming
 		if (this.thinkingFinalized) {
 			return; // Already finalized, don't recalculate duration
 		}
 
-		const thinkingPart = this.contentParts.find(p => p.kind === 'thinking') as VybeChatThinkingPart | undefined;
+		// Find the currently streaming thinking part (not just any thinking part)
+		let thinkingPart: VybeChatThinkingPart | undefined;
+		let thinkingIndex = -1;
+		for (let i = 0; i < this.contentParts.length; i++) {
+			const p = this.contentParts[i];
+			if (p.kind !== 'thinking') continue;
+			// Check content data to see if it's still streaming
+			const contentData = this.contentPartsData[i] as IVybeChatThinkingContent | undefined;
+			if (contentData && contentData.isStreaming === true) {
+				thinkingPart = p as VybeChatThinkingPart;
+				thinkingIndex = i;
+				break;
+			}
+		}
+
 		if (!thinkingPart) {
-			return; // No thinking part to finalize
+			return; // No streaming thinking part to finalize
 		}
 
 		// Mark as finalized BEFORE calculating to prevent race conditions
@@ -1302,13 +1585,23 @@ export class MessagePage extends Disposable {
 
 		thinkingPart.updateContent(thinkingContent);
 
-		// Update data tracking
-		const index = this.contentPartsData.findIndex(d => d.kind === 'thinking');
-		if (index >= 0) {
-			this.contentPartsData[index] = thinkingContent;
+		// Update data tracking - use the specific index we found
+		if (thinkingIndex >= 0 && thinkingIndex < this.contentPartsData.length) {
+			this.contentPartsData[thinkingIndex] = thinkingContent;
+		} else {
+			// Fallback: find by kind and streaming status
+			const index = this.contentPartsData.findIndex(d => d.kind === 'thinking' && (d as IVybeChatThinkingContent).isStreaming === true);
+			if (index >= 0) {
+				this.contentPartsData[index] = thinkingContent;
+			}
 		}
 
-		console.log('[MessagePage] Thinking finalized:', { duration: Math.round(duration / 1000) + 's' });
+		// CRITICAL: Reset accumulation state for next thinking phase (new turn)
+		// This prevents later thinking from being appended to this finalized block
+		this.accumulatedThinking = '';
+		this.thinkingStartTime = null;
+		this.thinkingFinalized = false; // Allow new thinking block to be created
+
 	}
 
 	/**
@@ -1319,11 +1612,24 @@ export class MessagePage extends Disposable {
 		// Accumulate chunk (single source of truth in MessagePage)
 		this.accumulatedMarkdown += chunk;
 
-		// Find or create markdown part
-		let part = this.contentParts.find(p => p.kind === 'markdown') as VybeChatMarkdownPart | undefined;
+		// Find existing markdown part - but only if it's still streaming
+		// If it's finalized (isStreaming: false), we need to create a new one
+		let part: VybeChatMarkdownPart | undefined;
+		let partIndex = -1;
+		for (let i = 0; i < this.contentParts.length; i++) {
+			const p = this.contentParts[i];
+			if (p.kind !== 'markdown') continue;
+			// Check content data to see if it's still streaming
+			const contentData = this.contentPartsData[i] as IVybeChatMarkdownContent | undefined;
+			if (contentData && contentData.isStreaming === true) {
+				part = p as VybeChatMarkdownPart;
+				partIndex = i;
+				break;
+			}
+		}
 
 		if (!part) {
-			// Create new markdown part
+			// Create new markdown part (either first one, or new one after previous was finalized)
 			const contentData: IVybeChatMarkdownContent = {
 				kind: 'markdown',
 				content: this.accumulatedMarkdown,
@@ -1333,6 +1639,7 @@ export class MessagePage extends Disposable {
 			if (!part) {
 				return;
 			}
+			partIndex = this.contentPartsData.length - 1;
 		}
 
 		// Update part with accumulated content
@@ -1344,12 +1651,17 @@ export class MessagePage extends Disposable {
 			});
 		}
 
-		// Update data tracking
-		const index = this.contentPartsData.findIndex(d => d.kind === 'markdown');
-		if (index >= 0) {
-			this.contentPartsData[index] = { kind: 'markdown', content: this.accumulatedMarkdown, isStreaming: true };
+		// Update data tracking - use the specific index we found
+		if (partIndex >= 0 && partIndex < this.contentPartsData.length) {
+			this.contentPartsData[partIndex] = { kind: 'markdown', content: this.accumulatedMarkdown, isStreaming: true };
 		} else {
-			this.contentPartsData.push({ kind: 'markdown', content: this.accumulatedMarkdown, isStreaming: true });
+			// Fallback: find by kind and streaming status
+			const index = this.contentPartsData.findIndex(d => d.kind === 'markdown' && (d as IVybeChatMarkdownContent).isStreaming === true);
+			if (index >= 0) {
+				this.contentPartsData[index] = { kind: 'markdown', content: this.accumulatedMarkdown, isStreaming: true };
+			} else {
+				this.contentPartsData.push({ kind: 'markdown', content: this.accumulatedMarkdown, isStreaming: true });
+			}
 		}
 	}
 
@@ -1485,18 +1797,85 @@ export class MessagePage extends Disposable {
 			return;
 		}
 
-		// Removed verbose logging
+		// Append text to accumulator first (before checking for duplicates)
+		// This allows us to check the full accumulated content against existing blocks
+		const testAccumulated = this.accumulatedMarkdown + text;
 
+
+		// CRITICAL: Check if this content already exists in ANY markdown block
+		// This prevents duplicates when final content arrives after streaming completes
+		// Check BEFORE creating a new block ID
+		const existingBlock = this.contentPartsData.find(d => {
+			if (d.kind !== 'markdown') return false;
+			const mdData = d as IVybeChatMarkdownContent;
+
+			// CRITICAL FIX: Check if incoming text matches existing block's content EXACTLY
+			// This catches cases where the backend sends the full content again as a "delta"
+			// This is the most common duplicate case: backend sends full content that was already streamed
+			if (mdData.content === text && text.length > 10) {
+				return true;
+			}
+
+			// Check if incoming text is contained within existing content (backend sent full content that was already streamed)
+			// This handles cases where the existing block has more content but the incoming text is a duplicate
+			if (mdData.content.includes(text) && text.length > 50 && mdData.content.length >= text.length) {
+				// Only match if the text is at the start (most common case) or if it's a substantial portion
+				const textStartIndex = mdData.content.indexOf(text);
+				if (textStartIndex === 0 || (textStartIndex >= 0 && text.length > mdData.content.length * 0.8)) {
+					return true;
+				}
+			}
+
+			// Check if the accumulated content matches an existing block's content exactly
+			if (mdData.content === testAccumulated) {
+				return true;
+			}
+
+			// Check if the incoming text (when accumulated is empty) matches a finalized block
+			// This handles cases where a complete message arrives after a block was finalized and accumulator was reset
+			if (this.accumulatedMarkdown === '' && !mdData.isStreaming && mdData.content === text) {
+				return true;
+			}
+
+			// Check if the existing finalized block's content exactly matches the incoming accumulated content
+			// This handles cases where the same full content is sent again
+			if (!mdData.isStreaming && mdData.content === testAccumulated) {
+				return true;
+			}
+
+			return false;
+		});
+
+		if (existingBlock) {
+			// This content already exists - reuse the existing block instead of creating a duplicate
+			const existingIndex = this.contentPartsData.findIndex(d => d === existingBlock);
+			if (existingIndex >= 0) {
+				const mdData = existingBlock as IVybeChatMarkdownContent;
+
+				// CRITICAL: When duplicate is detected, DO NOT update the content
+				// The existing block already has the correct content
+				// Just ensure the block ID and accumulator are in sync
+				this.currentMarkdownBlockId = mdData.id || null;
+
+				// Set accumulator to match the existing block's content (not the doubled testAccumulated)
+				// This ensures future chunks continue from the correct point
+				this.accumulatedMarkdown = mdData.content;
+
+				// DO NOT update the existing block - it already has the correct content
+				// Just return early to prevent creating a duplicate
+			}
+			return; // Skip creating a duplicate
+		}
+
+		// No duplicate found - proceed with normal flow
 		// If no current block ID, create a new one
 		if (!this.currentMarkdownBlockId) {
 			this.currentMarkdownBlockId = `md_${++this.markdownBlockCounter}`;
 			this.accumulatedMarkdown = ''; // Reset accumulator for new block
-			// Removed verbose logging
 		}
 
-		// Append text to accumulator (simple, no duplicate detection needed with block IDs)
+		// Append text to accumulator
 		this.accumulatedMarkdown += text;
-		// Removed verbose logging
 
 		// Find or create markdown part with the current block ID
 		const existingIndex = this.contentPartsData.findIndex(d =>
@@ -1507,7 +1886,6 @@ export class MessagePage extends Disposable {
 			// Update existing part
 			const existingPart = this.contentParts[existingIndex];
 			if (existingPart && existingPart.updateContent) {
-				// Removed verbose logging
 				existingPart.updateContent({
 					kind: 'markdown',
 					id: this.currentMarkdownBlockId,
@@ -1524,7 +1902,6 @@ export class MessagePage extends Disposable {
 			}
 		} else {
 			// Create new markdown part with block ID
-			// Removed verbose logging
 			const contentData: IVybeChatMarkdownContent = {
 				kind: 'markdown',
 				id: this.currentMarkdownBlockId,
@@ -1534,8 +1911,6 @@ export class MessagePage extends Disposable {
 			const part = this.addContentPart(contentData);
 			if (!part) {
 				console.error(`[MessagePage] appendText: Failed to create markdown part for block ${this.currentMarkdownBlockId}!`);
-			} else {
-				// Removed verbose logging
 			}
 		}
 	}
@@ -1552,7 +1927,7 @@ export class MessagePage extends Disposable {
 		if (this.accumulatedMarkdown === fullText) {
 			// Content matches - update data tracking and markdown part's streaming state
 			// updateContent will detect content unchanged and skip re-render (code blocks preserved)
-			const existingData = this.contentPartsData.find(d => d.kind === 'markdown');
+			const existingData = this.contentPartsData.find(d => d.kind === 'markdown') as IVybeChatMarkdownContent | undefined;
 			if (existingData && existingData.isStreaming) {
 				existingData.isStreaming = false;
 				// Call updateContent - it will detect content unchanged and just update streaming state
@@ -1793,7 +2168,6 @@ export class MessagePage extends Disposable {
 	public createBlock(block: ContentBlock): void {
 		// DEDUPE: Skip if block already exists
 		if (this.blocks.has(block.id)) {
-			console.log('[MessagePage] createBlock: block already exists, skipping', block.id);
 			return;
 		}
 		// Removed verbose logging

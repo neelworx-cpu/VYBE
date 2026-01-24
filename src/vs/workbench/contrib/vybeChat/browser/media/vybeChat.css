@@ -5,6 +5,23 @@
 
 /* VYBE Chat Main Styles */
 
+/* Theme-aware tool shine colors (used by VybeChatToolPart via CSS variables) */
+.monaco-workbench {
+	--vybe-tool-shine-dim: rgba(200, 200, 200, 0.6);
+	--vybe-tool-shine-bright: rgba(255, 255, 255, 1);
+}
+
+.monaco-workbench.vscode-light {
+	/* On light backgrounds the old light-gray gradient becomes invisible; use dark shine colors */
+	--vybe-tool-shine-dim: rgba(0, 0, 0, 0.35);
+	--vybe-tool-shine-bright: rgba(0, 0, 0, 0.75);
+}
+
+.monaco-workbench.vscode-high-contrast-light {
+	--vybe-tool-shine-dim: rgba(0, 0, 0, 0.5);
+	--vybe-tool-shine-bright: rgba(0, 0, 0, 1);
+}
+
 /* Chat messages area - HIDDEN scrollbar (invisible but functional) */
 .vybe-chat-messages-area {
 	/* Hide scrollbar for Firefox */
@@ -165,7 +182,7 @@
 /* Message group container (wraps related messages: thinking + tools + assistant) */
 .composer-message-group {
 	padding: 0;
-	margin: 0;
+	margin: 2px 0;
 }
 
 /* Summary wrapper inside message group */
@@ -190,6 +207,10 @@
 /* Grouped tool calls in message group */
 .composer-grouped-toolformer-message {
 	padding: 0;
+}
+
+.composer-tool-former-message {
+	margin: 2px 0;
 }
 
 .composer-summary-single-message {

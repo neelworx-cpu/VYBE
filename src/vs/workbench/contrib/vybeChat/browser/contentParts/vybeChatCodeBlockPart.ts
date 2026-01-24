@@ -12,6 +12,12 @@ import { ITextModel } from '../../../../../editor/common/model.js';
 import { ILanguageService } from '../../../../../editor/common/languages/language.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { IClipboardService } from '../../../../../platform/clipboard/common/clipboardService.js';
+import { IEditorService } from '../../../../services/editor/common/editorService.js';
+import { IWorkspaceContextService } from '../../../../../platform/workspace/common/workspace.js';
+import { URI } from '../../../../../base/common/uri.js';
+import * as path from '../../../../../base/common/path.js';
+import { getIconClasses } from '../../../../../editor/common/services/getIconClasses.js';
+import { FileKind } from '../../../../../platform/files/common/files.js';
 
 /**
  * Renders simple code blocks in AI responses with Monaco editor.
@@ -26,6 +32,7 @@ export class VybeChatCodeBlockPart extends VybeChatContentPart {
 	public onStreamingUpdate?: () => void; // Callback for parent to handle scrolling
 	private editorContainer: HTMLElement | null = null;
 	private copyButton: HTMLElement | null = null;
+	private headerElement: HTMLElement | null = null;
 
 	constructor(
 		content: IVybeChatCodeBlockContent,
@@ -33,7 +40,9 @@ export class VybeChatCodeBlockPart extends VybeChatContentPart {
 		@IInstantiationService private readonly instantiationService: IInstantiationService,
 		@IModelService private readonly modelService: IModelService,
 		@ILanguageService private readonly languageService: ILanguageService,
-		@IClipboardService private readonly clipboardService: IClipboardService
+		@IClipboardService private readonly clipboardService: IClipboardService,
+		@IEditorService private readonly editorService: IEditorService,
+		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService
 	) {
 		super('codeBlock');
 		this.currentContent = content;
@@ -64,6 +73,13 @@ export class VybeChatCodeBlockPart extends VybeChatContentPart {
 		const codeBlockContainer = $('.composer-code-block-container.composer-message-codeblock');
 		codeBlockContainer.style.cssText = 'transition: border-color 0.1s ease-in-out;';
 
+		// Create header if filePath/lineRange provided (reference codeblock)
+		const isReferenceCodeblock = !!(this.currentContent.filePath && this.currentContent.lineRange);
+		if (isReferenceCodeblock) {
+			this.headerElement = this.createHeader();
+			codeBlockContainer.appendChild(this.headerElement);
+		}
+
 		// Position wrapper
 		const positionWrapper = $('div');
 		positionWrapper.style.cssText = 'position: relative; overflow: hidden;';
@@ -89,14 +105,15 @@ export class VybeChatCodeBlockPart extends VybeChatContentPart {
 		// Create Monaco editor
 		this.createEditor(this.editorContainer);
 
-		// Copy button overlay
-		const copyOverlay = this.createCopyOverlay();
-
-		// Build hierarchy
+		// Build hierarchy first
 		contentContainer.appendChild(this.editorContainer);
 		positionWrapper.appendChild(contentContainer);
-		positionWrapper.appendChild(copyOverlay);
 		codeBlockContainer.appendChild(positionWrapper);
+
+		// Copy button overlay - create after DOM structure is in place
+		// Append to contentContainer so it's positioned relative to content area
+		const copyOverlay = this.createCopyOverlay(codeBlockContainer);
+		contentContainer.appendChild(copyOverlay);
 		wrapper.appendChild(codeBlockContainer);
 		outerContainer.appendChild(wrapper);
 
@@ -229,7 +246,7 @@ export class VybeChatCodeBlockPart extends VybeChatContentPart {
 		this.streamingIntervalId = setTimeout(streamNextLine, 300);
 	}
 
-	private createCopyOverlay(): HTMLElement {
+	private createCopyOverlay(codeBlockContainer: HTMLElement): HTMLElement {
 		const overlay = $('.composer-codeblock-copy-overlay');
 
 		// Wrapper for alignment
@@ -253,20 +270,9 @@ export class VybeChatCodeBlockPart extends VybeChatContentPart {
 			align-items: center;
 		`;
 
-		// Copy button wrapper (shows on hover)
-		const copyButtonWrapper = $('div');
-		copyButtonWrapper.style.cssText = `
-			flex-shrink: 0;
-			height: 100%;
-			transition: opacity 0.1s ease-in-out;
-			opacity: 0;
-			pointer-events: none;
-			margin-left: 4px;
-		`;
-
-		// Copy button
-		this.copyButton = $('.anysphere-icon-button');
-		this.copyButton.className = 'anysphere-icon-button';
+		// Copy button - VYBE branding
+		this.copyButton = $('.vybe-icon-button');
+		this.copyButton.className = 'vybe-icon-button';
 		this.copyButton.style.cssText = `
 			height: 20px;
 			width: 20px;
@@ -279,7 +285,7 @@ export class VybeChatCodeBlockPart extends VybeChatContentPart {
 			cursor: pointer;
 		`;
 
-		// Copy icon
+		// Copy icon - use codicon-copy
 		const copyIcon = $('span.codicon.codicon-copy');
 		copyIcon.style.cssText = 'font-size: 12px;';
 		this.copyButton.appendChild(copyIcon);
@@ -291,23 +297,132 @@ export class VybeChatCodeBlockPart extends VybeChatContentPart {
 			this.copyCode();
 		}));
 
-		copyButtonWrapper.appendChild(this.copyButton);
-		actionsContainer.appendChild(copyButtonWrapper);
+		actionsContainer.appendChild(this.copyButton);
 		overflowWrapper.appendChild(actionsContainer);
 		overlay.appendChild(overflowWrapper);
 
-		// Hover effect - show copy button
-		this._register(addDisposableListener(overlay.parentElement || overlay, 'mouseenter', () => {
-			copyButtonWrapper.style.opacity = '1';
-			copyButtonWrapper.style.pointerEvents = 'auto';
+		// Hover effect - show copy button on entire codeblock container
+		// CSS handles the hover via `.composer-code-block-container:hover .composer-codeblock-copy-overlay`
+		// JavaScript ensures it works even if CSS doesn't apply
+		this._register(addDisposableListener(codeBlockContainer, 'mouseenter', () => {
+			overlay.style.display = 'flex';
+			overlay.style.pointerEvents = 'auto';
 		}));
 
-		this._register(addDisposableListener(overlay.parentElement || overlay, 'mouseleave', () => {
-			copyButtonWrapper.style.opacity = '0';
-			copyButtonWrapper.style.pointerEvents = 'none';
+		this._register(addDisposableListener(codeBlockContainer, 'mouseleave', () => {
+			overlay.style.display = 'none';
+			overlay.style.pointerEvents = 'none';
 		}));
 
 		return overlay;
+	}
+
+	private createHeader(): HTMLElement {
+		const header = $('.composer-code-block-header');
+
+		// File info section
+		const fileInfo = $('.composer-code-block-file-info');
+
+		// File icon
+		const iconSpan = $('span.composer-primary-toolcall-icon');
+		const iconWrapper = $('.show-file-icons');
+		const iconContainer = $('div');
+		iconContainer.style.cssText = 'position: relative; height: 100%; width: 100%; display: flex; align-items: center; justify-content: center;';
+
+		// Get file icon classes
+		const filePath = this.currentContent.filePath!;
+		const fileUri = path.isAbsolute(filePath) ? URI.file(filePath) :
+			(this.workspaceContextService?.getWorkspace().folders[0]
+				? URI.joinPath(this.workspaceContextService.getWorkspace().folders[0].uri, filePath)
+				: URI.file(filePath));
+
+		const iconClasses = getIconClasses(this.modelService, this.languageService, fileUri, FileKind.FILE);
+		const iconElement = $('div.monaco-icon-label.file-icon');
+		const classString = Array.isArray(iconClasses) ? iconClasses.join(' ') : iconClasses;
+		iconElement.className = `monaco-icon-label file-icon ${classString}`;
+		iconElement.style.height = '100%';
+
+		iconContainer.appendChild(iconElement);
+		iconWrapper.appendChild(iconContainer);
+		iconSpan.appendChild(iconWrapper);
+
+		// Filename (extract from path)
+		const filename = this.currentContent.filename || path.basename(filePath);
+		const filenameSpan = $('span.composer-code-block-filename');
+		const filenameBidi = $('span');
+		filenameBidi.textContent = filename;
+		filenameSpan.appendChild(filenameBidi);
+
+		// Line range
+		const lineRange = this.currentContent.lineRange!;
+		const lineRangeSpan = $('span.composer-code-block-line-range');
+		lineRangeSpan.textContent = `Lines ${lineRange.start}-${lineRange.end}`;
+
+		// Build file info
+		fileInfo.appendChild(iconSpan);
+		fileInfo.appendChild(filenameSpan);
+		fileInfo.appendChild(lineRangeSpan);
+
+		// Build header
+		header.appendChild(fileInfo);
+
+		// Make header clickable to open file
+		if (this.editorService) {
+			header.style.cursor = 'pointer';
+			this._register(addDisposableListener(header, 'click', async (e) => {
+				e.preventDefault();
+				e.stopPropagation();
+				await this.openFile();
+			}));
+		}
+
+		return header;
+	}
+
+	private async openFile(): Promise<void> {
+		if (!this.editorService || !this.currentContent.filePath) {
+			return;
+		}
+
+		try {
+			let fileUri: URI;
+
+			// Check if path is absolute
+			if (path.isAbsolute(this.currentContent.filePath)) {
+				fileUri = URI.file(this.currentContent.filePath);
+			} else {
+				// Resolve relative path against workspace root
+				const workspaceFolder = this.workspaceContextService?.getWorkspace().folders[0];
+				if (workspaceFolder) {
+					fileUri = URI.joinPath(workspaceFolder.uri, this.currentContent.filePath);
+				} else {
+					// Fallback: try as-is
+					fileUri = URI.file(this.currentContent.filePath);
+				}
+			}
+
+			// Open file with line range selection if available
+			const editorInput: any = {
+				resource: fileUri
+			};
+
+			if (this.currentContent.lineRange) {
+				const startLine = this.currentContent.lineRange.start < 1 ? 1 : this.currentContent.lineRange.start;
+				const endLine = this.currentContent.lineRange.end < startLine ? startLine : this.currentContent.lineRange.end;
+				editorInput.options = {
+					selection: {
+						startLineNumber: startLine,
+						startColumn: 1,
+						endLineNumber: endLine,
+						endColumn: 1
+					}
+				};
+			}
+
+			await this.editorService.openEditor(editorInput);
+		} catch (error) {
+			console.error(`[VybeChatCodeBlockPart] Failed to open file: ${this.currentContent.filePath}`, error);
+		}
 	}
 
 	private copyCode(): void {

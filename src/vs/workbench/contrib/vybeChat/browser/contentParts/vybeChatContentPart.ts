@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { Disposable } from '../../../../../base/common/lifecycle.js';
+import { ModelDropdownState } from '../components/composer/modelDropdown.js';
 
 /**
  * Base interface for all VYBE Chat content parts.
@@ -54,6 +55,7 @@ export type VybeChatContentPartKind =
 	| 'error'          // Error messages
 	// Phase 2: Code (coming soon)
 	| 'codeBlock'      // Code blocks with syntax highlighting
+	| 'mermaidDiagram' // Mermaid diagrams with diagram/code view toggle
 	// Phase 3: File Edits (coming soon)
 	| 'textEdit'       // File edit suggestions
 	| 'diff'           // Side-by-side diff view
@@ -74,7 +76,9 @@ export type VybeChatContentPartKind =
 	| 'todoItem'      // Individual todo item indicator ("Started to-do")
 	| 'phaseIndicator' // "Planning next steps" indicator (appears when agent is planning)
 	// Phase 7: Unified Tool UI
-	| 'tool';         // Unified tool UI component (read, list, grep, search)
+	| 'tool'         // Unified tool UI component (read, list, grep, search)
+	// Phase 8: Questionnaire
+	| 'questionnaireAnswers'; // Questionnaire answers display (shows question-answer pairs)
 
 /**
  * Data for markdown content parts.
@@ -91,9 +95,11 @@ export interface IVybeChatMarkdownContent {
  */
 export interface IVybeChatThinkingContent {
 	kind: 'thinking';
+	id?: string;              // Unique block ID - allows multiple thinking parts in sequence (e.g. GPT-5 reasoning summary segments)
 	value: string | string[];  // Thinking text (can be array of chunks)
 	duration?: number;         // How long AI thought (in ms)
 	isStreaming?: boolean;     // Whether the thinking is still in progress
+	title?: string;            // Optional title derived from reasoning summary (OpenAI GPT-5.x)
 }
 
 /**
@@ -105,6 +111,18 @@ export interface IVybeChatCodeBlockContent {
 	language: string;  // Programming language (typescript, python, etc.)
 	isStreaming?: boolean; // Whether code is currently streaming line-by-line
 	filename?: string; // Optional filename hint (from show_code tool)
+	filePath?: string; // Optional full file path for reference codeblocks (enables header with click-to-open)
+	lineRange?: { start: number; end: number }; // Optional line range for reference codeblocks
+}
+
+/**
+ * Data for mermaid diagram content parts.
+ */
+export interface IVybeChatMermaidDiagramContent {
+	kind: 'mermaidDiagram';
+	diagramCode: string;      // The mermaid diagram code
+	diagramType?: string;     // Optional diagram type (flowchart, sequence, etc.)
+	isStreaming?: boolean;    // Whether diagram code is currently streaming
 }
 
 /**
@@ -123,6 +141,12 @@ export interface IVybeChatTextEditContent {
 	isApplied?: boolean;    // Whether the edit has been applied
 	isLoading?: boolean;    // Whether the edit is currently streaming
 	isStreaming?: boolean;  // Whether currently showing streaming code (not diff yet)
+	requiresConfirmation?: boolean;  // For new files and delete_file - shows confirmation UI
+	approvalState?: 'pending' | 'accepted' | 'rejected';  // HITL approval state
+	toolCallId?: string;    // Tool call ID for LangGraph HITL resume
+	isDelete?: boolean;     // Flag for delete_file operations
+	isCreate?: boolean;     // Flag for new file operations
+	onFinalized?: () => Promise<void>; // Callback when streaming finalizes (for file write)
 }
 
 /**
@@ -270,11 +294,7 @@ export interface IVybeChatPlanDocumentContent {
 	content: string; // Full plan content (markdown, shown in expanded mode)
 	isExpanded?: boolean; // Whether plan is expanded (default: false)
 	isStreaming?: boolean; // Whether plan is still being generated
-	modelState?: { // Model selection state
-		isAutoEnabled: boolean;
-		isMaxModeEnabled: boolean;
-		selectedModelId: string;
-	};
+	modelState?: ModelDropdownState; // Model selection state
 }
 
 /**
@@ -347,6 +367,42 @@ export interface IVybeChatToolContent {
 }
 
 /**
+ * Question-answer pair from questionnaire.
+ */
+export interface IQuestionnaireAnswer {
+	questionId: string;
+	questionText: string;
+	answerText: string; // The selected option label
+}
+
+/**
+ * Data for questionnaire answers content parts.
+ * Displays question-answer pairs after user answers questionnaire questions.
+ */
+export interface IVybeChatQuestionnaireAnswersContent {
+	kind: 'questionnaireAnswers';
+	id?: string; // Unique ID for tracking
+	toolCallId?: string; // Tool call ID from LangGraph
+	answers: IQuestionnaireAnswer[]; // Array of question-answer pairs
+	toolStatus?: 'loading' | 'completed' | 'error'; // Tool status
+}
+
+/**
+ * Data for code reference content parts.
+ * A code reference displays existing code from the codebase with a header (file icon, filename, line range)
+ * and the actual code content in a Monaco editor, similar to code blocks but with file metadata.
+ * Format: ```startLine:endLine:filepath\ncode content\n```
+ */
+export interface IVybeChatReferenceContent {
+	kind: 'reference';
+	filePath: string;      // Full file path (absolute or relative to workspace)
+	lineRange: { start: number; end: number }; // Line range to reference
+	code: string;          // Code content from markdown (AI provides it)
+	language?: string;     // Optional language for syntax highlighting (detected from file extension)
+	isStreaming?: boolean; // Whether code is currently streaming
+}
+
+/**
  * Union type of all content data.
  * This is what gets passed to content parts for rendering.
  */
@@ -354,6 +410,7 @@ export type IVybeChatContentData =
 	| IVybeChatMarkdownContent
 	| IVybeChatThinkingContent
 	| IVybeChatCodeBlockContent
+	| IVybeChatMermaidDiagramContent
 	| IVybeChatTextEditContent
 	| IVybeChatTerminalContent
 	| IVybeChatProgressContent
@@ -368,7 +425,9 @@ export type IVybeChatContentData =
 	| IVybeChatTodoContent
 	| IVybeChatTodoItemContent
 	| IVybeChatPhaseIndicatorContent
-	| IVybeChatToolContent;
+	| IVybeChatToolContent
+	| IVybeChatQuestionnaireAnswersContent
+	| IVybeChatReferenceContent;
 
 /**
  * Base class for content parts.

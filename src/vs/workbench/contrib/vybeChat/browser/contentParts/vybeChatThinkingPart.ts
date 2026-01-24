@@ -225,10 +225,10 @@ export class VybeChatThinkingPart extends VybeChatContentPart {
 					line-height: 14px;
 					width: 21px;
 					height: 14px;
-					display: flex;
-					justify-content: flex-start;
+					display: inline-flex;
+					justify-content: center;
 					align-items: center;
-					transform-origin: 45% 55%;
+					transform-origin: center center;
 					transition: transform 0.15s ease-in-out, opacity 0.2s ease-in-out, color 0.1s ease-in;
 					flex-shrink: 0;
 					cursor: pointer;
@@ -236,6 +236,7 @@ export class VybeChatThinkingPart extends VybeChatContentPart {
 					transform: rotate(0deg);
 					font-size: 18px;
 					margin-left: 4px;
+					position: relative;
 				`
 			});
 		}
@@ -398,15 +399,31 @@ export class VybeChatThinkingPart extends VybeChatContentPart {
 			return content.trim(); // Convert blockquote to paragraph
 		});
 
+		// CRITICAL: Preserve bold formatting for titles (**Title**) before removing other bold
+		// Titles are typically short phrases on their own line, followed by summary text
+		// Strategy: Protect title patterns with placeholders, remove other bold, then restore titles
+		const titlePlaceholders: string[] = [];
+		let titleIndex = 0;
+
+		// Match title patterns: **Title** that appears at line boundaries (start of line or after newline)
+		// Titles are typically short (less than 100 chars) and appear before summary text
+		// Pattern matches: (start OR newline) + optional whitespace + **Title** + (newline OR end)
+		processed = processed.replace(/(?:^|\n)(\s*)(\*\*[^*\n]{1,100}?\*\*)(?=\s*\n|$)/gm, (match, leadingWhitespace, titleText) => {
+			const placeholder = `__TITLE_PLACEHOLDER_${titleIndex}__`;
+			titlePlaceholders[titleIndex] = titleText;
+			titleIndex++;
+			return (match.startsWith('\n') ? '\n' : '') + leadingWhitespace + placeholder;
+		});
+
 		// Remove bold/italic formatting (**text**, *text*) - keep the text
 		// But preserve inline code (`...`) - it's allowed
 		// IMPORTANT: Don't match placeholders (they contain underscores)
 		// Process bold first (to avoid conflicts)
 		// Split by placeholders, process each segment separately
-		const segments = processed.split(/(__CODE_BLOCK_PLACEHOLDER_\d+__|__INCOMPLETE_CODE_BLOCK_\d+__)/g);
+		const segments = processed.split(/(__CODE_BLOCK_PLACEHOLDER_\d+__|__INCOMPLETE_CODE_BLOCK_\d+__|__TITLE_PLACEHOLDER_\d+__)/g);
 		const processedSegments = segments.map((segment) => {
 			// Skip placeholders - they're already protected
-			if (segment.match(/^__(CODE_BLOCK_PLACEHOLDER|INCOMPLETE_CODE_BLOCK)_\d+__$/)) {
+			if (segment.match(/^__(CODE_BLOCK_PLACEHOLDER|INCOMPLETE_CODE_BLOCK|TITLE_PLACEHOLDER)_\d+__$/)) {
 				return segment;
 			}
 			// Process this segment (no placeholders here, so safe to use simple regex)
@@ -418,6 +435,12 @@ export class VybeChatThinkingPart extends VybeChatContentPart {
 			return seg;
 		});
 		processed = processedSegments.join('');
+
+		// Restore title placeholders (restore bold formatting for titles)
+		for (let i = titlePlaceholders.length - 1; i >= 0; i--) {
+			const placeholder = `__TITLE_PLACEHOLDER_${i}__`;
+			processed = processed.replace(placeholder, titlePlaceholders[i]);
+		}
 
 		// Remove links [text](url) - keep the text
 		processed = processed.replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1');
@@ -502,8 +525,81 @@ export class VybeChatThinkingPart extends VybeChatContentPart {
 			return;
 		}
 
+		// CRITICAL: Remove inline code markers (backticks) from thinking content
+		// Inline code should not be rendered in thinking blocks - replace with plain text
+		// Strategy: First protect code blocks (```...```), then replace inline code (`...`), then restore code blocks
+		let processedContent = content;
+
+		// Step 1: Temporarily replace code blocks with placeholders
+		const codeBlockPlaceholders: string[] = [];
+		processedContent = processedContent.replace(/```[\s\S]*?```/g, (match) => {
+			const placeholder = `__CODE_BLOCK_${codeBlockPlaceholders.length}__`;
+			codeBlockPlaceholders.push(match);
+			return placeholder;
+		});
+
+		// Step 2: Replace inline code (single backticks) with the text in single quotes
+		processedContent = processedContent.replace(/`([^`\n]+)`/g, (match, code) => {
+			return `'${code}'`;
+		});
+
+		// Step 3: Restore code blocks
+		codeBlockPlaceholders.forEach((block, index) => {
+			processedContent = processedContent.replace(`__CODE_BLOCK_${index}__`, block);
+		});
+
+		// CRITICAL: Normalize spacing around titles to ensure proper paragraph separation
+		// Ensure that every title pattern (**Title**) is preceded by at least double newline
+		// and followed by at least one newline before summary text
+		// Strategy: Process titles one by one from end to start to avoid index shifting
+
+		// Find all titles first
+		const titleRegex = /\*\*[^*]+\*\*/g;
+		const titles: Array<{ text: string; index: number }> = [];
+		let match;
+		while ((match = titleRegex.exec(processedContent)) !== null) {
+			titles.push({ text: match[0], index: match.index });
+		}
+
+		// Process from end to start to avoid index shifting
+		for (let i = titles.length - 1; i >= 0; i--) {
+			const title = titles[i];
+			const beforeTitle = processedContent.substring(0, title.index);
+			const titleEnd = title.index + title.text.length;
+			const afterTitle = processedContent.substring(titleEnd);
+
+			// Check spacing before title
+			const trimmedBefore = beforeTitle.trimEnd();
+			const needsSpacingBefore = trimmedBefore.length > 0 && !trimmedBefore.endsWith('\n\n');
+
+			// Check spacing after title
+			const trimmedAfter = afterTitle.trimStart();
+			const needsSpacingAfter = trimmedAfter.length > 0 && !trimmedAfter.startsWith('\n');
+
+			// Build replacement
+			let newBefore = beforeTitle;
+			let newAfter = afterTitle;
+
+			if (needsSpacingBefore) {
+				if (trimmedBefore.endsWith('\n')) {
+					newBefore = trimmedBefore + '\n';
+				} else {
+					newBefore = trimmedBefore + '\n\n';
+				}
+			}
+
+			if (needsSpacingAfter) {
+				newAfter = '\n' + trimmedAfter;
+			}
+
+			processedContent = newBefore + title.text + newAfter;
+		}
+
+		// Clean up any triple+ newlines to exactly double newline
+		processedContent = processedContent.replace(/\n{3,}/g, '\n\n');
+
 		// Extract code blocks from processed content for reuse
-		const newCodeBlocks = this.extractCodeBlocks(content);
+		const newCodeBlocks = this.extractCodeBlocks(processedContent);
 
 		// Update code blocks directly if structure matches (prevents flicker)
 		const codeBlocksUpdated = this.updateCodeBlocksDirectly(newCodeBlocks);
@@ -521,7 +617,7 @@ export class VybeChatThinkingPart extends VybeChatContentPart {
 		}
 		this.codeBlockIndex = 0;
 
-		const markdownString = new MarkdownString(content, {
+		const markdownString = new MarkdownString(processedContent, {
 			isTrusted: true,
 			supportThemeIcons: true,
 			supportHtml: false
@@ -579,11 +675,36 @@ export class VybeChatThinkingPart extends VybeChatContentPart {
 			}
 		});
 
-		// Append the rendered content
+		// CRITICAL: Post-process the rendered HTML BEFORE appending to container
+		// This ensures we process the actual markdown-rendered content
+
+		// Step 1: Remove empty paragraphs first (before converting to spans)
+		this.removeEmptyParagraphs(result.element);
+
+		// Step 2: Convert <p> to <span> and wrap in sections (like Cursor)
+		this.postProcessRenderedHTML(result.element);
+
+		// Step 3: Append the processed content to container
 		container.appendChild(result.element);
 
-		// Post-process: Remove empty paragraphs created by LLM blank lines
+		// Step 4: Process container again to catch any <p> tags that might have been created during append
+		// or if the markdown renderer created nested structures
 		this.removeEmptyParagraphs(container);
+		this.postProcessRenderedHTML(container);
+
+		// Step 5: Immediately re-apply title styles to ensure they persist
+		// This is critical during streaming when content is constantly re-rendered
+		this.reapplyTitleStyles(container);
+
+		// Step 6: Also re-apply in requestAnimationFrame as a safety net
+		// Use requestAnimationFrame to ensure DOM is fully updated
+		if (this.rafId !== null) {
+			dom.getActiveWindow().cancelAnimationFrame(this.rafId);
+		}
+		this.rafId = dom.getActiveWindow().requestAnimationFrame(() => {
+			this.reapplyTitleStyles(container);
+			this.rafId = null;
+		});
 
 		// Register disposables
 		this._register(result);
@@ -663,8 +784,225 @@ export class VybeChatThinkingPart extends VybeChatContentPart {
 	}
 
 	/**
+	 * Post-process rendered HTML to match Cursor's structure:
+	 * - Convert <p> tags to <span> tags
+	 * - Make title spans block-level (full width)
+	 * - Add proper spacing between spans
+	 * - Wrap content in <section class="markdown-section"> elements
+	 * This ensures proper separation and matches Cursor's HTML structure.
+	 */
+	private postProcessRenderedHTML(container: HTMLElement): void {
+		// Find all <p> tags and convert them to <span> tags
+		// Use a while loop to handle dynamically changing DOM (in case of nested structures)
+		let paragraphs = container.querySelectorAll('p');
+		let iterations = 0;
+		const maxIterations = 10; // Safety limit to prevent infinite loops
+
+		while (paragraphs.length > 0 && iterations < maxIterations) {
+			iterations++;
+			const paragraphsArray = Array.from(paragraphs);
+
+			paragraphsArray.forEach(p => {
+				// Skip if already processed (parent might be a span now)
+				if (!p.parentNode) {
+					return;
+				}
+
+				// Create a new <span> element
+				const span = document.createElement('span');
+
+				// Copy all children from <p> to <span> using DOM manipulation (TrustedHTML safe)
+				// Clone each child node to avoid moving nodes during iteration
+				const children = Array.from(p.childNodes);
+				children.forEach(child => {
+					span.appendChild(child.cloneNode(true));
+				});
+
+				// Copy all attributes from <p> to <span>
+				Array.from(p.attributes).forEach(attr => {
+					span.setAttribute(attr.name, attr.value);
+				});
+
+				// Copy inline styles if any
+				if (p.style.cssText) {
+					span.style.cssText = p.style.cssText;
+				}
+
+				// Replace <p> with <span>
+				if (p.parentNode) {
+					p.parentNode.replaceChild(span, p);
+				}
+			});
+
+			// Re-query to catch any nested <p> tags
+			const newParagraphs = container.querySelectorAll('p');
+			if (newParagraphs.length === 0 || newParagraphs.length === paragraphsArray.length) {
+				// No more paragraphs or no change, we're done
+				break;
+			}
+			paragraphs = newParagraphs;
+		}
+
+		if (paragraphs.length > 0 && iterations >= maxIterations) {
+			console.warn('[VybeChatThinkingPart] postProcessRenderedHTML: Reached max iterations, some <p> tags may remain');
+		}
+
+		// CRITICAL: Process all spans to identify titles and make them block-level
+		// Titles are spans that contain only bold/strong text (rendered from **Title** markdown)
+		const allSpans = container.querySelectorAll('span');
+		let titleCount = 0;
+		allSpans.forEach((span, index) => {
+			const textContent = span.textContent || '';
+			const innerHTML = span.innerHTML || '';
+
+			// Check if this span is a title:
+			// 1. Contains only bold/strong elements (no other text nodes)
+			// 2. Or the text content matches a title pattern (short, bold text)
+			const strongElement = span.querySelector('strong, b');
+			const hasOnlyBold = strongElement &&
+				span.childNodes.length === 1 &&
+				(strongElement.textContent === textContent.trim());
+
+			// More lenient check: span contains bold and the bold text matches the span's text (allowing for whitespace)
+			const hasBoldMatchingText = strongElement &&
+				strongElement.textContent?.trim() === textContent.trim() &&
+				textContent.trim().length > 0;
+
+			const isTitlePattern = textContent.trim().length > 0 &&
+				textContent.trim().length < 100 && // Titles are typically short
+				(innerHTML.includes('<strong>') || innerHTML.includes('<b>')) &&
+				!textContent.includes('.') && // Titles usually don't end with periods
+				textContent.trim().split(/\s+/).length < 10; // Titles are typically short phrases
+
+			if (hasOnlyBold || hasBoldMatchingText || isTitlePattern) {
+				titleCount++;
+				// This is a title span - make it block-level and full width
+				const htmlSpan = span as HTMLElement;
+				htmlSpan.classList.add('thinking-title');
+
+				// Apply all styles with !important to prevent flickering/overrides
+				htmlSpan.style.setProperty('display', 'block', 'important');
+				htmlSpan.style.setProperty('width', '100%', 'important');
+				htmlSpan.style.setProperty('font-weight', '700', 'important');
+				htmlSpan.style.setProperty('font-size', '13px', 'important');
+				htmlSpan.style.setProperty('opacity', '1', 'important');
+				htmlSpan.style.setProperty('color', 'var(--vscode-foreground)', 'important');
+				htmlSpan.style.setProperty('margin-top', '0', 'important');
+				htmlSpan.style.setProperty('margin-bottom', '4px', 'important');
+
+				// Title detected and styled
+			} else {
+				// Regular content span - ensure it's block-level for proper line breaks
+				span.style.display = 'block';
+				span.style.width = '100%';
+			}
+		});
+
+		// CRITICAL: Add spacing before every title (except the first) to ensure gaps between summaries
+		// This handles cases where titles are in separate spans from their summaries
+		const allSpansArray = Array.from(container.querySelectorAll('span'));
+		let hasSeenAnyContent = false;
+
+		allSpansArray.forEach((span, index) => {
+			const htmlSpan = span as HTMLElement;
+			// Check if this span contains a title (either has thinking-title class or contains <strong>/<b>)
+			const hasTitle = span.classList.contains('thinking-title') || span.querySelector('strong, b') !== null;
+			// Check if this span has any text content (not just whitespace)
+			const hasContent = (span.textContent || '').trim().length > 0;
+
+			if (hasTitle) {
+				// This is a title span - add top margin if there's been any previous content
+				if (hasSeenAnyContent) {
+					// Add top margin to create gap before this title
+					htmlSpan.style.setProperty('margin-top', '8px', 'important');
+				}
+				// Add bottom margin to create space after this title/summary block
+				htmlSpan.style.setProperty('margin-bottom', '4px', 'important');
+				hasSeenAnyContent = true;
+			} else if (hasContent) {
+				// This is a content span - mark that we've seen content
+				hasSeenAnyContent = true;
+			}
+		});
+
+		// Title detection complete
+
+		// Wrap content in sections if not already wrapped
+		// Each summary should be in its own section (handled by markdown normalization)
+		// For now, we'll wrap the entire content in a single section if it's not already wrapped
+		// The markdown normalization ensures titles are properly separated
+		if (container.children.length > 0 && !container.querySelector('section.markdown-section')) {
+			// Check if we need to wrap - if container has direct children that aren't sections
+			const needsWrapping = Array.from(container.children).some(
+				child => child.tagName !== 'SECTION' || !child.classList.contains('markdown-section')
+			);
+
+			if (needsWrapping) {
+				const section = document.createElement('section');
+				section.className = 'markdown-section';
+				section.setAttribute('data-section-index', '0');
+
+				// Move all children to the section
+				while (container.firstChild) {
+					section.appendChild(container.firstChild);
+				}
+
+				container.appendChild(section);
+			}
+		}
+	}
+
+	/**
+	 * Re-apply title styles to ensure they persist during streaming updates.
+	 * This is called both immediately after rendering and in requestAnimationFrame.
+	 */
+	private reapplyTitleStyles(container: HTMLElement): void {
+		// Re-apply title span styles
+		const titleSpans = Array.from(container.querySelectorAll('span.thinking-title'));
+		titleSpans.forEach((span) => {
+			const htmlSpan = span as HTMLElement;
+			htmlSpan.style.setProperty('display', 'block', 'important');
+			htmlSpan.style.setProperty('width', '100%', 'important');
+			htmlSpan.style.setProperty('font-weight', '700', 'important');
+			htmlSpan.style.setProperty('font-size', '13px', 'important');
+			htmlSpan.style.setProperty('opacity', '1', 'important');
+			htmlSpan.style.setProperty('color', 'var(--vscode-foreground)', 'important');
+			htmlSpan.style.setProperty('margin-top', '0', 'important');
+			htmlSpan.style.setProperty('margin-bottom', '4px', 'important');
+		});
+
+		// Re-apply spacing before every title (except the first) to ensure gaps between summaries
+		// This handles cases where titles are in separate spans from their summaries
+		const allSpans = Array.from(container.querySelectorAll('span'));
+		let hasSeenAnyContent = false;
+
+		allSpans.forEach((span) => {
+			const htmlSpan = span as HTMLElement;
+			// Check if this span contains a title (either has thinking-title class or contains <strong>/<b>)
+			const hasTitle = span.classList.contains('thinking-title') || span.querySelector('strong, b') !== null;
+			// Check if this span has any text content (not just whitespace)
+			const hasContent = (span.textContent || '').trim().length > 0;
+
+			if (hasTitle) {
+				// This is a title span - add top margin if there's been any previous content
+				if (hasSeenAnyContent) {
+					// Add top margin to create gap before this title
+					htmlSpan.style.setProperty('margin-top', '8px', 'important');
+				}
+				// Add bottom margin to create space after this title/summary block
+				htmlSpan.style.setProperty('margin-bottom', '4px', 'important');
+				hasSeenAnyContent = true;
+			} else if (hasContent) {
+				// This is a content span - mark that we've seen content
+				hasSeenAnyContent = true;
+			}
+		});
+	}
+
+	/**
 	 * Remove empty or whitespace-only paragraphs that create unwanted gaps.
 	 * LLMs often output extra blank lines which get rendered as empty <p> elements.
+	 * NOTE: This should be called BEFORE converting <p> to <span>.
 	 */
 	private removeEmptyParagraphs(container: HTMLElement): void {
 		// Find all paragraphs in the rendered markdown
@@ -764,6 +1102,11 @@ export class VybeChatThinkingPart extends VybeChatContentPart {
 			const markdownContainer = this.contentElement?.querySelector('.anysphere-markdown-container-root');
 			if (markdownContainer) {
 				this.renderThinkingContent(markdownContainer as HTMLElement);
+				// CRITICAL: Re-apply title styles after rendering to ensure they persist during streaming
+				// Use a small delay to ensure DOM is updated
+				setTimeout(() => {
+					this.reapplyTitleStyles(markdownContainer as HTMLElement);
+				}, 0);
 			}
 		}
 
@@ -835,10 +1178,10 @@ export class VybeChatThinkingPart extends VybeChatContentPart {
 					line-height: 14px;
 					width: 21px;
 					height: 14px;
-					display: flex;
-					justify-content: flex-start;
+					display: inline-flex;
+					justify-content: center;
 					align-items: center;
-					transform-origin: 45% 55%;
+					transform-origin: center center;
 					transition: transform 0.15s ease-in-out, opacity 0.2s ease-in-out, color 0.1s ease-in;
 					flex-shrink: 0;
 					cursor: pointer;
@@ -846,6 +1189,7 @@ export class VybeChatThinkingPart extends VybeChatContentPart {
 					transform: rotate(0deg);
 					font-size: 18px;
 					margin-left: 4px;
+					position: relative;
 				`
 			});
 

@@ -11,7 +11,6 @@ import { type ModelDropdownState } from './modelDropdown.js';
 
 // Model labels mapping (should match modelDropdown.ts)
 const MODEL_LABELS: Record<string, string> = {
-	'composer-1': 'Composer 1',
 	'opus-4.5': 'Opus 4.5',
 	'sonnet-4.5': 'Sonnet 4.5',
 	'gpt-5.1-codex-high': 'GPT-5.1 Codex High',

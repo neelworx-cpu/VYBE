@@ -3,14 +3,18 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { VybeChatContentPart, IVybeChatMarkdownContent } from './vybeChatContentPart.js';
+import { VybeChatContentPart, IVybeChatMarkdownContent, IVybeChatReferenceContent } from './vybeChatContentPart.js';
 import { VybeChatCodeBlockPart } from './vybeChatCodeBlockPart.js';
+import { VybeChatReferencePart } from './vybeChatReferencePart.js';
 import { $, getWindow, addDisposableListener } from '../../../../../base/browser/dom.js';
 import { MarkdownString } from '../../../../../base/common/htmlContent.js';
 import { IMarkdownRendererService } from '../../../../../platform/markdown/browser/markdownRenderer.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { IEditorService } from '../../../../services/editor/common/editorService.js';
 import { IWorkspaceContextService } from '../../../../../platform/workspace/common/workspace.js';
+import { IModelService } from '../../../../../editor/common/services/model.js';
+import { ILanguageService } from '../../../../../editor/common/languages/language.js';
+import { IClipboardService } from '../../../../../platform/clipboard/common/clipboardService.js';
 import { URI } from '../../../../../base/common/uri.js';
 import * as path from '../../../../../base/common/path.js';
 
@@ -27,8 +31,10 @@ export class VybeChatMarkdownPart extends VybeChatContentPart {
 	public onStreamingUpdate?: () => void; // Callback for parent to handle scrolling
 	private codeBlockIndex: number = 0;
 	private codeBlockParts: VybeChatCodeBlockPart[] = [];
+	private referenceParts: VybeChatReferencePart[] = [];
 	private rafId: number | null = null; // RequestAnimationFrame ID for batching updates
 	private codeBlockMap: Map<number, VybeChatCodeBlockPart> = new Map(); // Map index -> code block for reuse
+	private referenceMap: Map<number, VybeChatReferencePart> = new Map(); // Map index -> reference part for reuse
 
 	/**
 	 * Production Architecture: When true, code block extraction is disabled.
@@ -403,7 +409,134 @@ export class VybeChatMarkdownPart extends VybeChatContentPart {
 				gfm: true, // GitHub Flavored Markdown (enables tables)
 				breaks: true // Line breaks create <br>
 			},
-			codeBlockRendererSync: (languageId: string, code: string) => {
+			codeBlockRendererSync: (languageId: string, code: string, raw?: string) => {
+				// Check if this is a code reference format: startLine:endLine:filepath
+				// The languageId is processed by postProcessCodeBlockLanguageId which splits on ':'
+				// So we need to check the raw markdown token instead
+				let referenceMatch: RegExpMatchArray | null = null;
+				if (raw) {
+					// Extract language from raw markdown: ```languageId\ncode\n```
+					const rawMatch = raw.match(/^```(\S+)/);
+					if (rawMatch && rawMatch[1]) {
+						const rawLanguageId = rawMatch[1];
+						referenceMatch = rawLanguageId.match(/^(\d+):(\d+):(.+)$/);
+					}
+				}
+				// Fallback: try the processed languageId (might work if no colons before the first one)
+				if (!referenceMatch) {
+					referenceMatch = languageId.match(/^(\d+):(\d+):(.+)$/);
+				}
+
+				if (referenceMatch) {
+					// This is a code reference, not a regular code block
+					const startLine = parseInt(referenceMatch[1], 10);
+					const endLine = parseInt(referenceMatch[2], 10);
+					const filePath = referenceMatch[3];
+
+					// Debug: Log what we received
+					console.log('[CodeReference] Parsing reference:', {
+						languageId,
+						filePath,
+						startLine,
+						endLine,
+						codeLength: code?.length || 0,
+						codePreview: code?.substring(0, 100) || '(empty)',
+						isStreaming: this.isStreaming
+					});
+
+					// Ensure code is not empty (use code parameter from markdown renderer)
+					const codeContent = code || '';
+
+					// Check if we can reuse an existing reference part
+					const existingReference = this.referenceMap.get(this.codeBlockIndex);
+					if (existingReference) {
+						if (!existingReference.domNode) {
+							console.warn('[CodeReference] Reusing reference but domNode is missing, creating new one', {
+								index: this.codeBlockIndex,
+								filePath: filePath
+							});
+							// Fall through to create new reference
+						} else {
+							// Update existing reference content (for streaming)
+							if (existingReference.updateContent) {
+								existingReference.updateContent({
+									kind: 'reference',
+									filePath: filePath,
+									lineRange: { start: startLine, end: endLine },
+									code: codeContent,
+									language: undefined,
+									isStreaming: this.isStreaming
+								});
+							}
+							this.codeBlockIndex++;
+							return existingReference.domNode;
+						}
+					}
+
+					// Create a new code reference part
+					const referenceContent: IVybeChatReferenceContent = {
+						kind: 'reference',
+						filePath: filePath,
+						lineRange: { start: startLine, end: endLine },
+						code: codeContent,
+						language: undefined, // Will be detected from file extension
+						isStreaming: this.isStreaming
+					};
+
+					// Get required services from instantiation service
+					// Use invokeFunction to access the service accessor
+					let modelService: IModelService | undefined;
+					let languageService: ILanguageService | undefined;
+					let clipboardService: IClipboardService | undefined;
+
+					try {
+						this.instantiationService.invokeFunction((accessor) => {
+							modelService = accessor.get(IModelService);
+							languageService = accessor.get(ILanguageService);
+							clipboardService = accessor.get(IClipboardService);
+						});
+					} catch (error) {
+						console.warn('[MarkdownPart] Failed to get services for code reference:', error);
+					}
+
+					// Ensure we have all required services
+					if (!this.editorService || !this.workspaceContextService || !modelService || !languageService || !clipboardService) {
+						console.error('[MarkdownPart] Missing required services for code reference. Services:', {
+							editorService: !!this.editorService,
+							workspaceContextService: !!this.workspaceContextService,
+							modelService: !!modelService,
+							languageService: !!languageService,
+							clipboardService: !!clipboardService
+						});
+						// Return a placeholder div instead of falling through to regular code block
+						// This prevents the reference format from being treated as a regular code block
+						const placeholder = $('div');
+						placeholder.style.cssText = 'padding: 8px; color: var(--vscode-errorForeground);';
+						placeholder.textContent = `[Code Reference Error: Missing services for ${filePath}]`;
+						return placeholder;
+					}
+
+					const referencePart = new VybeChatReferencePart(
+						referenceContent,
+						this.instantiationService,
+						modelService,
+						languageService,
+						clipboardService,
+						this.editorService,
+						this.workspaceContextService
+					);
+
+					// Track for disposal and reuse
+					this.referenceParts.push(referencePart);
+					this.referenceMap.set(this.codeBlockIndex, referencePart);
+					this._register(referencePart);
+					this.codeBlockIndex++;
+
+					// Return the DOM node
+					return referencePart.domNode;
+				}
+
+				// Regular code block handling
 				// Check if we can reuse an existing code block
 				const existingBlock = this.codeBlockMap.get(this.codeBlockIndex);
 				if (existingBlock) {

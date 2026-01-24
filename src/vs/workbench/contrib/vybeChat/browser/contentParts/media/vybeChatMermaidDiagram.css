@@ -1,0 +1,106 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* VYBE Chat Mermaid Diagram Styling - Reuses Codeblock Design */
+
+/* Mermaid diagram container - reuses codeblock container classes */
+.vybe-chat-response-area .mermaid-diagram-container {
+	display: flex;
+	justify-content: center;
+	align-items: center;
+	width: 100%;
+	min-height: 100px;
+	padding: 12px;
+	overflow: auto;
+	background-color: var(--vscode-editor-background);
+}
+
+/* SVG styling */
+.vybe-chat-response-area .mermaid-diagram-container svg {
+	max-width: 100%;
+	height: auto;
+	display: block;
+}
+
+/* Ensure Mermaid diagrams respect theme */
+.vybe-chat-response-area .mermaid-diagram-container svg {
+	background-color: transparent;
+}
+
+/* Full-screen modal styles */
+.vybe-mermaid-modal {
+	position: fixed;
+	top: 0;
+	left: 0;
+	width: 100%;
+	height: 100%;
+	z-index: 2551;
+}
+
+.vybe-mermaid-modal .mermaid-diagram-pannable-viewport {
+	position: relative;
+	overflow: hidden;
+	width: 100%;
+	height: 100%;
+}
+
+.vybe-mermaid-modal .mermaid-diagram-pannable-wrapper {
+	cursor: grab;
+	transition: transform 0.1s ease-out;
+	position: absolute;
+	top: 0;
+	left: 0;
+	width: 100%;
+	height: 100%;
+	display: flex;
+	justify-content: center;
+	align-items: center;
+}
+
+.vybe-mermaid-modal .mermaid-diagram-pannable-wrapper:active {
+	cursor: grabbing;
+}
+
+.vybe-mermaid-modal .mermaid-diagram-content {
+	transform-origin: center center;
+	transition: transform 0.1s ease-out;
+}
+
+.vybe-mermaid-modal .mermaid-diagram-content svg {
+	max-width: none;
+	max-height: none;
+}
+
+/* Controls in modal */
+.vybe-mermaid-modal .mermaid-diagram-controls {
+	position: absolute;
+	bottom: 12px;
+	right: 12px;
+	display: flex;
+	gap: 6px;
+	z-index: 2;
+}
+
+.vybe-mermaid-modal .mermaid-diagram-controls .anysphere-icon-button {
+	width: 20px;
+	height: 20px;
+	background: transparent;
+	border: none;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	cursor: pointer;
+	border-radius: 4px;
+	transition: background-color 0.1s ease;
+}
+
+.vybe-mermaid-modal .mermaid-diagram-controls .anysphere-icon-button:hover {
+	background-color: rgba(128, 128, 128, 0.2);
+}
+
+/* Reuse codeblock styles - diagrams use same container classes */
+.vybe-chat-response-area .composer-code-block-container .mermaid-diagram-container {
+	/* Inherits from .composer-code-block-content styles */
+}

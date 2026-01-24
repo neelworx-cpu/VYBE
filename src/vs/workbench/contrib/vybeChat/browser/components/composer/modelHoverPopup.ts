@@ -105,38 +105,41 @@ const MODEL_INFO: Record<string, ModelInfo> = {
 		contextWindow: 272000,
 		reasoningVersion: 'low reasoning'
 	},
-	// Anthropic Opus 4.5 variants
-	'anthropic/claude-opus-4.5-high': {
-		popupTitle: 'Opus 4.5 (Thinking)',
+	// Anthropic Opus 4.5
+	'anthropic/claude-opus-4.5': {
+		popupTitle: 'Opus 4.5',
 		description: "Anthropics smartest model, great for difficult tasks",
+		contextWindow: 200000
+	},
+	'anthropic/claude-opus-4.5-thinking': {
+		popupTitle: 'Opus 4.5 (Thinking)',
+		description: "Anthropics smartest model with extended thinking",
 		contextWindow: 200000,
 		reasoningVersion: 'high effort'
 	},
-	'anthropic/claude-opus-4.5-medium': {
-		popupTitle: 'Opus 4.5 (Thinking)',
-		description: "Anthropics smartest model, great for difficult tasks",
-		contextWindow: 200000,
-		reasoningVersion: 'medium effort'
-	},
-	// Anthropic Sonnet 4.5 variants
-	'anthropic/claude-sonnet-4.5-high': {
-		popupTitle: 'Sonnet 4.5 (Thinking)',
+	// Anthropic Sonnet 4.5
+	'anthropic/claude-sonnet-4.5': {
+		popupTitle: 'Sonnet 4.5',
 		description: "Anthropics latest model, great for daily use",
+		contextWindow: 200000
+	},
+	'anthropic/claude-sonnet-4.5-thinking': {
+		popupTitle: 'Sonnet 4.5 (Thinking)',
+		description: "Anthropics latest model with extended thinking",
 		contextWindow: 200000,
 		reasoningVersion: 'high effort'
 	},
-	'anthropic/claude-sonnet-4.5-medium': {
-		popupTitle: 'Sonnet 4.5 (Thinking)',
-		description: "Anthropics latest model, great for daily use",
-		contextWindow: 200000,
-		reasoningVersion: 'medium effort'
-	},
-	// Anthropic Haiku 4.5 (no reasoning variants)
+	// Anthropic Haiku 4.5
 	'anthropic/claude-haiku-4.5': {
 		popupTitle: 'Haiku 4.5',
 		description: "Anthropics lightest model, cheaper and faster",
 		contextWindow: 200000
-		// No reasoning version for Haiku
+	},
+	'anthropic/claude-haiku-4.5-thinking': {
+		popupTitle: 'Haiku 4.5 (Thinking)',
+		description: "Anthropics lightest model with extended thinking",
+		contextWindow: 200000,
+		reasoningVersion: 'high effort'
 	},
 };
 
@@ -220,6 +223,20 @@ function formatContextWindow(tokens: number): string {
 	return `${tokens}`;
 }
 
+function getContextWindow(model: VybeModel, fallback: number): number {
+	const id = model.id.toLowerCase();
+	if (id.includes('gemini')) {
+		return 1000000;
+	}
+	if (id.includes('claude') || id.includes('anthropic')) {
+		return 200000;
+	}
+	if (id.includes('gpt-5') || id.includes('codex')) {
+		return 272000;
+	}
+	return fallback;
+}
+
 export class ModelHoverPopup extends Disposable {
 	private popupElement: HTMLElement | null = null;
 	private hideTimeout: number | null = null;
@@ -297,6 +314,8 @@ export class ModelHoverPopup extends Disposable {
 			contextWindow: 128000, // Default
 			reasoningVersion: undefined
 		};
+
+		const contextWindow = getContextWindow(model, modelInfo.contextWindow);
 
 		// Get reasoning version (from model info or extract from model)
 		const reasoningVersion = modelInfo.reasoningVersion !== undefined
@@ -387,7 +406,7 @@ export class ModelHoverPopup extends Disposable {
 			padding: 0px 6px;
 			opacity: 0.7;
 		`;
-		contextRow.textContent = `${formatContextWindow(modelInfo.contextWindow)} context window`;
+		contextRow.textContent = `${formatContextWindow(contextWindow)} context window`;
 
 		// Reasoning version (if available)
 		if (reasoningVersion) {

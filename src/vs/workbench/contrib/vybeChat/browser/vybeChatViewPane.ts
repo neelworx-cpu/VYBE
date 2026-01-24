@@ -28,19 +28,21 @@ import { MessageComposer } from './components/composer/messageComposer.js';
 import { ContextDropdown } from './components/composer/contextDropdown.js';
 import { UsageDropdown } from './components/composer/usageDropdown.js';
 import { MessagePage, MessagePageOptions } from './components/chatArea/messagePage.js';
-import type { IVybeChatTodoContent, IVybeChatTodoItemContent, IVybeChatToolContent } from './contentParts/vybeChatContentPart.js';
+import type { IVybeChatTodoContent, IVybeChatTodoItemContent, IVybeChatToolContent, IVybeChatTextEditContent } from './contentParts/vybeChatContentPart.js';
 import { IModelService } from '../../../../editor/common/services/model.js';
 import { ILanguageService } from '../../../../editor/common/languages/language.js';
 import { ISpeechService } from '../../../contrib/speech/common/speechService.js';
 import { IMarkdownRendererService } from '../../../../platform/markdown/browser/markdownRenderer.js';
 import { IClipboardService } from '../../../../platform/clipboard/common/clipboardService.js';
 import { IEditorService } from '../../../services/editor/common/editorService.js';
+import { ITextFileService } from '../../../services/textfile/common/textfiles.js';
 import { IChatRequestVariableEntry, IChatRequestFileEntry, IChatRequestStringVariableEntry } from '../../chat/common/chatVariableEntries.js';
 import { ThemeIcon } from '../../../../base/common/themables.js';
 import { Codicon } from '../../../../base/common/codicons.js';
 import { IFileService, FileKind } from '../../../../platform/files/common/files.js';
 import { INotificationService } from '../../../../platform/notification/common/notification.js';
 import { URI } from '../../../../base/common/uri.js';
+import { extUri } from '../../../../base/common/resources.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import { CodeDataTransfers, containsDragType, extractEditorsDropData } from '../../../../platform/dnd/browser/dnd.js';
 import { DataTransfers } from '../../../../base/browser/dnd.js';
@@ -107,6 +109,7 @@ export class VybeChatViewPane extends ViewPane {
 		@IMarkdownRendererService private readonly markdownRendererService: IMarkdownRendererService,
 		@IClipboardService private readonly _clipboardService: IClipboardService,
 		@IEditorService private readonly _editorService: IEditorService,
+		@ITextFileService private readonly _textFileService: ITextFileService,
 		@IFileService private readonly _fileService: IFileService,
 		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
 		@INotificationService private readonly _notificationService: INotificationService,
@@ -195,7 +198,6 @@ export class VybeChatViewPane extends ViewPane {
 			// If scrolling UP (negative delta), disable auto-scroll immediately
 			if (deltaY < 0) {
 				if (!this.autoScrollDisabled) {
-					console.log('[Scroll] User scrolled UP - auto-scroll disabled');
 					this.autoScrollDisabled = true;
 				}
 			}
@@ -219,7 +221,6 @@ export class VybeChatViewPane extends ViewPane {
 				// Only re-enable if truly at bottom
 				if (distanceFromBottom < 50) {
 					if (this.autoScrollDisabled) {
-						console.log('[Scroll] User at bottom - auto-scroll re-enabled');
 					}
 					this.autoScrollDisabled = false;
 				}
@@ -298,8 +299,6 @@ export class VybeChatViewPane extends ViewPane {
 			// Attach directly to human message (for testing)
 			const part = lastPage.attachTodoToHumanMessage(testTodoData);
 			if (part) {
-				console.log('✅ TODO component attached to human message!', part);
-				console.log('📋 This simulates what happens when incomplete todos persist to the next message page.');
 			} else {
 				console.error('❌ Failed to attach TODO component to human message');
 			}
@@ -366,7 +365,6 @@ export class VybeChatViewPane extends ViewPane {
 			// Add to message page
 			const part = lastPage.addContentPart(testTodoData);
 			if (part) {
-				console.log('✅ TODO component added successfully!', part);
 
 				// Also add a test todo item indicator
 				const testTodoItemData: IVybeChatTodoItemContent = {
@@ -379,7 +377,6 @@ export class VybeChatViewPane extends ViewPane {
 
 				const itemPart = lastPage.addContentPart(testTodoItemData);
 				if (itemPart) {
-					console.log('✅ TODO item indicator added successfully!', itemPart);
 				}
 			} else {
 				console.error('❌ Failed to add TODO component');
@@ -487,15 +484,6 @@ export class VybeChatViewPane extends ViewPane {
 		const contextPills = this.composer ? this.composer.getContextPillsData() : [];
 		const images = this.composer ? this.composer.getImagesData() : [];
 
-		// Debug: Log pills data when sending message
-		if (contextPills.length > 0) {
-			console.log('[VYBE Chat] Sending message with pills:', contextPills.map(p => ({
-				type: p.type,
-				name: p.name,
-				hasValue: !!p.value,
-				valueLength: p.value?.length || 0
-			})));
-		}
 
 		const options: MessagePageOptions = {
 			messageId,
@@ -626,6 +614,7 @@ export class VybeChatViewPane extends ViewPane {
 			const selectedLevel = this.composer?.getAgentLevel() || 'L2';
 			const modelState = this.composer?.getModelState();
 			const selectedModelId = modelState?.selectedModelId;
+			const reasoningLevel = modelState?.reasoningLevel || 'medium';
 
 			// Generate taskId first (we'll use it for event subscription)
 			const taskId = `task-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -658,7 +647,6 @@ export class VybeChatViewPane extends ViewPane {
 				}
 
 				hasReceivedEvents = true;
-				// Removed verbose logging
 
 				switch (event.type) {
 					case 'token': {
@@ -672,7 +660,8 @@ export class VybeChatViewPane extends ViewPane {
 							// Removed verbose logging
 							// Remove phase indicator when content starts arriving
 							messagePage.removePhaseIndicator();
-							messagePage.appendThinkingChunk(payload.thinking);
+							// Pass summaryIndex if available (structured summaries from OpenAI Responses API)
+							messagePage.appendThinkingChunk(payload.thinking, payload.summaryIndex);
 							if (options.onContentUpdate) {
 								options.onContentUpdate();
 							}
@@ -707,12 +696,299 @@ export class VybeChatViewPane extends ViewPane {
 
 							// Helper function to process the tool call
 							const processToolCall = () => {
+								// CRITICAL: Finalize current thinking block before tool calls
+								// This ensures new thinking after tools goes to a new block
+								messagePage.finalizeThinking();
+
 								// Finalize current markdown block before adding tool UI
 								// This ensures markdown before and after tools are in separate groups
 								messagePage.finalizeCurrentMarkdown();
 
 								// Remove phase indicator when tool call starts
 								messagePage.removePhaseIndicator();
+
+								// Helper function to detect language from file path
+								const detectLanguageFromPath = (filePath: string): string => {
+									if (!filePath) {
+										return 'plaintext';
+									}
+									try {
+										const uri = URI.file(filePath);
+										const languageId = this._languageService.guessLanguageIdByFilepathOrFirstLine(uri);
+										return languageId || 'plaintext';
+									} catch {
+										// Fallback: extract extension and map to common languages
+										const ext = filePath.split('.').pop()?.toLowerCase() || '';
+										const langMap: Record<string, string> = {
+											'ts': 'typescript',
+											'tsx': 'typescriptreact',
+											'js': 'javascript',
+											'jsx': 'javascriptreact',
+											'py': 'python',
+											'java': 'java',
+											'cpp': 'cpp',
+											'c': 'c',
+											'cs': 'csharp',
+											'go': 'go',
+											'rs': 'rust',
+											'php': 'php',
+											'rb': 'ruby',
+											'swift': 'swift',
+											'kt': 'kotlin',
+											'scala': 'scala',
+											'sh': 'shellscript',
+											'bash': 'shellscript',
+											'zsh': 'shellscript',
+											'json': 'json',
+											'xml': 'xml',
+											'html': 'html',
+											'css': 'css',
+											'scss': 'scss',
+											'less': 'less',
+											'md': 'markdown',
+											'yaml': 'yaml',
+											'yml': 'yaml',
+											'toml': 'toml',
+											'sql': 'sql',
+										};
+										return langMap[ext] || 'plaintext';
+									}
+								};
+
+								// Helper function to count lines in text
+								const countLines = (text: string): number => {
+									if (!text) {
+										return 0;
+									}
+									return text.split('\n').length;
+								};
+
+								// Helper function to extract file path from tool args
+								const extractFilePath = (args: Record<string, unknown>): string => {
+									// eslint-disable-next-line @typescript-eslint/no-explicit-any
+									const argsAny = args as any;
+									return argsAny?.file_path || argsAny?.path || argsAny?.target_file || '';
+								};
+
+								// Helper function to extract filename from path
+								const extractFileName = (filePath: string): string => {
+									if (!filePath) {
+										return 'file';
+									}
+									// Handle both / and \ separators
+									const cleanPath = filePath.replace(/^[/\\]+|[/\\]+$/g, '');
+									const pathParts = cleanPath.split(/[/\\]/);
+									return pathParts[pathParts.length - 1] || cleanPath || 'file';
+								};
+
+								// Handle file operation tools (edit_file, delete_file) → textEdit content part
+								// write_file tool removed - use edit_file for all file operations
+								if (toolName === 'edit_file' || toolName === 'delete_file') {
+									// eslint-disable-next-line @typescript-eslint/no-explicit-any
+									const toolArgsAny = toolArgs as any;
+									const filePath = extractFilePath(toolArgs);
+									const fileName = extractFileName(filePath);
+									const language = detectLanguageFromPath(filePath);
+
+									console.log(`[Tool Call Mapping] ${toolName}:`, {
+										filePath,
+										fileName,
+										hasContents: !!toolArgsAny?.contents,
+										hasContent: !!toolArgsAny?.content,
+										hasOldString: !!toolArgsAny?.old_string,
+										hasNewString: !!toolArgsAny?.new_string,
+										toolId
+									});
+
+									if (toolName === 'edit_file') {
+										// Unified edit_file: handles both new files and existing files
+										const oldString = toolArgsAny?.old_string || '';
+										const newString = toolArgsAny?.new_string || '';
+
+										// Resolve file path
+										let fileUri: URI;
+										try {
+											const workspaceFolders = this.workspaceContextService.getWorkspace().folders;
+											if (workspaceFolders.length > 0) {
+												const workspaceRoot = workspaceFolders[0].uri;
+												fileUri = extUri.resolvePath(workspaceRoot, filePath);
+											} else {
+												fileUri = URI.file(filePath);
+											}
+										} catch {
+											fileUri = URI.file(filePath);
+										}
+
+										// Check file existence and read content if needed
+										(async () => {
+											try {
+												const fileExists = this.workspaceContextService.isInsideWorkspace(fileUri)
+													? await this._fileService.exists(fileUri)
+													: false;
+
+												let originalContent = '';
+												let requiresConfirmation = false;
+												let isCreate = false;
+												let addedLines = 0;
+												let deletedLines = 0;
+
+												if (!fileExists) {
+													// New file: requires confirmation, will stream
+													originalContent = '';
+													requiresConfirmation = true;
+													isCreate = true;
+													addedLines = countLines(newString);
+													deletedLines = 0;
+												} else {
+													// Existing file: read content for proper diff
+													try {
+														const fileContent = await this._fileService.readFile(fileUri);
+														originalContent = fileContent.value.toString();
+
+														if (oldString.trim().length === 0) {
+															// Empty old_string = overwrite entire file
+															requiresConfirmation = false; // No HITL for overwrites
+															isCreate = false;
+															addedLines = countLines(newString);
+															deletedLines = countLines(originalContent);
+														} else {
+															// Search-and-replace: calculate diff based on old_string/new_string
+															requiresConfirmation = false; // No HITL by default
+															isCreate = false;
+															addedLines = countLines(newString);
+															deletedLines = countLines(oldString);
+															// Note: originalContent is full file, but diff will show old_string vs new_string
+														}
+													} catch (readError) {
+														console.warn('[Tool Call Mapping] Failed to read file content:', readError);
+														// Fallback: use old_string as originalContent
+														originalContent = oldString;
+														addedLines = countLines(newString);
+														deletedLines = countLines(oldString);
+													}
+												}
+
+												const textEditContent: IVybeChatTextEditContent = {
+													kind: 'textEdit',
+													fileName: fileName,
+													filePath: filePath,
+													originalContent: originalContent,
+													modifiedContent: newString,
+													streamingContent: newString, // Set streaming content for animation
+													language: language,
+													addedLines: addedLines,
+													deletedLines: deletedLines,
+													isApplied: false,
+													isLoading: !requiresConfirmation, // Start loading if not requiring confirmation (existing file edit)
+													isStreaming: !requiresConfirmation, // Start streaming if not requiring confirmation (existing file edit)
+													requiresConfirmation: requiresConfirmation,
+													approvalState: requiresConfirmation ? 'pending' : undefined,
+													toolCallId: toolId,
+													isCreate: isCreate,
+													isDelete: false
+												};
+
+												// Set callback to write file after streaming finalizes
+												if (toolId) {
+													if (requiresConfirmation) {
+														// New files: resume HITL approval
+														textEditContent.onFinalized = async () => {
+															if (toolId && this._agentService && this._agentService.resumeWithApproval) {
+																try {
+																	await this._agentService.resumeWithApproval(taskId, 'approve');
+																} catch (error) {
+																	console.error('[TextEdit] Failed to resume with approval:', error);
+																}
+															}
+														};
+													} else {
+														// Existing files: write file after streaming completes
+														const replaceAll = (toolArgsAny?.replace_all as boolean | undefined) ?? false;
+														textEditContent.onFinalized = async () => {
+															try {
+																// Read current file content
+																const currentContent = await this._fileService.readFile(fileUri);
+																const currentText = currentContent.value.toString();
+
+																let finalText: string;
+																if (oldString.trim().length === 0) {
+																	// Overwrite entire file
+																	finalText = newString;
+																} else {
+																	// Perform search-and-replace
+																	if (replaceAll) {
+																		finalText = currentText.split(oldString).join(newString);
+																	} else {
+																		finalText = currentText.replace(oldString, newString);
+																	}
+																}
+
+																// Write the file
+																await this._textFileService.write(fileUri, finalText);
+
+																// Open the file in editor to show the change
+																await this._editorService.openEditor({ resource: fileUri });
+															} catch (error) {
+																console.error('[TextEdit] Failed to write file after streaming:', error);
+																this._notificationService?.error(`Failed to apply changes to ${fileName}: ${error instanceof Error ? error.message : String(error)}`);
+															}
+														};
+													}
+												}
+
+												messagePage.addContentPart(textEditContent, toolId);
+											} catch (error) {
+												console.error('[Tool Call Mapping] Error processing edit_file:', error);
+												// Fallback: create content part with minimal info
+												const textEditContent: IVybeChatTextEditContent = {
+													kind: 'textEdit',
+													fileName: fileName,
+													filePath: filePath,
+													originalContent: oldString,
+													modifiedContent: newString,
+													streamingContent: newString, // Set streaming content for animation
+													language: language,
+													addedLines: countLines(newString),
+													deletedLines: countLines(oldString),
+													isApplied: false,
+													isLoading: true, // Start loading for streaming animation
+													isStreaming: true, // Start streaming for existing file edits
+													requiresConfirmation: false,
+													approvalState: undefined,
+													toolCallId: toolId,
+													isCreate: false,
+													isDelete: false
+												};
+												messagePage.addContentPart(textEditContent, toolId);
+											}
+										})();
+
+										return; // Don't process as tool part
+									} else if (toolName === 'delete_file') {
+										// File deletion
+										const textEditContent: IVybeChatTextEditContent = {
+											kind: 'textEdit',
+											fileName: fileName,
+											filePath: filePath,
+											originalContent: '', // Will be read if needed
+											modifiedContent: '', // Delete = empty
+											language: language,
+											addedLines: 0,
+											deletedLines: 0, // Will be calculated if we read the file
+											isApplied: false,
+											isLoading: false,
+											isStreaming: false,
+											requiresConfirmation: true, // Always requires HITL
+											approvalState: 'pending',
+											toolCallId: toolId,
+											isCreate: false,
+											isDelete: true
+										};
+
+										messagePage.addContentPart(textEditContent, toolId);
+										return; // Don't process as tool part
+									}
+								}
 
 								// Map tool name to unified tool type
 								let toolType: 'read' | 'list' | 'grep' | 'search' | 'search_web' | 'todos' | null = null;
@@ -870,7 +1146,6 @@ export class VybeChatViewPane extends ViewPane {
 						// Check if this toolId was mapped to an existing one (duplicate detection)
 						const mappedToolId = toolPartsByTarget.get(toolId);
 						if (mappedToolId && mappedToolId !== toolId) {
-							console.log(`[VYBE Chat] 🔄 Using mapped tool ID: ${toolId} -> ${mappedToolId}`);
 							toolId = mappedToolId;
 						}
 
@@ -882,7 +1157,6 @@ export class VybeChatViewPane extends ViewPane {
 								code: 'TOOL_ERROR',
 								message: errorMessage
 							};
-							console.log(`[VYBE Chat] ❌ Tool error detected: ${errorMessage}`);
 						}
 
 						// Parse results based on tool type (only if no error)
@@ -901,7 +1175,6 @@ export class VybeChatViewPane extends ViewPane {
 									type: entry.type === 'directory' ? 'directory' : 'file',
 									path: entry.name || entry.path || ''
 								}));
-								console.log(`[VYBE Chat] 📁 Got ${fileList?.length ?? 0} files from fileList payload`);
 							} else if (toolResult) {
 								// Fallback: try to parse from result string
 								try {
@@ -921,7 +1194,6 @@ export class VybeChatViewPane extends ViewPane {
 											type: entry.type === 'directory' ? 'directory' : 'file',
 											path: entry.name || entry.path || ''
 										}));
-										console.log(`[VYBE Chat] 📁 Parsed ${fileList.length} files from list_dir result`);
 									}
 								} catch (error) {
 									console.warn(`[VYBE Chat] ⚠️ Failed to parse list_dir result:`, error, `Result: ${typeof toolResult === 'string' ? toolResult.substring(0, 200) : toolResult}`);
@@ -937,7 +1209,6 @@ export class VybeChatViewPane extends ViewPane {
 							// Check if backend sent structured searchResults (preferred)
 							if (event.payload?.searchResults && Array.isArray(event.payload.searchResults)) {
 								parsedSearchResults = event.payload.searchResults;
-								console.log(`[VYBE Chat] 🔍 ✅ Using backend searchResults: ${parsedSearchResults.length} results`);
 							} else {
 								try {
 									// eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -950,7 +1221,6 @@ export class VybeChatViewPane extends ViewPane {
 
 									if (parsed && parsed.results && Array.isArray(parsed.results)) {
 										parsedSearchResults = parsed.results;
-										console.log(`[VYBE Chat] 🔍 ✅ Parsed search results from JSON: ${parsedSearchResults.length} results`);
 									}
 								} catch (error) {
 									console.warn(`[VYBE Chat] 🔍 ⚠️ Failed to parse codebase_search result:`, error);
@@ -968,10 +1238,8 @@ export class VybeChatViewPane extends ViewPane {
 										end: r.lineRange.end || r.lineRange.endLineNumber || r.lineRange.start || 1,
 									} : undefined,
 								}));
-								console.log(`[VYBE Chat] 🔍 ✅ Formatted ${searchResults.length} search results for UI`);
 							} else {
 								searchResults = [];
-								console.log(`[VYBE Chat] 🔍 ℹ️ No search results found`);
 							}
 						}
 
@@ -980,14 +1248,6 @@ export class VybeChatViewPane extends ViewPane {
 							// Initialize to empty array - will be populated if parsing succeeds
 							grepResults = [];
 
-							console.log(`[VYBE Chat] 🔍 Parsing grep result:`, {
-								hasPayloadGrepResults: !!event.payload?.grepResults,
-								payloadGrepResultsLength: event.payload?.grepResults?.length,
-								hasTotalMatches: event.payload?.totalMatches !== undefined,
-								hasTruncated: event.payload?.truncated !== undefined,
-								toolResultType: typeof toolResult,
-								toolResultPreview: typeof toolResult === 'string' ? toolResult.substring(0, 200) : (toolResult ? 'object' : 'null')
-							});
 
 							// Check if backend sent structured grepResults (preferred - ALWAYS use this if available)
 							if (event.payload?.grepResults && Array.isArray(event.payload.grepResults)) {
@@ -1002,11 +1262,9 @@ export class VybeChatViewPane extends ViewPane {
 
 								if (validResults.length > 0) {
 									grepResults = validResults;
-									console.log(`[VYBE Chat] 🔍 ✅ Using backend grepResults: ${validResults.length} files (validated ${validResults.length}/${event.payload.grepResults.length})`);
 								} else if (event.payload.grepResults.length === 0) {
 									// Empty array is valid (no matches found)
 									grepResults = [];
-									console.log(`[VYBE Chat] 🔍 ℹ️ Backend returned empty grepResults (0 matches)`);
 								} else {
 									// Invalid structure - log warning but try to use it anyway
 									console.warn(`[VYBE Chat] 🔍 ⚠️ Backend grepResults has invalid structure, attempting to use anyway`);
@@ -1043,8 +1301,6 @@ export class VybeChatViewPane extends ViewPane {
 										// Removed verbose logging
 									}
 								} catch (jsonError) {
-									console.log(`[VYBE Chat] 🔍 JSON parse failed:`, jsonError);
-									console.log(`[VYBE Chat] 🔍 Will try string format`);
 								}
 
 								if (parsed && parsed.matches && Array.isArray(parsed.matches)) {
@@ -1066,11 +1322,9 @@ export class VybeChatViewPane extends ViewPane {
 												matchCount: count
 											};
 										});
-										console.log(`[VYBE Chat] 🔍 ✅ Parsed ${grepResults.length} grep result files from JSON format`);
 									} else if (parsed.matches.length === 0) {
 										// Empty matches array - this is valid, not an error
 										grepResults = [];
-										console.log(`[VYBE Chat] 🔍 ℹ️ Grep returned 0 matches (empty matches array)`);
 									} else {
 										// Matches exist but no file paths found
 										grepResults = [];
@@ -1089,7 +1343,6 @@ export class VybeChatViewPane extends ViewPane {
 								} else {
 									// Fallback: Parse plain string format "file:line:content\nfile:line:content..."
 									// This is the format returned by fileService.grep() (not VS Code search service)
-									console.log(`[VYBE Chat] 🔍 Attempting to parse string format`);
 									try {
 										const lines = toolResult.split('\n').filter(line => line.trim());
 										const fileMap = new Map<string, number>();
@@ -1112,7 +1365,6 @@ export class VybeChatViewPane extends ViewPane {
 													matchCount: count
 												};
 											});
-											console.log(`[VYBE Chat] 🔍 ✅ Parsed ${grepResults.length} grep result files from string format:`, grepResults);
 										}
 									} catch (error) {
 										const errorMsg = error instanceof Error ? error.message : String(error);
@@ -1132,12 +1384,6 @@ export class VybeChatViewPane extends ViewPane {
 							} else if (toolResult && typeof toolResult === 'object') {
 								// Already an object, check for matches
 								const objResult = toolResult as any;
-								console.log(`[VYBE Chat] 🔍 Parsing object result:`, {
-									hasMatches: !!objResult.matches,
-									matchCount: objResult.matches?.length || 0,
-									totalMatches: objResult.totalMatches,
-									truncated: objResult.truncated
-								});
 
 								if (objResult.matches && Array.isArray(objResult.matches)) {
 									const fileMap = new Map<string, number>();
@@ -1157,10 +1403,8 @@ export class VybeChatViewPane extends ViewPane {
 												matchCount: count
 											};
 										});
-										console.log(`[VYBE Chat] 🔍 ✅ Parsed ${grepResults.length} grep result files from object format`);
 									} else if (objResult.matches.length === 0) {
 										grepResults = [];
-										console.log(`[VYBE Chat] 🔍 ℹ️ Grep returned 0 matches (empty matches array from object)`);
 									}
 
 									// Extract totalMatches and truncated from object result if not already set
@@ -1178,7 +1422,6 @@ export class VybeChatViewPane extends ViewPane {
 							// Ensure grepResults is always an array for grep tool calls
 							if (!grepResults) {
 								grepResults = [];
-								console.log(`[VYBE Chat] 🔍 ℹ️ No grep results parsed, setting empty array`);
 							}
 						}
 
@@ -1190,7 +1433,6 @@ export class VybeChatViewPane extends ViewPane {
 								// Try to extract markdown content from result
 								webSearchContent = (toolResult as any).content || (toolResult as any).markdown || JSON.stringify(toolResult, null, 2);
 							}
-							console.log(`[VYBE Chat] 🌐 Parsed web search content (${webSearchContent?.length || 0} chars)`);
 						}
 
 						// Parse todo items
@@ -1209,7 +1451,6 @@ export class VybeChatViewPane extends ViewPane {
 										text: t.text || t.content || '',
 										status: (t.status === 'in_progress' ? 'in-progress' : t.status) || 'pending'
 									}));
-									console.log(`[VYBE Chat] ✅ Parsed ${todoItems?.length || 0} todo items`);
 								}
 							} catch (error) {
 								console.warn(`[VYBE Chat] ⚠️ Failed to parse todos result:`, error);
@@ -1241,9 +1482,7 @@ export class VybeChatViewPane extends ViewPane {
 										updateData.truncated = event.payload.truncated;
 									}
 
-									console.log(`[VYBE Chat] 🔧 Passing ${updateData.grepResults.length} grep results to tool part (totalMatches: ${updateData.totalMatches || 'N/A'}, truncated: ${updateData.truncated || false})`);
 									if (updateData.grepResults.length > 0) {
-										console.log(`[VYBE Chat] 🔧 Sample grep results (first 5):`, updateData.grepResults.slice(0, 5).map((r: any) => `${r.file} (${r.matchCount})`).join(', '));
 									}
 								}
 								if (webSearchContent) {
@@ -1258,9 +1497,7 @@ export class VybeChatViewPane extends ViewPane {
 
 								const updated = messagePage.updateContentPartById(toolId, updateData);
 								if (!updated) {
-									// Debug: list all tool parts to see what IDs we have
-									const toolParts = messagePage.getContentPartsData().filter(d => d.kind === 'tool');
-									console.log(`[VYBE Chat] 🔧 Available tool parts:`, toolParts.map(t => (t as any).id));
+									// Tool part not found - will be created on next update
 								}
 								// Clean up creation time tracking
 								toolCreationTimes.delete(toolId);
@@ -1281,7 +1518,6 @@ export class VybeChatViewPane extends ViewPane {
 								if (elapsed < TOOL_MIN_DISPLAY_MS) {
 									// Delay the update to ensure "Reading" shows for minimum time
 									const delay = TOOL_MIN_DISPLAY_MS - elapsed;
-									console.log(`[VYBE Chat] 🔧 Delaying tool completion by ${delay}ms for visibility`);
 									setTimeout(doUpdate, delay);
 									break;
 								}
@@ -1295,7 +1531,6 @@ export class VybeChatViewPane extends ViewPane {
 
 					case 'agent.iteration': {
 						// New loop iteration starting - finalize current markdown to ensure separation
-						console.log('[VYBE Chat] New agent iteration - finalizing current markdown');
 						messagePage.finalizeCurrentMarkdown();
 						if (options.onContentUpdate) {
 							options.onContentUpdate();
@@ -1336,6 +1571,24 @@ export class VybeChatViewPane extends ViewPane {
 							if (options.onContentUpdate) {
 								options.onContentUpdate();
 							}
+						}
+						break;
+					}
+
+					case 'tool.error': {
+						// Handle tool execution errors - show user-friendly popup
+						const toolName = event.payload?.tool_name || 'Tool';
+						const errorMessage = event.payload?.error || 'Unknown error';
+						const errorCode = event.payload?.code || 'TOOL_ERROR';
+
+						// Show error popup above composer
+						messagePage.showError(
+							`${toolName} failed: ${errorMessage}`,
+							errorCode
+						);
+
+						if (options.onContentUpdate) {
+							options.onContentUpdate();
 						}
 						break;
 					}
@@ -1383,7 +1636,8 @@ export class VybeChatViewPane extends ViewPane {
 				mode: selectedMode,
 				agentLevel: selectedLevel,
 				taskId: taskId,
-				modelId: selectedModelId
+				modelId: selectedModelId,
+				reasoningLevel: reasoningLevel
 			});
 
 			// Wait for complete event instead of promise resolution
@@ -2063,6 +2317,10 @@ declare global {
 		__vybeTestSpacing?: () => void;
 		__vybeTestPlanDocument?: () => void;
 		__vybeTestQuestionnaire?: () => void;
+		__vybeTestCodeReference?: () => void;
+		__vybeTestHeaderComparison?: () => void;
+		__vybeTestDeleteConfirmation?: () => void;
+		__vybeTestToolCallMapping?: () => void;
 	}
 }
 
@@ -3748,7 +4006,8 @@ Add VS Code settings for:
 						modelState: {
 							isAutoEnabled: true,
 							isMaxModeEnabled: false,
-							selectedModelId: 'composer-1'
+							selectedModelId: '', // Empty when auto mode is enabled
+							reasoningLevel: 'medium'
 						}
 					});
 					pane.scrollToShowLatestContent();
@@ -3773,7 +4032,8 @@ Add VS Code settings for:
 							modelState: {
 								isAutoEnabled: true,
 								isMaxModeEnabled: false,
-								selectedModelId: 'composer-1'
+								selectedModelId: 'composer-1',
+								reasoningLevel: 'medium'
 							}
 						}
 					]);
@@ -3795,7 +4055,8 @@ Add VS Code settings for:
 							modelState: {
 								isAutoEnabled: true,
 								isMaxModeEnabled: false,
-								selectedModelId: 'composer-1'
+								selectedModelId: 'composer-1',
+								reasoningLevel: 'medium'
 							}
 						}
 					]);
@@ -3871,5 +4132,540 @@ Add VS Code settings for:
 		// Set questions to display
 		composer.setQuestionnaireQuestions(questions);
 		console.log('Questionnaire toolbar displayed with', questions.length, 'questions');
+	};
+
+	// Test function for code references
+	// Tests both direct creation and markdown parsing
+	(window as any).__vybeTestCodeReference = function () {
+		const allElements = document.querySelectorAll('*');
+		for (const el of allElements) {
+			if ((el as any).__vybePane) {
+				const pane = (el as any).__vybePane as VybeChatViewPane;
+				const lastPage = Array.from((pane as any).messagePages.values()).pop() as MessagePage | undefined;
+				if (!lastPage) {
+					console.warn('No message page found. Send a message first.');
+					return;
+				}
+
+				console.log('🧪 Testing code references...');
+
+				// Test 1: Direct creation (for testing the component itself)
+				console.log('Test 1: Direct reference creation');
+				lastPage.addContentPart({
+					kind: 'reference',
+					filePath: 'src/vs/workbench/contrib/vybeChat/browser/contentParts/vybeChatReferencePart.ts',
+					lineRange: { start: 1, end: 50 },
+					code: `/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+import { VybeChatContentPart, IVybeChatReferenceContent, IVybeChatContentPart } from './vybeChatContentPart.js';
+import { $, addDisposableListener } from '../../../../../base/browser/dom.js';
+import { IEditorService } from '../../../../services/editor/common/editorService.js';
+import { IWorkspaceContextService } from '../../../../../platform/workspace/common/workspace.js';
+import { URI } from '../../../../../base/common/uri.js';
+import * as path from '../../../../../base/common/path.js';
+import { getIconClasses } from '../../../../../editor/common/services/getIconClasses.js';
+import { FileKind } from '../../../../../platform/files/common/files.js';
+import { IModelService } from '../../../../../editor/common/services/model.js';
+import { ILanguageService } from '../../../../../editor/common/languages/language.js';
+import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
+import { ICodeEditor } from '../../../../../editor/browser/editorBrowser.js';
+import { CodeEditorWidget } from '../../../../../editor/browser/widget/codeEditor/codeEditorWidget.js';
+import { IClipboardService } from '../../../../../platform/clipboard/common/clipboardService.js';
+
+/**
+ * Code Reference Content Part - Displays existing code from the codebase with header and Monaco editor.
+ * Format: \`\`\`startLine:endLine:filepath\ncode content\n\`\`\`
+ *
+ * Structure matches code blocks exactly:
+ * - Header (exact copy of textEditContentPart header) with file icon, filename, line range
+ * - Monaco editor for code display
+ * - Copy button overlay
+ * - Clickable to open file at exact line range
+ */
+export class VybeChatReferencePart extends VybeChatContentPart {`,
+					language: 'typescript',
+					isStreaming: false
+				});
+
+				// Test 2: Test via markdown (simulates how AI will send it)
+				setTimeout(() => {
+					console.log('Test 2: Markdown parsing (simulating AI response)');
+					const testMarkdown = `Here's the code reference:
+
+\`\`\`4:77:src/vs/workbench/contrib/vybeChat/browser/contentParts/vybeChatContentPart.ts
+export interface IVybeChatReferenceContent {
+	kind: 'reference';
+	filePath: string;      // Full file path (absolute or relative to workspace)
+	lineRange: { start: number; end: number }; // Line range to reference
+	code: string;          // Code content from markdown (AI provides it)
+	language?: string;     // Optional language for syntax highlighting (detected from file extension)
+	isStreaming?: boolean; // Whether code is currently streaming
+}
+\`\`\`
+
+This shows how code references work.`;
+
+					// Add as markdown - the parser should detect the code reference format
+					lastPage.appendMarkdownChunk(testMarkdown);
+				}, 1000);
+
+				// Test 3: Another reference with different file
+				setTimeout(() => {
+					console.log('Test 3: Another reference');
+					lastPage.addContentPart({
+						kind: 'reference',
+						filePath: 'src/vs/workbench/contrib/vybeChat/browser/components/chatArea/messagePage.ts',
+						lineRange: { start: 1100, end: 1120 },
+						code: `		case 'reference':
+			return this.instantiationService.createInstance(
+				VybeChatReferencePart,
+				content as IVybeChatReferenceContent
+			);`,
+						language: 'typescript',
+						isStreaming: false
+					});
+				}, 2000);
+
+				// Scroll to show the new content
+				setTimeout(() => {
+					pane.scrollToShowLatestContent();
+					console.log('✅ Test code references added!');
+					console.log('📝 Instructions:');
+					console.log('   1. Check that headers show file icon, filename, and line range');
+					console.log('   2. Verify code is displayed in Monaco editor');
+					console.log('   3. Hover over code block to see copy button');
+					console.log('   4. Click header to open file at exact line range');
+					console.log('   5. Click copy button to copy code to clipboard');
+				}, 2500);
+
+				return;
+			}
+		}
+		console.warn('VYBE Chat pane not found. Make sure the chat is open.');
+	};
+
+	// Test function to compare headers: Reference, Text Edit, and Terminal
+	(window as any).__vybeTestHeaderComparison = function () {
+		const allElements = document.querySelectorAll('*');
+		for (const el of allElements) {
+			if ((el as any).__vybePane) {
+				const pane = (el as any).__vybePane as VybeChatViewPane;
+				const lastPage = Array.from((pane as any).messagePages.values()).pop() as MessagePage | undefined;
+				if (!lastPage) {
+					console.warn('No message page found. Send a message first.');
+					return;
+				}
+
+				console.log('🧪 Testing header comparison: Reference, Text Edit, and Terminal...');
+
+				// Test 1: Reference content part
+				console.log('Test 1: Reference content part');
+				lastPage.addContentPart({
+					kind: 'reference',
+					filePath: 'src/vs/workbench/contrib/vybeChat/browser/contentParts/vybeChatReferencePart.ts',
+					lineRange: { start: 149, end: 200 },
+					code: `	private createHeader(): HTMLElement {
+		// Match textEditContentPart exactly - no inline styles, let CSS handle everything
+		const header = $('.composer-code-block-header');
+
+		// File info (styling in CSS - match textEditContentPart)
+		const fileInfo = $('.composer-code-block-file-info');
+
+		// File icon container - match textEditContentPart exactly
+		const iconSpan = $('span.composer-primary-toolcall-icon');
+		const iconWrapper = $('.show-file-icons');
+		const iconContainer = $('div');
+		iconContainer.style.cssText = 'position: relative; height: 100%; width: 100%; display: flex; align-items: center; justify-content: center;';`,
+					language: 'typescript',
+					isStreaming: false
+				});
+
+				// Test 2: Text Edit content part
+				setTimeout(() => {
+					console.log('Test 2: Text Edit content part');
+					lastPage.addContentPart({
+						kind: 'textEdit',
+						fileName: 'vybeChatReferencePart.ts',
+						filePath: 'src/vs/workbench/contrib/vybeChat/browser/contentParts/vybeChatReferencePart.ts',
+						originalContent: `	private createHeader(): HTMLElement {
+		const header = $('.composer-code-block-header');
+		// ... old code ...
+	}`,
+						modifiedContent: `	private createHeader(): HTMLElement {
+		// Match textEditContentPart exactly - no inline styles, let CSS handle everything
+		const header = $('.composer-code-block-header');
+
+		// File info (styling in CSS - match textEditContentPart)
+		const fileInfo = $('.composer-code-block-file-info');
+
+		// File icon container - match textEditContentPart exactly
+		const iconSpan = $('span.composer-primary-toolcall-icon');
+		const iconWrapper = $('.show-file-icons');
+		const iconContainer = $('div');
+		iconContainer.style.cssText = 'position: relative; height: 100%; width: 100%; display: flex; align-items: center; justify-content: center;';
+	}`,
+						language: 'typescript',
+						addedLines: 8,
+						deletedLines: 2,
+						isApplied: false,
+						isLoading: false,
+						isStreaming: false
+					});
+				}, 500);
+
+				// Test 3: Terminal content part
+				setTimeout(() => {
+					console.log('Test 3: Terminal content part');
+					lastPage.addContentPart({
+						kind: 'terminal',
+						command: 'cat src/vs/workbench/contrib/vybeChat/browser/contentParts/vybeChatReferencePart.ts | head -20',
+						output: `/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+import { VybeChatContentPart, IVybeChatReferenceContent, IVybeChatContentPart } from './vybeChatContentPart.js';
+import { $, addDisposableListener } from '../../../../../base/browser/dom.js';
+import { IEditorService } from '../../../../services/editor/common/editorService.js';
+import { IWorkspaceContextService } from '../../../../../platform/workspace/common/workspace.js';
+import { URI } from '../../../../../base/common/uri.js';
+import * as path from '../../../../../base/common/path.js';
+import { getIconClasses } from '../../../../../editor/common/services/getIconClasses.js';
+import { FileKind } from '../../../../../platform/files/common/files.js';
+import { IModelService } from '../../../../../editor/common/services/model.js';
+import { ILanguageService } from '../../../../../editor/common/languages/language.js';`,
+						phase: 'completed',
+						status: 'success',
+						permission: 'Ask Every Time',
+						isStreaming: false
+					});
+				}, 1000);
+
+				// Scroll to show all content
+				setTimeout(() => {
+					pane.scrollToShowLatestContent();
+					console.log('✅ Header comparison test added!');
+					console.log('📝 Instructions:');
+					console.log('   1. Compare headers side by side');
+					console.log('   2. Check file icon alignment across all three');
+					console.log('   3. Verify filename and line range positioning');
+					console.log('   4. Check background colors and borders match');
+					console.log('   5. Inspect computed styles in DevTools');
+				}, 1500);
+
+				return;
+			}
+		}
+		console.warn('VYBE Chat pane not found. Make sure the chat is open.');
+	};
+
+	// Test function for delete file confirmation UI
+	(window as any).__vybeTestDeleteConfirmation = function () {
+		const allElements = document.querySelectorAll('*');
+		for (const el of allElements) {
+			if ((el as any).__vybePane) {
+				const pane = (el as any).__vybePane as VybeChatViewPane;
+				const lastPage = Array.from((pane as any).messagePages.values()).pop() as MessagePage | undefined;
+				if (!lastPage) {
+					console.warn('No message page found. Send a message first.');
+					return;
+				}
+
+				console.log('🧪 Testing delete file confirmation UI...');
+
+				// Test 1: Delete file confirmation (pending approval state)
+				lastPage.addContentPart({
+					kind: 'textEdit',
+					fileName: 'test-file-to-delete.ts',
+					filePath: 'src/test-file-to-delete.ts',
+					originalContent: `export function test() {
+	return 'this file will be deleted';
+}`,
+					modifiedContent: '', // Empty for delete
+					language: 'typescript',
+					addedLines: 0,
+					deletedLines: 3,
+					isApplied: false,
+					isLoading: false,
+					isStreaming: false,
+					requiresConfirmation: true,  // NEW: Triggers confirmation UI
+					approvalState: 'pending',     // NEW: Shows Accept/Reject buttons
+					toolCallId: `test-delete-${Date.now()}`
+				});
+
+				// Test 2: Create file confirmation (pending approval state)
+				lastPage.addContentPart({
+					kind: 'textEdit',
+					fileName: 'test-new-file.ts',
+					filePath: 'src/test-new-file.ts',
+					originalContent: '', // Empty for new file
+					modifiedContent: `export function newFunction() {
+	return 'this is a new file';
+	return 'with multiple lines';
+	return 'to test streaming';
+	return 'and expand bar';
+	return 'when content is long';
+	return 'enough to require';
+	return 'expansion capability';
+	return 'line 8';
+	return 'line 9';
+	return 'line 10';
+	return 'line 11';
+	return 'line 12';
+	return 'line 13';
+	return 'line 14';
+	return 'line 15';
+	return 'line 16';
+	return 'line 17';
+	return 'line 18';
+	return 'line 19';
+	return 'line 20';
+	return 'line 21';
+	return 'line 22';
+	return 'line 23';
+	return 'line 24';
+	return 'line 25';
+	return 'line 26';
+	return 'line 27';
+	return 'line 28';
+	return 'line 29';
+	return 'line 30';
+	return 'line 31';
+	return 'line 32';
+	return 'line 33';
+	return 'line 34';
+	return 'line 35';
+	return 'line 36';
+	return 'line 37';
+	return 'line 38';
+	return 'line 39';
+	return 'line 40';
+	return 'line 41';
+	return 'line 42';
+	return 'line 43';
+	return 'line 44';
+	return 'line 45';
+	return 'line 46';
+	return 'line 47';
+	return 'line 48';
+	return 'line 49';
+	return 'line 50';
+	return 'line 51';
+	return 'line 52';
+	return 'line 53';
+	return 'line 54';
+	return 'line 55';
+	return 'line 56';
+	return 'line 57';
+	return 'line 58';
+	return 'line 59';
+	return 'line 60';
+	return 'line 61';
+	return 'line 62';
+	return 'line 63';
+	return 'line 64';
+	return 'line 65';
+	return 'line 66';
+	return 'line 67';
+	return 'line 68';
+	return 'line 69';
+	return 'line 70';
+	return 'line 71';
+	return 'line 72';
+	return 'line 73';
+	return 'line 74';
+	return 'line 75';
+	return 'line 76';
+	return 'line 77';
+	return 'line 78';
+	return 'line 79';
+	return 'line 80';
+	return 'line 81';
+	return 'line 82';
+	return 'line 83';
+	return 'line 84';
+	return 'line 85';
+	return 'line 86';
+	return 'line 87';
+	return 'line 88';
+	return 'line 89';
+	return 'line 90';
+	return 'line 91';
+	return 'line 92';
+	return 'line 93';
+	return 'line 94';
+	return 'line 95';
+	return 'line 96';
+	return 'line 97';
+	return 'line 98';
+	return 'line 99';
+	return 'line 100';
+}`,
+					language: 'typescript',
+					addedLines: 100,
+					deletedLines: 0,
+					isApplied: false,
+					isLoading: false,
+					isStreaming: false,
+					requiresConfirmation: true,  // Triggers confirmation UI
+					approvalState: 'pending',     // Shows Accept/Reject buttons
+					toolCallId: `test-create-${Date.now()}`
+				});
+
+				// Test 3: Regular text edit part (for comparison)
+				lastPage.addContentPart({
+					kind: 'textEdit',
+					fileName: 'test-file-edit.ts',
+					filePath: 'src/test-file-edit.ts',
+					originalContent: `export function old() {
+	return 'old code';
+}`,
+					modifiedContent: `export function new() {
+	return 'new code';
+	return 'added line';
+}`,
+					language: 'typescript',
+					addedLines: 3,
+					deletedLines: 2,
+					isApplied: false,
+					isLoading: false,
+					isStreaming: false,
+					// No requiresConfirmation - normal text edit
+				});
+
+				// Scroll to show
+				setTimeout(() => {
+					pane.scrollToShowLatestContent();
+					console.log('✅ Test parts added!');
+					console.log('📝 What to check:');
+					console.log('   Delete confirmation (Test 1):');
+					console.log('   1. Header should be double height (56px)');
+					console.log('   2. First row: File icon + filename');
+					console.log('   3. Second row: "Delete" text (left) + Accept/Reject buttons (right)');
+					console.log('   4. Content area should be hidden');
+					console.log('   5. Click Accept → red close icon appears, header normal');
+					console.log('   6. Click Reject → red circle-slash icon appears, header normal');
+					console.log('   Create file confirmation (Test 2):');
+					console.log('   1. Header should be double height (56px)');
+					console.log('   2. First row: File icon + filename');
+					console.log('   3. Second row: "Create file" text (left) + Accept/Reject buttons (right)');
+					console.log('   4. Content area should be hidden');
+					console.log('   5. Click Accept → content area appears, code streams');
+					console.log('   6. After streaming → stats (+8) appear, expand bar if needed');
+					console.log('   7. Click Reject → no icon, just header normal');
+					console.log('   Regular text edit (Test 3):');
+					console.log('   1. Normal single-row header');
+					console.log('   2. Content area visible with diff');
+					console.log('   3. Stats show +3 -2');
+				}, 500);
+
+				return;
+			}
+		}
+		console.warn('VYBE Chat pane not found. Make sure the chat is open.');
+	};
+
+	(window as any).__vybeTestToolCallMapping = function () {
+		const allElements = document.querySelectorAll('*');
+		for (const el of allElements) {
+			if ((el as any).__vybePane) {
+				const pane = (el as any).__vybePane as VybeChatViewPane;
+				const lastPage = Array.from((pane as any).messagePages.values()).pop() as MessagePage | undefined;
+				if (!lastPage) {
+					console.warn('No message page found. Send a message first.');
+					return;
+				}
+
+				console.log('🧪 Testing tool call mapping (edit_file, delete_file)...');
+
+				// Test 1: edit_file (new file) - should show confirmation UI
+				console.log('📝 Test 1: edit_file (new file)');
+				lastPage.addContentPart({
+					kind: 'textEdit',
+					fileName: 'test-new-file.ts',
+					filePath: 'src/test-new-file.ts',
+					originalContent: '',
+					modifiedContent: `export function newFunction() {
+	return 'this is a new file';
+	return 'created via edit_file';
+	return 'should show confirmation UI';
+	return 'with Accept/Reject buttons';
+}`,
+					language: 'typescript',
+					addedLines: 5,
+					deletedLines: 0,
+					isApplied: false,
+					isLoading: false,
+					isStreaming: false,
+					requiresConfirmation: true,
+					approvalState: 'pending',
+					toolCallId: `test-write-${Date.now()}`,
+					isCreate: true,
+					isDelete: false
+				});
+
+				// Test 2: edit_file (existing file) - should show diff view directly (no confirmation)
+				console.log('✏️ Test 2: edit_file (existing file)');
+				lastPage.addContentPart({
+					kind: 'textEdit',
+					fileName: 'existing-file.ts',
+					filePath: 'src/existing-file.ts',
+					originalContent: `export function oldFunction() {
+	return 'old code';
+}`,
+					modifiedContent: `export function newFunction() {
+	return 'new code';
+	return 'updated via edit_file';
+}`,
+					language: 'typescript',
+					addedLines: 3,
+					deletedLines: 2,
+					isApplied: false,
+					isLoading: false,
+					isStreaming: false,
+					requiresConfirmation: false, // No HITL by default
+					approvalState: undefined,
+					toolCallId: `test-edit-${Date.now()}`,
+					isCreate: false,
+					isDelete: false
+				});
+
+				// Test 3: delete_file - should show confirmation UI
+				console.log('🗑️ Test 3: delete_file');
+				lastPage.addContentPart({
+					kind: 'textEdit',
+					fileName: 'file-to-delete.ts',
+					filePath: 'src/file-to-delete.ts',
+					originalContent: '',
+					modifiedContent: '',
+					language: 'typescript',
+					addedLines: 0,
+					deletedLines: 0,
+					isApplied: false,
+					isLoading: false,
+					isStreaming: false,
+					requiresConfirmation: true,
+					approvalState: 'pending',
+					toolCallId: `test-delete-${Date.now()}`,
+					isCreate: false,
+					isDelete: true
+				});
+
+				pane.scrollToShowLatestContent();
+
+				console.log('✅ Test tool call mapping added!');
+				console.log('📝 Instructions:');
+				console.log('    1. Check that edit_file (new file) shows confirmation UI (Accept/Reject buttons)');
+				console.log('    2. Check that edit_file (existing file) shows diff view directly (no confirmation UI)');
+				console.log('    3. Check that delete_file shows confirmation UI (Accept/Reject buttons)');
+				console.log('    4. Click Accept on edit_file (new file) to see streaming');
+				console.log('    5. Click Accept on delete_file to see delete status icon');
+				return;
+			}
+		}
+		console.warn('No VYBE chat pane found. Open a chat first.');
 	};
 }

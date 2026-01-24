@@ -20,24 +20,138 @@
 .vybe-chat-response-area .composer-code-block-container {
 	width: 100%;
 	transition: border-color 0.1s ease-in-out;
-	border: 1px solid var(--vscode-panel-border);
-	border-radius: 6px;
+	border-radius: 8px; /* Match computed: 8px */
 	overflow-y: hidden; /* Prevent vertical scroll/movement */
 	overflow-x: hidden; /* Hide horizontal on container (editor has it) */
-	background-color: #1a1d1f; /* VYBE Dark */
 	position: relative;
+	display: flex;
+	flex-direction: column;
+	contain: paint; /* Match computed */
+	/* Use secondary panel background color */
+	background-color: var(--vscode-panel-background);
+	border: 1px solid var(--vscode-panel-border);
 }
 
-/* VYBE Light theme override */
-.vs .vybe-chat-response-area .composer-code-block-container {
-	background-color: #f2f4f6; /* VYBE Light */
+/* Code Block Header - Matches text edit header structure */
+.vybe-chat-response-area .composer-code-block-container .composer-code-block-header {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	padding: 0 8px; /* Left 8px, Right 8px */
+	height: 28px; /* Match computed */
+	box-sizing: border-box;
+	cursor: pointer;
+	user-select: none;
+	column-gap: 6px;
+	row-gap: 6px;
+	/* Match composer input box background: #212427 (dark) or #eceff2 (light) */
+	background-color: #212427; /* VYBE Dark - matches composer input box */
+	/* Match composer input box border: #383838 (dark) or #d9d9d9 (light) */
+	border-bottom: 1px solid #383838; /* VYBE Dark - matches composer input box border */
+	position: sticky;
+	top: 0;
+	z-index: 2;
+	transition: background-color 0.1s ease-in-out;
+}
+
+/* Header - VYBE Light theme override */
+.vs .vybe-chat-response-area .composer-code-block-container .composer-code-block-header {
+	background-color: #eceff2; /* VYBE Light - matches composer input box */
+	border-bottom: 1px solid #d9d9d9; /* VYBE Light - matches composer input box border */
+}
+
+/* File info section - matches text edit */
+.vybe-chat-response-area .composer-code-block-container .composer-code-block-file-info {
+	display: flex;
+	align-items: center;
+	column-gap: 6px;
+	row-gap: 6px;
+	flex: 1 1 0%;
+	flex-shrink: 1;
+	min-width: 0;
+	overflow: auto hidden;
+	box-sizing: border-box;
+	height: 16px; /* Match text edit exactly */
+	scrollbar-width: none;
+}
+
+/* File icon - keep vertical center, match text edit exactly */
+.vybe-chat-response-area .composer-code-block-container .composer-primary-toolcall-icon {
+	flex-shrink: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 16px;
+	height: 16px;
+	margin: 0;
+	padding: 0;
+	margin-left: -2px; /* Shift icon 2px to the left - match text edit */
+}
+
+.vybe-chat-response-area .composer-code-block-container .show-file-icons {
+	display: block;
+	height: 18px;
+	width: 16px;
+}
+
+/* Monaco icon label - match Cursor exactly */
+.vybe-chat-response-area .composer-code-block-container .monaco-icon-label.file-icon {
+	height: 100%; /* Keep icon vertically aligned */
+	user-select: text; /* Match Cursor */
+	overflow-wrap: normal; /* Remove break-word - match Cursor */
+}
+
+/* Monaco icon label ::before pseudo-element - match Cursor exactly */
+.vybe-chat-response-area .composer-code-block-container .monaco-icon-label.file-icon::before {
+	display: flex; /* Match Cursor - was block */
+	align-items: center; /* Match Cursor */
+	justify-content: center; /* Match Cursor */
+	height: 18px; /* Match Cursor - was 22px */
+	line-height: 19.5px; /* Match Cursor - was 29.25px */
+	padding-right: 0px; /* Match Cursor - was 6px */
+	user-select: text; /* Match Cursor - was none */
+}
+
+/* Filename wrapper - RTL direction for ellipsis (matches text edit exactly) */
+.vybe-chat-response-area .composer-code-block-container .composer-code-block-filename {
+	direction: rtl;
+	display: flex;
+	align-items: center; /* Vertically center the text - match text edit */
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	color: var(--vscode-foreground);
+	height: 16px; /* Match file info height - match text edit */
+}
+
+/* Filename inner span - LTR with proper size (matches text edit exactly) */
+.vybe-chat-response-area .composer-code-block-container .composer-code-block-filename > span {
+	direction: ltr;
+	unicode-bidi: embed;
+	display: inline;
+	font-size: 12px;
+	line-height: 14.4px;
+}
+
+/* Line range (unique to codeblocks) */
+.vybe-chat-response-area .composer-code-block-container .composer-code-block-line-range {
+	display: block; /* Match computed */
+	white-space: nowrap;
+	color: var(--cursor-text-tertiary);
+	font-size: 13px; /* Match computed */
+	line-height: 19.5px; /* Match computed */
+	margin-left: 8px; /* Match computed */
+	cursor: pointer;
 }
 
 /* Code content wrapper - SCOPED */
 .vybe-chat-response-area .composer-code-block-container .composer-code-block-content {
 	display: block;
 	position: relative;
-	overflow: hidden; /* Prevent any vertical movement */
+	overflow: auto hidden; /* Match computed */
+	background-color: var(--vscode-panel-background);
+	box-sizing: border-box;
+	padding: 0 6px; /* Match computed: left 6px, right 6px */
 }
 
 /* Scrollable container for Monaco editor - SCOPED */
@@ -45,12 +159,7 @@
 	position: relative;
 	overflow-y: hidden; /* Prevent vertical scroll */
 	overflow-x: visible; /* Allow horizontal scroll */
-	background-color: #1a1d1f; /* VYBE Dark */
-}
-
-/* VYBE Light theme override */
-.vs .vybe-chat-response-area .composer-code-block-container .scrollable-div-container {
-	background-color: #f2f4f6; /* VYBE Light */
+	background-color: var(--vscode-panel-background);
 }
 
 /* Show scrollbars only on hover - SCOPED */
@@ -65,37 +174,25 @@
 
 /* Monaco editor overrides for code blocks - IMPORTANT: Use !important to override Monaco defaults */
 .vybe-chat-response-area .composer-code-block-container .monaco-editor {
-	background-color: #1a1d1f !important; /* VYBE Dark */
+	background-color: var(--vscode-panel-background) !important;
 	overflow-y: hidden !important; /* Prevent ANY vertical scroll */
-}
-
-.vs .vybe-chat-response-area .composer-code-block-container .monaco-editor {
-	background-color: #f2f4f6 !important; /* VYBE Light */
-	overflow-y: hidden !important; /* Prevent ANY vertical scroll */
+	overflow-x: visible !important; /* Allow horizontal scroll */
 }
 
 .vybe-chat-response-area .composer-code-block-container .monaco-editor .margin {
-	background-color: #1a1d1f !important; /* VYBE Dark */
-}
-
-.vs .vybe-chat-response-area .composer-code-block-container .monaco-editor .margin {
-	background-color: #f2f4f6 !important; /* VYBE Light */
+	background-color: var(--vscode-panel-background) !important;
 }
 
 .vybe-chat-response-area .composer-code-block-container .monaco-editor-background {
-	background-color: #1a1d1f !important; /* VYBE Dark */
-}
-
-.vs .vybe-chat-response-area .composer-code-block-container .monaco-editor-background {
-	background-color: #f2f4f6 !important; /* VYBE Light */
+	background-color: var(--vscode-panel-background) !important;
 }
 
 .vybe-chat-response-area .composer-code-block-container .lines-content {
-	background-color: #1a1d1f !important; /* VYBE Dark */
+	background-color: var(--vscode-panel-background) !important;
 }
 
 .vs .vybe-chat-response-area .composer-code-block-container .lines-content {
-	background-color: #f2f4f6 !important; /* VYBE Light */
+	background-color: var(--vscode-panel-background) !important;
 }
 
 /* Additional layer overrides to catch all Monaco background layers */
@@ -120,53 +217,73 @@
 	padding-left: 0;
 }
 
-/* Copy button overlay (top-right, vertically centered for single-line blocks) */
+/* Copy button overlay (top-right, matches computed styles) */
+/* Positioned relative to content area (or container if no header) */
 .vybe-chat-response-area .composer-codeblock-copy-overlay {
 	position: absolute;
-	top: 3px;
-	right: 3px;
-	z-index: 10;
+	top: 6px; /* Match computed - relative to content area */
+	right: 6px; /* Match computed */
+	z-index: 10; /* Match computed */
+	align-items: center;
+	background: linear-gradient(to left, var(--vscode-panel-background) 80%, transparent 100%);
+	display: none; /* Hidden by default, shown on hover */
 	pointer-events: none;
 }
+
+/* Show copy overlay on codeblock hover - works on entire container */
+.vybe-chat-response-area .composer-code-block-container:hover .composer-codeblock-copy-overlay {
+	display: flex;
+	pointer-events: auto;
+}
+
+/* Also show on hover of content area */
+.vybe-chat-response-area .composer-code-block-container .composer-code-block-content:hover ~ .composer-codeblock-copy-overlay,
+.vybe-chat-response-area .composer-code-block-container .composer-code-block-content:hover .composer-codeblock-copy-overlay {
+	display: flex;
+	pointer-events: auto;
+}
+
+/* If header exists, position copy overlay relative to content area */
+.vybe-chat-response-area .composer-code-block-container .composer-code-block-content {
+	position: relative; /* Ensure copy overlay positions correctly */
+}
+
+/* Copy overlay uses panel background (no theme override needed - CSS variable handles it) */
 
 .vybe-chat-response-area .composer-codeblock-copy-overlay > div {
 	pointer-events: auto;
 }
 
-/* Icon button styling - SCOPED to code blocks only */
-.vybe-chat-response-area .composer-codeblock-copy-overlay .anysphere-icon-button {
-	height: 20px;
-	width: 20px;
-	background: transparent;
+/* VYBE Icon button styling - SCOPED to code blocks only */
+.vybe-chat-response-area .composer-codeblock-copy-overlay .vybe-icon-button {
+	height: 20px; /* Match computed */
+	width: 20px; /* Match computed */
+	background-color: transparent; /* Match computed */
 	border: none;
 	color: var(--vscode-foreground);
 	display: flex;
 	align-items: center;
 	justify-content: center;
 	cursor: pointer;
-	opacity: 0.7;
+	opacity: 0.5; /* Match computed */
 	transition: opacity 0.1s ease, background-color 0.1s ease;
 	border-radius: 4px;
-	padding: 2px;
+	padding: 0;
 }
 
-.vybe-chat-response-area .composer-codeblock-copy-overlay .anysphere-icon-button:hover {
-	opacity: 1;
+.vybe-chat-response-area .composer-codeblock-copy-overlay .vybe-icon-button:hover {
+	opacity: 1; /* Match computed hover behavior */
 	background-color: rgba(128, 128, 128, 0.15);
 }
 
-.vybe-chat-response-area .composer-codeblock-copy-overlay .anysphere-icon-button:active {
+.vybe-chat-response-area .composer-codeblock-copy-overlay .vybe-icon-button:active {
 	opacity: 0.8;
 	transform: scale(0.95);
 }
 
-/* Copy icon */
-.vybe-chat-response-area .composer-codeblock-copy-overlay .anysphere-icon-button .codicon {
-	font-size: 12px;
-}
-
-/* Copy button always visible */
-.vybe-chat-response-area .composer-codeblock-copy-overlay > div > div > div {
-	opacity: 1 !important;
-	pointer-events: auto !important;
+/* Copy icon - use codicon-copy */
+.vybe-chat-response-area .composer-codeblock-copy-overlay .vybe-icon-button .codicon {
+	font-size: 12px; /* Match computed */
+	font-family: codicon; /* Match computed */
+	line-height: 12px; /* Match computed */
 }

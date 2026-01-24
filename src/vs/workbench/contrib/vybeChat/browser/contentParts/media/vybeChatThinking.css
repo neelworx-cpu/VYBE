@@ -49,15 +49,12 @@
 	overflow-anchor: none;
 	row-gap: 2px;
 	user-select: none;
-	background-color: rgba(128, 128, 128, 0.1); /* Subtle background */
-	border-radius: 6px;
-	padding: 6px 10px;
 	margin: 0; /* No extra margin */
 }
 
-/* Thinking part container - minimal spacing */
+/* Thinking part container - no extra spacing */
 .vybe-chat-thinking-part {
-	margin-bottom: 6px; /* Small gap before next element to match reference */
+	margin-bottom: 0;
 }
 
 /* ============================================
@@ -135,11 +132,12 @@
 	line-height: 12px;
 	opacity: 0.55 !important;
 	text-align: center;
-	transform-origin: 50% 50%; /* Rotate around center */
+	transform-origin: center center; /* Rotate around center - fixed to prevent rotation outside row */
 	transition: transform 0.15s ease-in-out, opacity 0.2s ease-in-out;
 	width: 12px;
 	margin-left: 4px;
 	vertical-align: middle;
+	position: relative; /* Keep chevron in place during rotation */
 	-webkit-font-smoothing: antialiased;
 	-moz-osx-font-smoothing: grayscale;
 }
@@ -254,6 +252,29 @@
 	white-space: pre-wrap;
 	word-break: break-word;
 }
+
+/* 3.11.1 Title Spans - Enhanced bold styling for reasoning titles */
+/* CRITICAL: Parent has opacity: 0.6, so we need opacity: 1 to make titles stand out */
+.think-content-scrollable span.thinking-title,
+.markdown-section span.thinking-title,
+span.thinking-title {
+	font-weight: 700 !important; /* Bold for prominence */
+	font-size: 13px !important; /* Same as content but bold for differentiation */
+	color: var(--vscode-foreground) !important; /* Ensure color is set */
+	opacity: 1 !important; /* Full opacity to override parent's 0.6 opacity */
+	display: block !important;
+	width: 100% !important;
+	margin-bottom: 4px !important; /* Space after title before content */
+}
+
+/* First title has no top margin */
+.think-content-scrollable span.thinking-title:first-of-type,
+.markdown-section span.thinking-title:first-of-type,
+span.thinking-title:first-of-type {
+	margin-top: 0 !important;
+}
+
+/* Spacing between title+summary blocks is handled by inline styles in TypeScript */
 
 /* Remove extra spacing between paragraphs */
 .think-content p {

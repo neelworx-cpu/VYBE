@@ -49,10 +49,17 @@
 	opacity: 1 !important;
 }
 
-/* Top Header (with code block background) */
+/* Top Header (with code block background) - match reference and text edit */
 .composer-tool-call-top-header {
-	background: var(--vscode-titleBar-activeBackground) !important;
+	background: #212427 !important; /* VYBE Dark - matches composer input box */
 	border-radius: 7px 7px 0 0;
+	border-bottom: 1px solid #383838 !important; /* VYBE Dark - matches composer input box border */
+}
+
+/* Top Header - VYBE Light theme override */
+.vs .composer-tool-call-top-header {
+	background: #eceff2 !important; /* VYBE Light - matches composer input box */
+	border-bottom: 1px solid #d9d9d9 !important; /* VYBE Light - matches composer input box border */
 }
 
 /* Command Header (panel background) */
@@ -60,9 +67,14 @@
 	background: var(--vscode-editor-background) !important;
 }
 
-/* Control Row */
+/* Control Row - match header background */
 .composer-tool-call-control-row {
-	background: var(--vscode-editor-background) !important;
+	background: #212427 !important; /* VYBE Dark - matches header */
+}
+
+/* Control Row - VYBE Light theme override */
+.vs .composer-tool-call-control-row {
+	background: #eceff2 !important; /* VYBE Light - matches header */
 }
 
 /* Command Prefix */

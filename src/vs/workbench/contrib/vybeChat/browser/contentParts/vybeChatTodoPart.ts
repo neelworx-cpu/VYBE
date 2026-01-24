@@ -86,9 +86,131 @@ export class VybeChatTodoPart extends VybeChatContentPart {
 		const attachedBg = isDark ? '#212427' : '#eceff2';
 		const attachedBorder = isDark ? '#383838' : '#d9d9d9';
 
-		// Main container - use composer background color (matches theme)
-		// When attached to human message, overlap by border radius to seamlessly connect borders and background
-		// The container overlaps the input box by 8px, covering the bottom rounded corners
+		// Constants for Cursor structure matching
+		const COLLAPSED_HEIGHT = 31.5; // Height when collapsed (matches Cursor)
+		const EXPANDED_MAX_HEIGHT = 700; // Max height when expanded (matches Cursor)
+		const EMPTY_LINE_HEIGHT = 73; // Spacer height (matches input height)
+
+		// When attached to human message, use Cursor's HTML structure
+		if (this.isAttachedToHuman) {
+			// Root: .human-execution-message-bottom (matches Cursor structure)
+			const humanMessageBottom = $('div', {
+				class: 'human-execution-message-bottom',
+				style: `
+					margin-top: -${EMPTY_LINE_HEIGHT}px;
+					position: relative;
+				`
+			});
+
+			// Main container: .todo-summary-sticky-container (matches Cursor structure)
+			const stickyContainer = $('div', {
+				class: 'todo-summary-sticky-container',
+				style: `
+					overflow: hidden;
+					box-sizing: border-box;
+					opacity: 1;
+					background-color: ${attachedBg};
+					border: 1px solid ${attachedBorder};
+					border-radius: 8px;
+					${this.isExpanded ? `max-height: ${EXPANDED_MAX_HEIGHT}px;` : `height: ${COLLAPSED_HEIGHT}px;`}
+				`
+			});
+
+			// Spacer: .todo-summary-empty-line (matches Cursor structure)
+			const emptyLine = $('div', {
+				class: 'todo-summary-empty-line',
+				style: `
+					opacity: 0;
+					height: ${EMPTY_LINE_HEIGHT}px;
+				`
+			});
+
+			// Transition wrapper for height animation (matches Cursor structure)
+			const transitionWrapper = $('div', {
+				style: `
+					transition: height 0.25s ease-in-out, max-height 0.25s ease-in-out;
+					overflow: hidden;
+					${this.isExpanded ? `max-height: ${EXPANDED_MAX_HEIGHT}px; height: auto;` : `max-height: ${COLLAPSED_HEIGHT}px; height: ${COLLAPSED_HEIGHT}px;`}
+				`
+			});
+
+			// Header: .todo-summary-content.todo-summary-content-clickable (matches Cursor structure)
+			this.headerElement = $('div', {
+				class: 'todo-summary-content todo-summary-content-clickable',
+				style: `
+					height: ${COLLAPSED_HEIGHT}px;
+					display: flex;
+					align-items: center;
+					gap: 6px;
+					cursor: pointer;
+					padding: 0 12px;
+				`
+			});
+
+			// Icon container (16px width, matches Cursor structure)
+			const iconContainer = $('div', {
+				style: `
+					width: 16px;
+					display: flex;
+					justify-content: center;
+					align-items: center;
+					flex-shrink: 0;
+				`
+			});
+
+			// Update icon (will show check-circled when all completed, chevron otherwise)
+			this.updateIcon();
+
+			// Text span (matches Cursor structure)
+			const textSpan = $('span', {
+				style: `
+					font-size: 12px;
+					white-space: nowrap;
+					color: var(--vscode-foreground);
+				`
+			});
+			this.updateHeaderText(textSpan);
+
+			// Assemble header
+			iconContainer.appendChild(this.iconElement!);
+			this.headerElement.appendChild(iconContainer);
+			this.headerElement.appendChild(textSpan);
+
+			// Expanded content container (todo list)
+			this.expandedContent = $('div', {
+				style: `
+					display: ${this.isExpanded ? 'block' : 'none'};
+					padding: 8px 12px;
+				`
+			});
+
+			// Todo list container
+			this.todoListContainer = $('.todo-summary-list', {
+				style: 'padding: 0px;'
+			});
+
+			// Render todo items
+			this.renderTodoItems();
+			this.expandedContent.appendChild(this.todoListContainer!);
+
+			// Assemble Cursor structure
+			transitionWrapper.appendChild(this.headerElement);
+			if (this.isExpanded) {
+				transitionWrapper.appendChild(this.expandedContent);
+			}
+			stickyContainer.appendChild(emptyLine);
+			stickyContainer.appendChild(transitionWrapper);
+			humanMessageBottom.appendChild(stickyContainer);
+
+			// Click handler for expand/collapse
+			this._register(dom.addDisposableListener(this.headerElement, 'click', () => {
+				this.toggleExpanded();
+			}));
+
+			return humanMessageBottom;
+		}
+
+		// Non-attached todos (in AI response area) - keep existing VYBE structure
 		const outerContainer = $('.vybe-chat-todo-part', {
 			'data-message-role': 'ai',
 			'data-message-kind': 'todo',
@@ -97,16 +219,14 @@ export class VybeChatTodoPart extends VybeChatContentPart {
 				display: block;
 				outline: none;
 				padding: 0px;
-				background-color: ${this.isAttachedToHuman ? attachedBg : 'var(--vscode-titleBar-activeBackground)'};
-				border: ${this.isAttachedToHuman ? `1px solid ${attachedBorder}` : '1px solid var(--vscode-panel-border)'};
-				border-top: ${this.isAttachedToHuman ? 'none' : '1px solid var(--vscode-panel-border)'};
-				border-radius: ${this.isAttachedToHuman ? '0px 0px 8px 8px' : '4px'};
-				margin: ${this.isAttachedToHuman ? '0px' : '4px 0px'};
-				width: ${this.isAttachedToHuman ? '100%' : 'auto'};
+				background-color: var(--vscode-titleBar-activeBackground);
+				border: 1px solid var(--vscode-panel-border);
+				border-radius: 4px;
+				margin: 4px 0px;
+				width: auto;
 				box-sizing: border-box;
 				opacity: 1;
-				z-index: ${this.isAttachedToHuman ? '1' : '99'};
-				${this.isAttachedToHuman ? 'overflow: hidden;' : ''}
+				z-index: 99;
 			`
 		});
 
@@ -115,10 +235,9 @@ export class VybeChatTodoPart extends VybeChatContentPart {
 			style: 'background-color: transparent;'
 		});
 
-		// Tool former message container - add padding inside border
-		// When attached, add extra 8px top padding to account for the overlap
+		// Tool former message container
 		const toolFormerMessage = $('.composer-tool-former-message', {
-			style: `padding: ${this.isAttachedToHuman ? '16px 12px 8px 12px' : '8px 12px'};`
+			style: 'padding: 8px 12px;'
 		});
 
 		// Collapsible container
@@ -131,7 +250,7 @@ export class VybeChatTodoPart extends VybeChatContentPart {
 			`
 		});
 
-		// Header (always clickable for collapse/expand) - match document Section 5
+		// Header (always clickable for collapse/expand)
 		this.headerElement = $('div', {
 			style: `
 				display: flex;
@@ -148,7 +267,7 @@ export class VybeChatTodoPart extends VybeChatContentPart {
 			`
 		});
 
-		// Icon container - center align for header (no padding-top needed for single-line alignment)
+		// Icon container
 		const iconContainer = $('div', {
 			style: `
 				display: flex;
@@ -158,7 +277,7 @@ export class VybeChatTodoPart extends VybeChatContentPart {
 			`
 		});
 
-		// Header text container - simplified to match document
+		// Header text container
 		this.headerTextElement = $('.collapsible-header-text', {
 			style: `
 				flex: 1;
@@ -166,17 +285,17 @@ export class VybeChatTodoPart extends VybeChatContentPart {
 				display: flex;
 				align-items: center;
 				overflow: hidden;
-				gap: 8px; /* Match todo items gap between icon and text */
+				gap: 8px;
 				color: var(--vscode-foreground);
 				transition: opacity 0.1s ease-in;
 				font-size: 12px;
 			`
 		});
 
-		// Icon (circle when collapsed, chevron when expanded)
+		// Icon (chevron)
 		this.updateIcon();
 
-		// Text wrapper - match document Section 9
+		// Text wrapper
 		const textWrapper = $('span', {
 			style: `
 				font-size: 12px;
@@ -189,16 +308,16 @@ export class VybeChatTodoPart extends VybeChatContentPart {
 			`
 		});
 
-		// Assemble header - match document structure: iconContainer + headerTextElement
+		// Assemble header
 		iconContainer.appendChild(this.iconElement!);
 		this.headerElement.appendChild(iconContainer);
 		this.headerTextElement.appendChild(textWrapper);
 		this.headerElement.appendChild(this.headerTextElement);
 
-		// Update header text after DOM is assembled
+		// Update header text
 		this.updateHeaderText(textWrapper);
 
-		// Click handler for expand/collapse (always enabled, even when attached to human)
+		// Click handler
 		this._register(dom.addDisposableListener(this.headerElement, 'click', () => {
 			this.toggleExpanded();
 		}));
@@ -238,40 +357,92 @@ export class VybeChatTodoPart extends VybeChatContentPart {
 			this.iconElement.remove();
 		}
 
-		// Always show chevron - rotate based on expanded state
-		// 90deg (pointing down) when expanded, 0deg (pointing right) when collapsed
-		// Match todo item codicon styling exactly for alignment
-		this.iconElement = $('span.codicon.codicon-chevron-right', {
-			style: `
-				font-size: 12px;
-				color: var(--vscode-foreground);
-				opacity: 0.4;
-				display: flex;
-				align-items: center;
-				justify-content: center;
-				flex-shrink: 0;
-				transition: opacity 0.1s;
-				transform-origin: 50% 50%;
-				transition: transform 0.15s ease-in-out, opacity 0.2s ease-in-out;
-				transform: ${this.isExpanded ? 'rotate(90deg)' : 'rotate(0deg)'};
-			`
-		});
+		// When attached to human and all todos are completed, show check-circled (matches Cursor)
+		if (this.isAttachedToHuman) {
+			const completedCount = this.items.filter(item => item.status === 'completed').length;
+			const totalCount = this.items.length;
+			const allCompleted = completedCount === totalCount && totalCount > 0;
+
+			if (allCompleted) {
+				// All completed: show check-circled icon (16px, matches Cursor)
+				this.iconElement = $('span.codicon.codicon-check-circled', {
+					style: `
+						font-size: 16px;
+						flex-shrink: 0;
+						color: var(--vscode-foreground);
+						display: flex;
+						align-items: center;
+						justify-content: center;
+					`
+				});
+			} else {
+				// Not all completed: show chevron (rotated when expanded)
+				this.iconElement = $('span.codicon.codicon-chevron-right', {
+					style: `
+						font-size: 12px;
+						color: var(--vscode-foreground);
+						opacity: 0.4;
+						display: flex;
+						align-items: center;
+						justify-content: center;
+						flex-shrink: 0;
+						transition: opacity 0.1s;
+						transform-origin: 50% 50%;
+						transition: transform 0.15s ease-in-out, opacity 0.2s ease-in-out;
+						transform: ${this.isExpanded ? 'rotate(90deg)' : 'rotate(0deg)'};
+					`
+				});
+			}
+		} else {
+			// Non-attached: always show chevron - rotate based on expanded state
+			// 90deg (pointing down) when expanded, 0deg (pointing right) when collapsed
+			this.iconElement = $('span.codicon.codicon-chevron-right', {
+				style: `
+					font-size: 12px;
+					color: var(--vscode-foreground);
+					opacity: 0.4;
+					display: flex;
+					align-items: center;
+					justify-content: center;
+					flex-shrink: 0;
+					transition: opacity 0.1s;
+					transform-origin: 50% 50%;
+					transition: transform 0.15s ease-in-out, opacity 0.2s ease-in-out;
+					transform: ${this.isExpanded ? 'rotate(90deg)' : 'rotate(0deg)'};
+				`
+			});
+		}
 	}
 
 	private updateHeaderText(textWrapper?: HTMLElement): void {
-		if (!this.headerTextElement) {
-			return;
-		}
+		// For attached todos (Cursor structure), text span is directly in header
+		// For non-attached todos, text span is in headerTextElement
+		if (this.isAttachedToHuman) {
+			// Find text span directly in header (second child after icon container)
+			if (!textWrapper && this.headerElement) {
+				// Text span is the second child (after icon container)
+				const children = Array.from(this.headerElement.children);
+				if (children.length >= 2) {
+					textWrapper = children[1] as HTMLElement;
+				}
+			}
+		} else {
+			// Non-attached: use headerTextElement
+			if (!this.headerTextElement) {
+				return;
+			}
 
-		// Use provided textWrapper or find it
-		if (!textWrapper) {
-			// Find text wrapper (second child after icon container, or search by class/attribute)
-			textWrapper = this.headerTextElement.querySelector('span[style*="flex: 0 1 auto"]') as HTMLElement;
+			// Use provided textWrapper or find it
 			if (!textWrapper) {
-				// Fallback: try to find by index
-				textWrapper = this.headerTextElement.children[1] as HTMLElement;
+				// Find text wrapper (second child after icon container, or search by class/attribute)
+				textWrapper = this.headerTextElement.querySelector('span[style*="flex: 0 1 auto"]') as HTMLElement;
+				if (!textWrapper) {
+					// Fallback: try to find by index
+					textWrapper = this.headerTextElement.children[1] as HTMLElement;
+				}
 			}
 		}
+
 		if (!textWrapper) {
 			console.warn('[VybeChatTodoPart] Text wrapper not found');
 			return;
@@ -302,7 +473,7 @@ export class VybeChatTodoPart extends VybeChatContentPart {
 		const completedCount = this.items.filter(item => item.status === 'completed').length;
 		const totalCount = this.items.length;
 
-		// Count text - use "To-Dos" with proper capitalization
+		// Count text - use "To-dos" to match Cursor format
 		const countText = $('span', {
 			style: `
 				color: var(--vscode-foreground);
@@ -312,14 +483,14 @@ export class VybeChatTodoPart extends VybeChatContentPart {
 		});
 
 		if (completedCount === 0) {
-			// No tasks completed: "0 of 6 To-Dos"
-			countText.textContent = `0 of ${totalCount} To-Dos`;
+			// No tasks completed: "0 of 6 To-dos" (matches Cursor)
+			countText.textContent = `0 of ${totalCount} To-dos`;
 		} else if (completedCount === totalCount) {
-			// All tasks completed: "6 of 6 To-Dos Completed"
-			countText.textContent = `${completedCount} of ${totalCount} To-Dos Completed`;
+			// All tasks completed: "6 of 6 To-dos Completed" (matches Cursor)
+			countText.textContent = `${completedCount} of ${totalCount} To-dos Completed`;
 		} else {
-			// Some tasks completed: "1 of 6 To-Dos Completed"
-			countText.textContent = `${completedCount} of ${totalCount} To-Dos Completed`;
+			// Some tasks completed: "1 of 6 To-dos Completed" (matches Cursor)
+			countText.textContent = `${completedCount} of ${totalCount} To-dos Completed`;
 		}
 
 		textWrapper.appendChild(countText);
@@ -416,7 +587,17 @@ export class VybeChatTodoPart extends VybeChatContentPart {
 
 		// Update icon
 		this.updateIcon();
-		const iconContainer = this.headerElement?.querySelector('div[style*="justify-content: center"]') as HTMLElement | null;
+
+		// Find icon container (different selectors for attached vs non-attached)
+		let iconContainer: HTMLElement | null = null;
+		if (this.isAttachedToHuman) {
+			// For attached: find div with width: 16px
+			iconContainer = this.headerElement?.querySelector('div[style*="width: 16px"]') as HTMLElement | null;
+		} else {
+			// For non-attached: find div with justify-content: center
+			iconContainer = this.headerElement?.querySelector('div[style*="justify-content: center"]') as HTMLElement | null;
+		}
+
 		if (iconContainer && this.iconElement) {
 			// Clear existing icon (use DOM manipulation instead of innerHTML for TrustedHTML compliance)
 			while (iconContainer.firstChild) {
@@ -430,6 +611,35 @@ export class VybeChatTodoPart extends VybeChatContentPart {
 			this.expandedContent.style.display = this.isExpanded ? 'block' : 'none';
 		}
 
+		// Update transition wrapper height for attached todos (Cursor structure)
+		if (this.isAttachedToHuman) {
+			const transitionWrapper = this.expandedContent?.parentElement;
+			if (transitionWrapper && transitionWrapper !== this.headerElement) {
+				const COLLAPSED_HEIGHT = 31.5;
+				const EXPANDED_MAX_HEIGHT = 700;
+				if (this.isExpanded) {
+					transitionWrapper.style.maxHeight = `${EXPANDED_MAX_HEIGHT}px`;
+					transitionWrapper.style.height = 'auto';
+				} else {
+					transitionWrapper.style.maxHeight = `${COLLAPSED_HEIGHT}px`;
+					transitionWrapper.style.height = `${COLLAPSED_HEIGHT}px`;
+				}
+			}
+
+			// Update sticky container height
+			const stickyContainer = transitionWrapper?.parentElement;
+			if (stickyContainer && stickyContainer.classList.contains('todo-summary-sticky-container')) {
+				const COLLAPSED_HEIGHT = 31.5;
+				if (this.isExpanded) {
+					stickyContainer.style.height = '';
+					stickyContainer.style.maxHeight = '700px';
+				} else {
+					stickyContainer.style.height = `${COLLAPSED_HEIGHT}px`;
+					stickyContainer.style.maxHeight = '';
+				}
+			}
+		}
+
 		// Update header text (to show "Running to-do" when collapsed)
 		this.updateHeaderText();
 	}
@@ -438,6 +648,26 @@ export class VybeChatTodoPart extends VybeChatContentPart {
 		if (data.items && data.items.length >= 2) {
 			this.items = data.items;
 			this.renderTodoItems();
+			// Update icon in case completion status changed
+			this.updateIcon();
+			// Update icon in DOM
+			if (this.isAttachedToHuman) {
+				const iconContainer = this.headerElement?.querySelector('div[style*="width: 16px"]') as HTMLElement | null;
+				if (iconContainer && this.iconElement) {
+					while (iconContainer.firstChild) {
+						iconContainer.removeChild(iconContainer.firstChild);
+					}
+					iconContainer.appendChild(this.iconElement);
+				}
+			} else {
+				const iconContainer = this.headerElement?.querySelector('div[style*="justify-content: center"]') as HTMLElement | null;
+				if (iconContainer && this.iconElement) {
+					while (iconContainer.firstChild) {
+						iconContainer.removeChild(iconContainer.firstChild);
+					}
+					iconContainer.appendChild(this.iconElement);
+				}
+			}
 		}
 
 		if (data.currentRunningTodo !== undefined) {
@@ -445,12 +675,61 @@ export class VybeChatTodoPart extends VybeChatContentPart {
 			this.updateHeaderText();
 		}
 
-		if (data.isExpanded !== undefined && !this.isAttachedToHuman) {
+		if (data.isExpanded !== undefined) {
+			// Allow expand/collapse even when attached to human
 			this.isExpanded = data.isExpanded;
 			if (this.expandedContent) {
 				this.expandedContent.style.display = this.isExpanded ? 'block' : 'none';
 			}
 			this.updateIcon();
+
+			// Update transition wrapper height for attached todos (Cursor structure)
+			if (this.isAttachedToHuman) {
+				const transitionWrapper = this.expandedContent?.parentElement;
+				if (transitionWrapper && transitionWrapper !== this.headerElement) {
+					const COLLAPSED_HEIGHT = 31.5;
+					const EXPANDED_MAX_HEIGHT = 700;
+					if (this.isExpanded) {
+						transitionWrapper.style.maxHeight = `${EXPANDED_MAX_HEIGHT}px`;
+						transitionWrapper.style.height = 'auto';
+					} else {
+						transitionWrapper.style.maxHeight = `${COLLAPSED_HEIGHT}px`;
+						transitionWrapper.style.height = `${COLLAPSED_HEIGHT}px`;
+					}
+				}
+
+				// Update sticky container height
+				const stickyContainer = transitionWrapper?.parentElement;
+				if (stickyContainer && stickyContainer.classList.contains('todo-summary-sticky-container')) {
+					const COLLAPSED_HEIGHT = 31.5;
+					if (this.isExpanded) {
+						stickyContainer.style.height = '';
+						stickyContainer.style.maxHeight = '700px';
+					} else {
+						stickyContainer.style.height = `${COLLAPSED_HEIGHT}px`;
+						stickyContainer.style.maxHeight = '';
+					}
+				}
+			}
+
+			// Update icon in DOM
+			if (this.isAttachedToHuman) {
+				const iconContainer = this.headerElement?.querySelector('div[style*="width: 16px"]') as HTMLElement | null;
+				if (iconContainer && this.iconElement) {
+					while (iconContainer.firstChild) {
+						iconContainer.removeChild(iconContainer.firstChild);
+					}
+					iconContainer.appendChild(this.iconElement);
+				}
+			} else {
+				const iconContainer = this.headerElement?.querySelector('div[style*="justify-content: center"]') as HTMLElement | null;
+				if (iconContainer && this.iconElement) {
+					while (iconContainer.firstChild) {
+						iconContainer.removeChild(iconContainer.firstChild);
+					}
+					iconContainer.appendChild(this.iconElement);
+				}
+			}
 		}
 	}
 

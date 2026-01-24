@@ -52,7 +52,7 @@ export class MessageComposer extends Disposable {
 	private container: HTMLElement;
 	private textInput: HTMLElement | null = null;
 	private placeholderElement: HTMLElement | null = null;
-	private selectedModel: string = 'composer-1';
+	private selectedModel: string = ''; // Empty when auto mode is enabled
 	private isAutoEnabled: boolean = true;
 	private autoLabelElement: HTMLElement | null = null;
 	private maxBadge: HTMLElement | null = null;
@@ -72,8 +72,11 @@ export class MessageComposer extends Disposable {
 	private modelState: ModelDropdownState = {
 		isAutoEnabled: true,
 		isMaxModeEnabled: false,
-		selectedModelId: '' // Will be set to first available model when Auto is off
+		selectedModelId: '', // Will be set to first available model when Auto is off
+		reasoningLevel: 'medium' // Default reasoning level
 	};
+
+	private currentReasoningLevel: 'low' | 'medium' | 'high' | 'xhigh' = 'medium';
 	private autoDropdownElement: HTMLElement | null = null;
 
 	// Image attachments (separate component)
@@ -1615,6 +1618,7 @@ export class MessageComposer extends Disposable {
 			// Listen for state changes
 			this._register(this.modelDropdown.onStateChange(state => {
 				this.modelState = state;
+				this.currentReasoningLevel = state.reasoningLevel;
 				this.updateModelLabel();
 				this.notifyModelChange();
 				// Don't reopen dropdown on state change - it should stay closed after model selection
@@ -1688,7 +1692,17 @@ export class MessageComposer extends Disposable {
 					this.autoLabelElement.textContent = modelId;
 				}
 			} else {
-				this.autoLabelElement.textContent = selectedModel.label;
+				// Model found - show its label with reasoning level indicator if applicable
+				let labelText = selectedModel.label;
+				// Check if model supports reasoning and show reasoning level indicator
+				const fullModel = (this.modelDropdown as any)?.modelCache?.get(selectedModel.id);
+				if (fullModel?.supportsReasoning && this.currentReasoningLevel) {
+					const reasoningLabel = this.currentReasoningLevel === 'xhigh' ? 'xH' :
+						this.currentReasoningLevel === 'high' ? 'H' :
+							this.currentReasoningLevel === 'medium' ? 'M' : 'L';
+					labelText = `${selectedModel.label} (${reasoningLabel})`;
+				}
+				this.autoLabelElement.textContent = labelText;
 				// Do NOT add thinking icon in composer model selection (user requested)
 			}
 		}
@@ -1985,6 +1999,17 @@ export class MessageComposer extends Disposable {
 			this.questionnaireToolbar.setOnContinue(onContinue);
 			this.questionnaireToolbar.setOnOptionSelected(onOptionSelected);
 		}
+	}
+
+	/**
+	 * Get selected answers from questionnaire toolbar.
+	 * Returns array of { questionId, questionText, answerText } for questions that have been answered.
+	 */
+	public getQuestionnaireAnswers(): Array<{ questionId: string; questionText: string; answerText: string }> {
+		if (this.questionnaireToolbar) {
+			return this.questionnaireToolbar.getSelectedAnswers();
+		}
+		return [];
 	}
 
 	/**

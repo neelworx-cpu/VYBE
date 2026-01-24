@@ -268,7 +268,8 @@ export class VybeChatToolPart extends VybeChatContentPart {
 				align-items: center;
 				overflow: hidden;
 				gap: 4px;
-				color: var(--cursor-text-tertiary);
+				/* Theme-aware: in light mode Cursor-like tertiary can become too low-contrast */
+				color: var(--vscode-foreground);
 				transition: opacity 0.1s ease-in;
 				font-size: 12px;
 			`
@@ -286,11 +287,11 @@ export class VybeChatToolPart extends VybeChatContentPart {
 			animation: tool-shine 2s linear infinite;
 			background-image: linear-gradient(
 				90deg,
-				rgba(200, 200, 200, 0.6) 0%,
-				rgba(200, 200, 200, 0.6) 25%,
-				rgba(255, 255, 255, 1) 50%,
-				rgba(200, 200, 200, 0.6) 75%,
-				rgba(200, 200, 200, 0.6) 100%
+				var(--vybe-tool-shine-dim) 0%,
+				var(--vybe-tool-shine-dim) 25%,
+				var(--vybe-tool-shine-bright) 50%,
+				var(--vybe-tool-shine-dim) 75%,
+				var(--vybe-tool-shine-dim) 100%
 			);
 			background-size: 200% 100%;
 			-webkit-background-clip: text;
@@ -319,7 +320,7 @@ export class VybeChatToolPart extends VybeChatContentPart {
 			-webkit-text-fill-color: transparent;
 		` : `
 			color: var(--vscode-foreground);
-			opacity: 0.6;
+			opacity: 0.7;
 		`;
 
 		this.verbTextElement = $('span', {
@@ -343,8 +344,8 @@ export class VybeChatToolPart extends VybeChatContentPart {
 		const targetColorStyle = (this.isStreaming && !hasError) ? `
 			-webkit-text-fill-color: transparent;
 		` : `
-			color: var(--vscode-foreground);
-			opacity: 0.4;
+			color: var(--vscode-descriptionForeground);
+			opacity: 1;
 		`;
 
 		this.targetElement = $('span', {
@@ -753,11 +754,11 @@ export class VybeChatToolPart extends VybeChatContentPart {
 						animation: tool-shine 2s linear infinite;
 						background-image: linear-gradient(
 							90deg,
-							rgba(200, 200, 200, 0.6) 0%,
-							rgba(200, 200, 200, 0.6) 25%,
-							rgba(255, 255, 255, 1) 50%,
-							rgba(200, 200, 200, 0.6) 75%,
-							rgba(200, 200, 200, 0.6) 100%
+							var(--vybe-tool-shine-dim) 0%,
+							var(--vybe-tool-shine-dim) 25%,
+							var(--vybe-tool-shine-bright) 50%,
+							var(--vybe-tool-shine-dim) 75%,
+							var(--vybe-tool-shine-dim) 100%
 						);
 						background-size: 200% 100%;
 						-webkit-background-clip: text;
@@ -780,7 +781,7 @@ export class VybeChatToolPart extends VybeChatContentPart {
 				// Complete - static style with var(--vscode-foreground) and 0.6 opacity (60%)
 				this.verbTextElement.setAttribute('style', verbBaseStyle + `
 					color: var(--vscode-foreground);
-					opacity: 0.6;
+						opacity: 0.7;
 				`);
 			}
 
@@ -802,8 +803,8 @@ export class VybeChatToolPart extends VybeChatContentPart {
 				} else {
 					// Complete - static style with var(--vscode-foreground) and 0.4 opacity (40%)
 					this.targetElement.setAttribute('style', targetBaseStyle + `
-						color: var(--vscode-foreground);
-						opacity: 0.4;
+						color: var(--vscode-descriptionForeground);
+						opacity: 1;
 					`);
 				}
 			}
