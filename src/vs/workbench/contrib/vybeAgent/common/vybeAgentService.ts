@@ -89,6 +89,43 @@ export interface IVybeAgentService {
 	 * @param decision User's decision to approve or reject
 	 */
 	resumeWithApproval?(taskId: string, decision: 'approve' | 'reject'): Promise<void>;
+
+	// ========================================================================
+	// Error Recovery (Durable Execution)
+	// ========================================================================
+
+	/**
+	 * Resume a task from its last checkpoint after an error.
+	 *
+	 * @param taskId The task to resume
+	 * @param modelId Optional model ID (uses task's original model if not provided)
+	 * @param reasoningLevel Optional reasoning level (uses task's original level if not provided)
+	 */
+	resumeTask?(taskId: string, modelId?: string, reasoningLevel?: 'low' | 'medium' | 'high' | 'xhigh'): Promise<void>;
+
+	/**
+	 * Retry a task from scratch after an error.
+	 * Clears old checkpoint and starts new task with original message.
+	 *
+	 * @param taskId The task to retry
+	 * @param goal The original goal/message
+	 * @param modelId Optional model ID (uses task's original model if not provided)
+	 * @param level Optional level (uses task's original level if not provided)
+	 * @param reasoningLevel Optional reasoning level (uses task's original level if not provided)
+	 */
+	retryTask?(taskId: string, goal: string, modelId?: string, level?: 'L1' | 'L2' | 'L3', reasoningLevel?: 'low' | 'medium' | 'high' | 'xhigh'): Promise<void>;
+
+	/**
+	 * Get incomplete tasks for recovery on startup.
+	 *
+	 * @returns Array of incomplete task information
+	 */
+	getIncompleteTasks?(): Promise<Array<{
+		taskId: string;
+		threadId: string;
+		lastMessage: string;
+		timestamp: number;
+	}>>;
 }
 
 

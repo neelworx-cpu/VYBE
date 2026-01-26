@@ -230,6 +230,13 @@ export class MessageComposer extends Disposable {
 
 		// Update send button (if we add theme-specific styling later)
 		// Send button is always green, so no change needed for now
+
+		// Update warning popup on next frame so DOM/theme has settled and popup border/background stay in sync
+		if (this.warningPopup?.visible) {
+			requestAnimationFrame(() => {
+				this.warningPopup?.updateTheme();
+			});
+		}
 	}
 
 	private isDarkTheme(): boolean {
@@ -2607,8 +2614,12 @@ export class MessageComposer extends Disposable {
 	 * Show a warning/error/info popup above the composer
 	 */
 	public showWarning(options: ComposerWarningOptions): void {
+		console.log('[MessageComposer] showWarning called:', { title: options.title, hasWarningPopup: !!this.warningPopup });
 		if (this.warningPopup) {
 			this.warningPopup.show(options);
+			console.log('[MessageComposer] showWarning completed, popup visible:', this.warningPopup.visible);
+		} else {
+			console.error('[MessageComposer] Cannot show warning: warningPopup is null');
 		}
 	}
 

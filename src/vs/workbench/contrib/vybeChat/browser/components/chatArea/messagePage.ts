@@ -1426,10 +1426,10 @@ export class MessagePage extends Disposable {
 				return;
 			}
 
-			// Track when thinking started (for duration calculation)
-			if (this.thinkingStartTime === null) {
-				this.thinkingStartTime = Date.now();
-			}
+		// Track when thinking started (for duration calculation)
+		if (this.thinkingStartTime === null) {
+			this.thinkingStartTime = Date.now();
+		}
 
 			// CRITICAL: If chunk starts with a title pattern and we already have accumulated thinking,
 			// this is a new reasoning summary within the same thinking block - add spacing for proper separation
@@ -1456,7 +1456,7 @@ export class MessagePage extends Disposable {
 			}
 
 			// Append chunk to accumulation (continuation of current part)
-			this.accumulatedThinking += chunk;
+		this.accumulatedThinking += chunk;
 		}
 
 		// CRITICAL: If this is a new reasoning part, ALWAYS create a new block (don't look for existing)
@@ -1487,14 +1487,14 @@ export class MessagePage extends Disposable {
 				}
 			}
 
-			if (!existingPart) {
+		if (!existingPart) {
 				// No existing streaming part found - create new one
-				const contentData: IVybeChatThinkingContent = {
-					kind: 'thinking',
-					value: this.accumulatedThinking,
-					isStreaming: true
-				};
-				existingPart = this.addContentPart(contentData) as VybeChatThinkingPart | undefined;
+			const contentData: IVybeChatThinkingContent = {
+				kind: 'thinking',
+				value: this.accumulatedThinking,
+				isStreaming: true
+			};
+			existingPart = this.addContentPart(contentData) as VybeChatThinkingPart | undefined;
 				if (existingPart) {
 				}
 			}
@@ -1516,11 +1516,11 @@ export class MessagePage extends Disposable {
 			} else {
 				// Fallback: find by kind (shouldn't happen, but be safe)
 				const index = this.contentPartsData.findIndex(d => d.kind === 'thinking' && (d as IVybeChatThinkingContent).isStreaming === true);
-				if (index >= 0) {
-					this.contentPartsData[index] = thinkingContent;
-				} else {
+			if (index >= 0) {
+				this.contentPartsData[index] = thinkingContent;
+			} else {
 					// If not found, add it
-					this.contentPartsData.push(thinkingContent);
+				this.contentPartsData.push(thinkingContent);
 				}
 			}
 		}
@@ -1591,8 +1591,8 @@ export class MessagePage extends Disposable {
 		} else {
 			// Fallback: find by kind and streaming status
 			const index = this.contentPartsData.findIndex(d => d.kind === 'thinking' && (d as IVybeChatThinkingContent).isStreaming === true);
-			if (index >= 0) {
-				this.contentPartsData[index] = thinkingContent;
+		if (index >= 0) {
+			this.contentPartsData[index] = thinkingContent;
 			}
 		}
 
@@ -1657,10 +1657,10 @@ export class MessagePage extends Disposable {
 		} else {
 			// Fallback: find by kind and streaming status
 			const index = this.contentPartsData.findIndex(d => d.kind === 'markdown' && (d as IVybeChatMarkdownContent).isStreaming === true);
-			if (index >= 0) {
-				this.contentPartsData[index] = { kind: 'markdown', content: this.accumulatedMarkdown, isStreaming: true };
-			} else {
-				this.contentPartsData.push({ kind: 'markdown', content: this.accumulatedMarkdown, isStreaming: true });
+		if (index >= 0) {
+			this.contentPartsData[index] = { kind: 'markdown', content: this.accumulatedMarkdown, isStreaming: true };
+		} else {
+			this.contentPartsData.push({ kind: 'markdown', content: this.accumulatedMarkdown, isStreaming: true });
 			}
 		}
 	}
@@ -2097,16 +2097,54 @@ export class MessagePage extends Disposable {
 						this.contentPartsData.splice(dataIndex, 1);
 					}
 				}
-				// Remove from DOM
+				// Remove from DOM (wrapper is the message bubble; fallback to part's parent if map missed)
 				const wrapper = this.partToWrapperMap.get(part);
 				if (wrapper) {
-					wrapper.remove(); // Remove from DOM (works even if no parent)
+					wrapper.remove();
+				} else if (part.domNode?.parentElement) {
+					part.domNode.parentElement.remove();
 				}
 				this.partToWrapperMap.delete(part);
 				// Dispose part
 				part.dispose();
 			}
 		}
+	}
+
+	/**
+	 * Clear all AI response content (partial response and tools) for "Try Again from scratch".
+	 * Keeps the human message; next stream will fill the response area fresh.
+	 */
+	public clearAiContent(): void {
+		for (let i = this.contentParts.length - 1; i >= 0; i--) {
+			const part = this.contentParts[i];
+			const wrapper = this.partToWrapperMap.get(part);
+			if (wrapper) {
+				wrapper.remove();
+			} else if (part.domNode?.parentElement) {
+				part.domNode.parentElement.remove();
+			}
+			this.partToWrapperMap.delete(part);
+			part.dispose();
+		}
+		this.contentParts = [];
+		this.contentPartsData = [];
+		if (this.aiResponseArea) {
+			while (this.aiResponseArea.firstChild) {
+				this.aiResponseArea.removeChild(this.aiResponseArea.firstChild);
+			}
+		}
+		this.accumulatedThinking = '';
+		this.thinkingStartTime = null;
+		this.thinkingFinalized = false;
+		this.accumulatedMarkdown = '';
+		this.accumulatedCodeBlocks.clear();
+		this.activeCodeBlocks.clear();
+		this.summaryByIndex.clear();
+		this.currentBlockSummaryIndices.clear();
+		this.currentMarkdownBlockId = null;
+		this.blocks.clear();
+		this.blockToPartMap.clear();
 	}
 
 	/**
@@ -2412,28 +2450,151 @@ export class MessagePage extends Disposable {
 	 * - Set button variant based on count (single = primary/VYBE green, multiple = secondary)
 	 * - Position above the composer input box
 	 */
-	public showError(message: string, code?: string): void {
+	public showError(message: string, code?: string, options?: {
+		errorType?: 'network' | 'timeout' | 'bad_request' | 'crash' | 'unknown';
+		canResume?: boolean;
+		canRetry?: boolean;
+		onResume?: () => void;
+		onRetry?: () => void;
+		onCancel?: () => void;
+	}): void {
+		// Check if composer is available
+		if (!this.composer) {
+			console.error('[MessagePage] Cannot show error: composer not available');
+			return;
+		}
+
 		// Use the new composer warning popup (standard error display)
 		const fullMessage = code ? `${message} (Code: ${code})` : message;
 
+		console.log('[MessagePage] Showing error popup:', { message: fullMessage, errorType: options?.errorType, canResume: options?.canResume, canRetry: options?.canRetry });
+
+		const buttons: Array<{ label: string; action: () => void; variant?: 'primary' | 'secondary' | 'tertiary' }> = [];
+
+		// Add Resume button if recoverable
+		if (options?.canResume && options?.onResume) {
+			buttons.push({
+				label: 'Resume',
+				variant: 'primary',
+				action: () => {
+					this.composer.hideWarning();
+					options.onResume?.();
+				}
+			});
+		}
+
+		// Add Try Again button if retry is possible
+		if (options?.canRetry && options?.onRetry) {
+			buttons.push({
+				label: 'Try Again',
+				variant: buttons.length === 0 ? 'primary' : 'secondary',
+				action: () => {
+					this.composer.hideWarning();
+					options.onRetry?.();
+				}
+			});
+		}
+
+		// Add Cancel button
+		if (options?.onCancel) {
+			buttons.push({
+				label: 'Cancel',
+				variant: 'tertiary',
+				action: () => {
+					this.composer.hideWarning();
+					options.onCancel?.();
+				}
+			});
+		} else if (buttons.length === 0) {
+			// Default: just a dismiss button if no actions available
+			buttons.push({
+				label: 'Dismiss',
+				variant: 'tertiary',
+				action: () => {
+					this.composer.hideWarning();
+				}
+			});
+		}
+
+		// Determine title and icon based on error type
+		let title = 'Error';
+		let icon: 'error' | 'warning' | 'info' = 'error';
+
+		if (options?.errorType === 'network') {
+			title = 'Connection Error';
+		} else if (options?.errorType === 'timeout') {
+			title = 'Timeout Error';
+		} else if (options?.errorType === 'bad_request') {
+			title = 'Request Error';
+		} else if (options?.errorType === 'crash') {
+			title = 'Crash Recovery';
+			icon = 'warning';
+		}
+
+		try {
 		this.composer.showWarning({
-			title: code ? `Error: ${code}` : 'Error',
+				title,
 			message: fullMessage,
-			icon: 'error',
+				icon,
+				showCloseButton: true,
+				buttons,
+				onClose: () => {
+					// Popup was closed
+					console.log('[MessagePage] Error popup closed');
+				}
+			});
+			console.log('[MessagePage] Error popup shown successfully');
+		} catch (error) {
+			console.error('[MessagePage] Failed to show error popup:', error);
+		}
+	}
+
+	/**
+	 * Show recovery popup for incomplete tasks detected on startup.
+	 */
+	public showRecoveryPopup(task: {
+		taskId: string;
+		threadId: string;
+		lastMessage: string;
+		timestamp: number;
+	}, options: {
+		onResume?: () => void;
+		onStartFresh?: () => void;
+		onDismiss?: () => void;
+	}): void {
+		this.composer.showWarning({
+			title: 'Incomplete Task Detected',
+			message: 'A previous task was interrupted. You can resume from where it left off or start fresh.',
+			icon: 'warning',
 			showCloseButton: true,
 			buttons: [
 				{
-					label: 'Try again',
-					variant: 'secondary', // Will be auto-converted to 'primary' since it's the only non-tertiary button
+					label: 'Resume',
+					variant: 'primary',
 					action: () => {
-						// Hide popup on retry
 						this.composer.hideWarning();
-						// Could trigger a retry action here if needed
+						options.onResume?.();
+					}
+				},
+				{
+					label: 'Start Fresh',
+					variant: 'secondary',
+					action: () => {
+						this.composer.hideWarning();
+						options.onStartFresh?.();
+					}
+				},
+				{
+					label: 'Dismiss',
+					variant: 'tertiary',
+					action: () => {
+						this.composer.hideWarning();
+						options.onDismiss?.();
 					}
 				}
 			],
 			onClose: () => {
-				// Popup was closed
+				options.onDismiss?.();
 			}
 		});
 	}

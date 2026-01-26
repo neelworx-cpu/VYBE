@@ -149,6 +149,11 @@ export interface ErrorEvent extends VybeAgentEventBase {
 		message: string; // Changed from 'error' to 'message' to match StreamingErrorEvent
 		code?: string;
 		recoverable?: boolean;
+		errorType?: 'network' | 'timeout' | 'bad_request' | 'crash' | 'unknown';
+		canResume?: boolean;
+		canRetry?: boolean;
+		threadId?: string;
+		originalMessage?: string;
 	};
 }
 

@@ -27,6 +27,8 @@ let langGraphLoaded = false;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let MemorySaver: any;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
+let PostgresSaver: any;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let HumanMessage: any;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let ToolMessage: any;
@@ -195,6 +197,17 @@ async function loadLangChainModules(): Promise<boolean> {
 		MemorySaver = langGraph.MemorySaver;
 		Command = langGraph.Command;
 		// Note: interrupt is available but not used - we handle interrupts via event streaming
+
+		// Import PostgresSaver for production checkpointer
+		console.log('[VybeLangGraphService] Importing @langchain/langgraph-checkpoint-postgres...');
+		try {
+			const postgresCheckpoint = await import('@langchain/langgraph-checkpoint-postgres');
+			PostgresSaver = postgresCheckpoint.PostgresSaver;
+			console.log('[VybeLangGraphService] PostgresSaver imported successfully');
+		} catch (error) {
+			console.warn('[VybeLangGraphService] Failed to import PostgresSaver, will use MemorySaver fallback:', error);
+			PostgresSaver = null;
+		}
 
 		// Import createAgent from langchain
 		console.log('[VybeLangGraphService] Importing langchain...');
@@ -773,6 +786,8 @@ export class VybeLangGraphService {
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	private checkpointer: any = null;
 	private initialized = false;
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	private errorRecovery: any = null;
 
 	constructor() {
 		// Will be initialized on first use
@@ -793,10 +808,51 @@ export class VybeLangGraphService {
 
 		try {
 			// Create checkpointer for durable execution
-			this.checkpointer = new MemorySaver();
+			// Try PostgresSaver first (production), fallback to MemorySaver (development)
+			if (PostgresSaver) {
+				try {
+					// Import checkpointer utilities
+					const { createPostgresCheckpointer } = await import('../common/vybeCheckpointer.js');
+					const { getUserId } = await import('../../../services/indexing/common/namespaceUtils.js');
+
+					const userId = getUserId();
+					console.log(`[VybeLangGraphService] Attempting to create PostgresSaver for user: ${userId}`);
+
+					const postgresCheckpointer = await createPostgresCheckpointer(userId);
+
+					if (postgresCheckpointer) {
+						this.checkpointer = postgresCheckpointer;
+						console.log('[VybeLangGraphService] Using PostgresSaver (production checkpointer)');
+					} else {
+						console.warn('[VybeLangGraphService] PostgresSaver creation failed, falling back to MemorySaver');
+						this.checkpointer = new MemorySaver();
+					}
+				} catch (postgresError) {
+					console.warn('[VybeLangGraphService] PostgresSaver initialization error, falling back to MemorySaver:', postgresError);
+					this.checkpointer = new MemorySaver();
+				}
+			} else {
+				console.warn('[VybeLangGraphService] PostgresSaver not available, using MemorySaver');
+				this.checkpointer = new MemorySaver();
+			}
 
 			// Auto-fetch API keys from Supabase Edge Function
 			await this.fetchApiKeysFromSupabase();
+
+			// Initialize error recovery module
+			const { VybeErrorRecovery } = await import('./vybeErrorRecovery.js');
+			const { getUserId } = await import('../../../services/indexing/common/namespaceUtils.js');
+			const { getUserScopedThreadId } = await import('../common/vybeCheckpointer.js');
+			this.errorRecovery = new VybeErrorRecovery(
+				this.checkpointer,
+				getUserId,
+				getUserScopedThreadId
+			);
+
+			// Recover interrupted tasks on startup
+			// Note: We don't have an eventHandler here, so we'll skip recovery for now
+			// Recovery will be triggered via IPC handler when UI is ready
+			console.log('[VybeLangGraphService] Error recovery initialized');
 
 			// Model will be configured per-request based on settings
 			this.initialized = true;
@@ -805,6 +861,56 @@ export class VybeLangGraphService {
 		} catch (error) {
 			console.error('[VybeLangGraphService] Initialization failed:', error);
 			return false;
+		}
+	}
+
+	/**
+	 * Load all threads for a user.
+	 * Returns thread summaries with metadata for conversation history UI.
+	 *
+	 * @param userId - User identifier
+	 * @returns Array of thread summaries
+	 */
+	async loadUserThreads(userId: string): Promise<Array<{
+		threadId: string;
+		taskId: string;
+		lastCheckpointId: string;
+		lastUpdated: Date;
+		messageCount: number;
+		preview: string;
+	}>> {
+		if (!this.checkpointer) {
+			console.warn('[VybeLangGraphService] No checkpointer available, cannot load threads');
+			return [];
+		}
+
+		try {
+			// Import checkpointer utilities (for future thread loading implementation)
+			// Note: Currently thread loading requires direct database access, which will be implemented later
+			await import('../common/vybeCheckpointer.js');
+			const threads = new Map<string, {
+				threadId: string;
+				taskId: string;
+				lastCheckpointId: string;
+				lastUpdated: Date;
+				messageCount: number;
+				preview: string;
+			}>();
+
+			// Query all checkpoints for threads starting with `${userId}::`
+			// Since PostgresSaver doesn't have a direct "list all threads" method,
+			// we'll need to query the database directly or use a workaround
+			// For now, return empty array - this will be enhanced when we have direct DB access
+			console.log(`[VybeLangGraphService] loadUserThreads called for user: ${userId}`);
+			console.warn('[VybeLangGraphService] Thread loading requires direct database access - returning empty array for now');
+
+			// TODO: Implement direct database query to list all threads for user
+			// This requires access to the PostgresSaver's pool or a custom query method
+
+			return Array.from(threads.values());
+		} catch (error) {
+			console.error('[VybeLangGraphService] Failed to load user threads:', error);
+			return [];
 		}
 	}
 
@@ -1950,15 +2056,22 @@ export class VybeLangGraphService {
 				new HumanMessage(state.messages[0]?.content || ''),
 			];
 
-			// Thread config for checkpointing
+			// Thread config for checkpointing with user-scoped thread ID
+			const { getUserId } = await import('../../../services/indexing/common/namespaceUtils.js');
+			const { getUserScopedThreadId } = await import('../common/vybeCheckpointer.js');
+			const userId = getUserId();
+			const userScopedThreadId = getUserScopedThreadId(userId, taskId);
+
 			const config = {
 				configurable: {
-					thread_id: taskId,
+					thread_id: userScopedThreadId,
 				},
 				// Increased from 2x to 4x for complex multi-tool tasks
 				// L1: 20, L2: 60, L3: 200
 				recursionLimit: tier.maxTurns * 4,
 			};
+
+			console.log(`[VybeLangGraphService] Using user-scoped thread ID: ${userScopedThreadId}`);
 
 			console.log(`[VybeLangGraphService] ===== NATIVE STREAMING STARTED =====`);
 			console.log(`[VybeLangGraphService] Using agent.stream() with streamMode: "messages"`);
@@ -1988,74 +2101,138 @@ export class VybeLangGraphService {
 			let lastEmittedReasoning = ''; // Track last emitted reasoning to detect new reasoning parts
 			let currentReasoningPart = ''; // Track current reasoning part being built
 
-			for await (const [token] of stream) {
-				if (abortController.signal.aborted) {
-					console.log('[VybeLangGraphService] Stream aborted');
-					break;
+			// Stream timeout detection - detect network issues when no tokens arrive
+			const STREAM_TIMEOUT_MS = 20000; // 20 seconds - if no tokens arrive, treat as network error
+			let lastTokenTimestamp = Date.now();
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			let streamTimeoutId: any = null;
+
+			// Create a timeout promise that will reject if no tokens arrive
+			const createStreamTimeout = (): Promise<never> => {
+				return new Promise((_, reject) => {
+					streamTimeoutId = setTimeout(() => {
+						const timeSinceLastToken = Date.now() - lastTokenTimestamp;
+						console.error(`[VybeLangGraphService] ⚠️ Stream timeout: No tokens received for ${timeSinceLastToken}ms`);
+						reject(new Error(`Stream timeout: No tokens received for ${timeSinceLastToken}ms. Network connection may be lost.`));
+					}, STREAM_TIMEOUT_MS);
+				});
+			};
+
+			// Reset timeout when token arrives
+			const resetStreamTimeout = () => {
+				if (streamTimeoutId) {
+					clearTimeout(streamTimeoutId);
+					streamTimeoutId = null;
 				}
+				lastTokenTimestamp = Date.now();
+				// Create new timeout for next token
+				streamTimeoutId = setTimeout(() => {
+					const timeSinceLastToken = Date.now() - lastTokenTimestamp;
+					console.error(`[VybeLangGraphService] ⚠️ Stream timeout: No tokens received for ${timeSinceLastToken}ms`);
+					throw new Error(`Stream timeout: No tokens received for ${timeSinceLastToken}ms. Network connection may be lost.`);
+				}, STREAM_TIMEOUT_MS);
+			};
 
-				totalTokens++;
+			// Start initial timeout
+			resetStreamTimeout();
 
-				// Check if this is an AI message chunk
-				if (isAIMessageChunk && isAIMessageChunk(token)) {
+			try {
+				// Use Promise.race to detect timeout
+				const streamIterator = stream[Symbol.asyncIterator]();
+				let streamDone = false;
 
-					// Handle complete tool calls (not chunks - chunks are partial)
-					// Note: Tool call events are emitted from setToolExecutor when tools are actually executed
-					// We check both tool_calls (complete) and tool_call_chunks (partial) but only track complete ones
-					const completeToolCalls = token.tool_calls || [];
-					const hasCompleteToolCalls = completeToolCalls.length > 0;
+				while (!streamDone) {
+					// Race between next token and timeout
+					const nextPromise = streamIterator.next();
+					const timeoutPromise = createStreamTimeout();
 
-					// Also check if we have complete tool calls in chunks (when all chunks are assembled)
-					let completeToolCallsFromChunks: Array<{ name: string; args: Record<string, unknown>; id: string }> = [];
-					if (token.tool_call_chunks && token.tool_call_chunks.length > 0) {
-						// Group chunks by ID and check if any are complete (have both name and id)
-						const chunksById = new Map<string, { name: string; args: Record<string, unknown>; id: string }>();
-						for (const tc of token.tool_call_chunks) {
-							const chunkId = tc.id;
-							if (chunkId && tc.name) {
-								// This is a complete chunk - has both id and name
-								chunksById.set(chunkId, {
-									name: tc.name,
-									args: typeof tc.args === 'object' ? tc.args : {},
-									id: chunkId
-								});
+					try {
+						const result = await Promise.race([nextPromise, timeoutPromise]);
+
+						if (abortController.signal.aborted) {
+							console.log('[VybeLangGraphService] Stream aborted');
+							if (streamTimeoutId) {
+								clearTimeout(streamTimeoutId);
+								streamTimeoutId = null;
 							}
-						}
-						completeToolCallsFromChunks = Array.from(chunksById.values());
-					}
-
-					if (hasCompleteToolCalls || completeToolCallsFromChunks.length > 0) {
-						const allCompleteToolCalls = hasCompleteToolCalls ? completeToolCalls : completeToolCallsFromChunks;
-						console.log(`[VybeLangGraphService] 🔧 MODEL TOOL CALLS RECEIVED: ${allCompleteToolCalls.length} complete tool call(s)`);
-
-						// CRITICAL: Emit current reasoning part as complete BEFORE resetting
-						// This ensures the frontend finalizes the thinking block before tool calls
-						// New reasoning after tools will go to a new thinking block
-						if (currentReasoningPart.length > 0 && currentReasoningPart !== lastEmittedReasoning) {
-							eventHandler({
-								type: 'token',
-								payload: {
-									thinking: currentReasoningPart, // Emit complete current part
-								},
-								timestamp: Date.now(),
-								task_id: taskId,
-							});
-							lastEmittedReasoning = currentReasoningPart;
+							break;
 						}
 
-						// Reset content tracking when tool call happens (new markdown block will start after)
-						lastEmittedContent = '';
-						// CRITICAL: Reset reasoning tracking when tool call happens - next reasoning will be a new part
-						// NEW: Clear structured summary tracking
-						summaryByIndex.clear();
-						emittedSummaryIndices.clear();
-						// DEPRECATED: Keep for backward compatibility
-						accumulatedReasoning = '';
-						lastEmittedReasoning = '';
-						currentReasoningPart = '';
-						emittedContentSet.clear(); // Clear emitted content set for new block
+						// Check if stream is done
+						if (result.done) {
+							streamDone = true;
+							if (streamTimeoutId) {
+								clearTimeout(streamTimeoutId);
+								streamTimeoutId = null;
+							}
+							break;
+						}
 
-						for (const tc of allCompleteToolCalls) {
+						// Reset timeout since we got a token
+						resetStreamTimeout();
+
+						const [token] = result.value;
+						totalTokens++;
+
+						// Check if this is an AI message chunk
+						if (isAIMessageChunk && isAIMessageChunk(token)) {
+							// Handle complete tool calls (not chunks - chunks are partial)
+							// Note: Tool call events are emitted from setToolExecutor when tools are actually executed
+							// We check both tool_calls (complete) and tool_call_chunks (partial) but only track complete ones
+							const completeToolCalls = token.tool_calls || [];
+							const hasCompleteToolCalls = completeToolCalls.length > 0;
+
+							// Also check if we have complete tool calls in chunks (when all chunks are assembled)
+							let completeToolCallsFromChunks: Array<{ name: string; args: Record<string, unknown>; id: string }> = [];
+							if (token.tool_call_chunks && token.tool_call_chunks.length > 0) {
+								// Group chunks by ID and check if any are complete (have both name and id)
+								const chunksById = new Map<string, { name: string; args: Record<string, unknown>; id: string }>();
+								for (const tc of token.tool_call_chunks) {
+									const chunkId = tc.id;
+									if (chunkId && tc.name) {
+										// This is a complete chunk - has both id and name
+										chunksById.set(chunkId, {
+											name: tc.name,
+											args: typeof tc.args === 'object' ? tc.args : {},
+											id: chunkId
+										});
+									}
+								}
+								completeToolCallsFromChunks = Array.from(chunksById.values());
+							}
+
+							if (hasCompleteToolCalls || completeToolCallsFromChunks.length > 0) {
+								const allCompleteToolCalls = hasCompleteToolCalls ? completeToolCalls : completeToolCallsFromChunks;
+								console.log(`[VybeLangGraphService] 🔧 MODEL TOOL CALLS RECEIVED: ${allCompleteToolCalls.length} complete tool call(s)`);
+
+								// CRITICAL: Emit current reasoning part as complete BEFORE resetting
+								// This ensures the frontend finalizes the thinking block before tool calls
+								// New reasoning after tools will go to a new thinking block
+								if (currentReasoningPart.length > 0 && currentReasoningPart !== lastEmittedReasoning) {
+									eventHandler({
+										type: 'token',
+										payload: {
+											thinking: currentReasoningPart, // Emit complete current part
+										},
+										timestamp: Date.now(),
+										task_id: taskId,
+									});
+									lastEmittedReasoning = currentReasoningPart;
+								}
+
+								// Reset content tracking when tool call happens (new markdown block will start after)
+								lastEmittedContent = '';
+								// CRITICAL: Reset reasoning tracking when tool call happens - next reasoning will be a new part
+								// NEW: Clear structured summary tracking
+								summaryByIndex.clear();
+								emittedSummaryIndices.clear();
+								// DEPRECATED: Keep for backward compatibility
+								accumulatedReasoning = '';
+								lastEmittedReasoning = '';
+								currentReasoningPart = '';
+								emittedContentSet.clear(); // Clear emitted content set for new block
+
+								for (const tc of allCompleteToolCalls) {
 							const toolName = tc.name || '';
 							const modelToolCallId = tc.id || 'undefined';
 
@@ -2089,22 +2266,22 @@ export class VybeLangGraphService {
 									toolCallId: modelToolCallId,
 								};
 							}
+							}
 						}
-					}
 
-					// Handle text content and extract thinking/reasoning
-					const content = token.content;
-					if (content) {
-						// Use extractThinkingContent for comprehensive thinking extraction
-						// This handles both OpenAI reasoning tokens and Anthropic thinking blocks
-						const { thinking, thinkingSummaries, content: textContent } = this.extractThinkingContent(token);
+						// Handle text content and extract thinking/reasoning
+						const content = token.content;
+						if (content) {
+							// Use extractThinkingContent for comprehensive thinking extraction
+							// This handles both OpenAI reasoning tokens and Anthropic thinking blocks
+							const { thinking, thinkingSummaries, content: textContent } = this.extractThinkingContent(token);
 
-						// NEW: Use structured summaries if available (OpenAI Responses API)
-						// LangChain converts response.reasoning_summary_text.delta events to summary items
-						// Each delta event creates a summary array with one item containing the delta text
-						// We accumulate these deltas by summary_index on the frontend
-						if (thinkingSummaries && thinkingSummaries.length > 0) {
-							for (const summaryItem of thinkingSummaries) {
+							// NEW: Use structured summaries if available (OpenAI Responses API)
+							// LangChain converts response.reasoning_summary_text.delta events to summary items
+							// Each delta event creates a summary array with one item containing the delta text
+							// We accumulate these deltas by summary_index on the frontend
+							if (thinkingSummaries && thinkingSummaries.length > 0) {
+								for (const summaryItem of thinkingSummaries) {
 								const index = summaryItem.index;
 								const text = summaryItem.text || '';
 
@@ -2127,11 +2304,11 @@ export class VybeLangGraphService {
 										task_id: taskId,
 									});
 								}
+								}
 							}
-						}
-						// DEPRECATED: Fallback to text-based approach for Anthropic thinking (backward compatibility)
-						else if (thinking) {
-							// CRITICAL: If reasoning tracking was reset (after tool call), this is definitely a new part
+							// DEPRECATED: Fallback to text-based approach for Anthropic thinking (backward compatibility)
+							else if (thinking) {
+								// CRITICAL: If reasoning tracking was reset (after tool call), this is definitely a new part
 							const isAfterToolCall = accumulatedReasoning.length === 0 && currentReasoningPart.length === 0;
 
 							// Check if this is a continuation of the current reasoning part or a new one
@@ -2421,11 +2598,38 @@ export class VybeLangGraphService {
 							timestamp: Date.now()
 						});
 
-						// Remove from tracking map once we receive the result
-						if (toolCallId !== 'undefined') {
-							toolCallIdMap.delete(toolCallId);
-						}
+					// Remove from tracking map once we receive the result
+					if (toolCallId !== 'undefined') {
+						toolCallIdMap.delete(toolCallId);
 					}
+				}
+					}
+				} catch (timeoutError) {
+					// Timeout detected - this is a network error
+					if (streamTimeoutId) {
+						clearTimeout(streamTimeoutId);
+						streamTimeoutId = null;
+					}
+					// Break out of while loop and re-throw to be caught by outer catch block
+					streamDone = true;
+					throw timeoutError;
+				}
+			}
+			} catch (streamError) {
+				// Catch errors during stream iteration (network errors, timeouts, etc.)
+				console.error('[VybeLangGraphService] Stream iteration error:', streamError);
+				// Clean up timeout if still active
+				if (streamTimeoutId) {
+					clearTimeout(streamTimeoutId);
+					streamTimeoutId = null;
+				}
+				// Re-throw to be caught by outer catch block which will handle error classification and emission
+				throw streamError;
+			} finally {
+				// Clean up timeout
+				if (streamTimeoutId) {
+					clearTimeout(streamTimeoutId);
+					streamTimeoutId = null;
 				}
 			}
 
@@ -2475,18 +2679,72 @@ export class VybeLangGraphService {
 				timestamp: Date.now()
 			});
 
+			// Log error details for debugging
+			console.error('[VybeLangGraphService] Error details:', {
+				errorType: error instanceof Error ? error.constructor.name : typeof error,
+				message: errorMessage,
+				hasErrorRecovery: !!this.errorRecovery,
+				taskId
+			});
+
 			// Log any untracked tool calls (these might be causing the "No tool output found" error)
 			if (toolCallIdMap.size > 0) {
 				console.error('[VybeLangGraphService] 🔧 ⚠️ UNTRACKED TOOL CALLS (no result received):',
 					Array.from(toolCallIdMap.entries()).map(([id, info]) => `${info.toolName} (${id})`).join(', '));
 			}
 
-			eventHandler({
-				type: 'error',
-				payload: { message: errorMessage, code: 'AGENT_ERROR', recoverable: false },
+			// Classify error using error recovery module
+			let errorClassification: any = {
+				errorType: 'unknown' as const,
+				recoverable: false,
+				canResume: false,
+				canRetry: true,
+				message: errorMessage,
+			};
+
+			if (this.errorRecovery) {
+				try {
+					errorClassification = this.errorRecovery.classifyError(error);
+				} catch (classificationError) {
+					console.warn('[VybeLangGraphService] Error classification failed:', classificationError);
+				}
+			}
+
+			// Get thread ID for resume functionality
+			const { getUserId } = await import('../../../services/indexing/common/namespaceUtils.js');
+			const { getUserScopedThreadId } = await import('../common/vybeCheckpointer.js');
+			const userId = getUserId();
+			const threadId = getUserScopedThreadId(userId, taskId);
+
+			// Get original message from state
+			const originalMessage = state.messages[0]?.content || '';
+
+			const errorEvent = {
+				type: 'error' as const,
+				payload: {
+					message: errorMessage,
+					code: 'AGENT_ERROR',
+					recoverable: errorClassification.recoverable,
+					errorType: errorClassification.errorType,
+					canResume: errorClassification.canResume,
+					canRetry: errorClassification.canRetry,
+					threadId: errorClassification.canResume ? threadId : undefined,
+					originalMessage: errorClassification.canRetry ? originalMessage : undefined,
+				},
 				timestamp: Date.now(),
 				task_id: taskId,
+			};
+
+			console.log('[VybeLangGraphService] 📤 Emitting error event:', {
+				errorType: errorClassification.errorType,
+				canResume: errorClassification.canResume,
+				canRetry: errorClassification.canRetry,
+				hasThreadId: !!errorEvent.payload.threadId,
+				hasOriginalMessage: !!errorEvent.payload.originalMessage,
+				taskId
 			});
+
+			eventHandler(errorEvent);
 
 			eventHandler({
 				type: 'complete',
@@ -3876,6 +4134,363 @@ export class VybeLangGraphService {
 	 */
 	getTaskState(taskId: string): AgentState | undefined {
 		return activeTasks.get(taskId)?.state;
+	}
+
+	/**
+	 * Resume a task from its last checkpoint after an error.
+	 * This is different from resumeWithApproval which handles HITL interrupts.
+	 */
+	async resumeTask(
+		taskId: string,
+		eventHandler: (event: LangGraphEvent) => void,
+		modelId?: string,
+		reasoningLevel?: 'low' | 'medium' | 'high' | 'xhigh',
+		toolContext?: ToolContext
+	): Promise<void> {
+		if (!this.errorRecovery) {
+			throw new Error('Error recovery not initialized');
+		}
+
+		// Get task info to determine model/reasoning level
+		const task = activeTasks.get(taskId);
+		const finalModelId = modelId || task?.state.model || 'azure/gpt-5.2';
+		const finalReasoningLevel = reasoningLevel || task?.reasoningLevel || 'medium';
+		const finalToolContext = toolContext || task?.toolContext;
+
+		// Create agent instance (same as startTask)
+		const { BUDGET_TIERS } = await import('./vybePromptConfig.js');
+		const level = task?.state.level || 'L2';
+		const tier = BUDGET_TIERS[level];
+
+		// Build system prompt
+		const { buildDynamicSystemPrompt } = await import('./vybeDynamicPrompt.js');
+		const systemPrompt = buildDynamicSystemPrompt({
+			level,
+			context: {},
+			toolCallCount: task?.state.toolCallCount || 0,
+			turnCount: task?.state.turnCount || 0,
+			messageCount: task?.state.messages.length || 0,
+			modelName: finalModelId,
+		});
+
+		// Create model
+		const model = this.createLangChainModel(finalModelId, finalReasoningLevel);
+		if (!model) {
+			throw new Error(`No LangChain adapter available for model: ${finalModelId}`);
+		}
+
+		// Get tools
+		langchainTools = createLangChainTools();
+
+		// Create agent
+		const agent = createAgent({
+			model: model,
+			tools: langchainTools,
+			checkpointer: this.checkpointer,
+			systemPrompt: systemPrompt,
+		});
+
+		// Check if task can be resumed
+		const canResume = await this.errorRecovery.canResumeTask(taskId, agent);
+		if (!canResume) {
+			throw new Error('Task is already complete or cannot be resumed');
+		}
+
+		// Get thread ID
+		const { getUserId } = await import('../../../services/indexing/common/namespaceUtils.js');
+		const { getUserScopedThreadId } = await import('../common/vybeCheckpointer.js');
+		const userId = getUserId();
+		const threadId = getUserScopedThreadId(userId, taskId);
+
+		const config = {
+			configurable: {
+				thread_id: threadId,
+			},
+			recursionLimit: tier.maxTurns * 4,
+		};
+
+		// Resume from checkpoint (pass null to continue from last checkpoint)
+		const stream = await agent.stream(null, { ...config, streamMode: 'messages' as const });
+
+		// Create ActiveTask for resume
+		const abortController = new AbortController();
+		const activeTask: ActiveTask = {
+			taskId,
+			state: task?.state || {
+				messages: [],
+				level: 'L2',
+				toolCallCount: 0,
+				turnCount: 0,
+				startTime: Date.now(),
+				suggestedUpgrade: false,
+				filesRead: [],
+				filesModified: [],
+				toolsUsed: [],
+				errors: [],
+			},
+			abortController,
+			eventHandler,
+			toolContext: finalToolContext,
+			checkpointer: this.checkpointer,
+			reasoningLevel: finalReasoningLevel,
+		};
+
+		activeTasks.set(taskId, activeTask);
+
+		// Process the stream directly for resume
+		// For resume, we pass null as input to agent.stream() to continue from checkpoint
+		console.log('[VybeLangGraphService] Resuming task from checkpoint...');
+
+		// Set up tool executor the same way as startTask
+		// This is needed for tool execution during resume
+		if (finalToolContext) {
+			// Tool execution queue to serialize tool calls
+			let toolExecutionQueue: Promise<string> = Promise.resolve('');
+			let toolQueuePosition = 0;
+			const TOOL_SEQUENTIAL_DELAY_MS = 300;
+
+			setToolExecutor(async (toolName: string, args: Record<string, unknown>): Promise<string> => {
+				const myPosition = ++toolQueuePosition;
+				console.log(`[VybeLangGraphService] 🔧 TOOL EXEC START (resume): ${toolName} (position ${myPosition})`);
+
+				const executeThisTool = async (): Promise<string> => {
+					// Wait for previous tools to complete
+					await toolExecutionQueue;
+
+					// Add delay for visual separation
+					if (myPosition > 1) {
+						await new Promise(resolve => setTimeout(resolve, TOOL_SEQUENTIAL_DELAY_MS));
+					}
+
+					// Execute tool via toolContext (same logic as startTask)
+					const toolCallId = `exec_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+					eventHandler({
+						type: 'token',
+						payload: {
+							content: '',
+							tool_call: {
+								id: toolCallId,
+								name: toolName,
+								args: JSON.stringify(args),
+							},
+						},
+						timestamp: Date.now(),
+						task_id: taskId,
+					});
+
+					// Execute tool (simplified - full implementation would match startTask)
+					let result = 'Tool execution for resume - needs full implementation';
+					try {
+						switch (toolName) {
+							case 'read_file':
+								result = await finalToolContext.fileService.readFile(
+									args.target_file as string,
+									args.offset as number | undefined,
+									args.limit as number | undefined
+								);
+								break;
+							case 'edit_file': {
+								const editFileResult = await finalToolContext.fileService.editFile(
+									args.file_path as string,
+									args.old_string as string,
+									args.new_string as string
+								);
+								const parsedResult = typeof editFileResult === 'string' ? JSON.parse(editFileResult) : editFileResult;
+								if (parsedResult?.deferred === true) {
+									result = parsedResult.message || `File edited successfully: ${args.file_path as string}. The file system has confirmed the write operation.`;
+								} else if (parsedResult?.created === true) {
+									result = `File created successfully: ${args.file_path as string}`;
+								} else {
+									result = `File edited successfully: ${args.file_path as string}`;
+								}
+								break;
+							}
+							case 'grep':
+								result = await finalToolContext.fileService.grep(
+									args.pattern as string,
+									args.path as string | undefined,
+									args.glob as string | undefined
+								);
+								break;
+							case 'list_dir':
+								result = await finalToolContext.fileService.listDir(args.target_directory as string);
+								break;
+							case 'delete_file':
+								result = await finalToolContext.fileService.deleteFile(args.target_file as string);
+								break;
+							case 'run_terminal_cmd':
+								result = await finalToolContext.terminalService.runCommand(
+									args.command as string,
+									args.is_background as boolean | undefined
+								);
+								break;
+							case 'codebase_search':
+								result = await finalToolContext.fileService.codebaseSearch(
+									args.query as string,
+									args.target_directories as string[] | undefined
+								);
+								break;
+							default:
+								result = `Unknown tool: ${toolName}`;
+						}
+
+						// Emit tool result
+						eventHandler({
+							type: 'tool.result',
+							payload: {
+								tool_id: toolCallId,
+								tool_name: toolName,
+								result: result.substring(0, 500),
+							},
+							timestamp: Date.now(),
+							task_id: taskId,
+						});
+
+						return result;
+					} catch (toolError) {
+						const errorMsg = toolError instanceof Error ? toolError.message : String(toolError);
+						eventHandler({
+							type: 'tool.result',
+							payload: {
+								tool_id: toolCallId,
+								tool_name: toolName,
+								error: errorMsg,
+							},
+							timestamp: Date.now(),
+							task_id: taskId,
+						});
+						throw toolError;
+					}
+				};
+
+				toolExecutionQueue = executeThisTool();
+				return await toolExecutionQueue;
+			});
+		}
+
+		// Process the stream (simplified version - full implementation would match runAgentLoop)
+		try {
+			let totalTokens = 0;
+			const emittedContentSet = new Set<string>();
+			let lastEmittedContent = '';
+			let accumulatedReasoning = '';
+			let currentReasoningPart = '';
+
+			for await (const [token] of stream) {
+				if (abortController.signal.aborted) {
+					console.log('[VybeLangGraphService] Resume stream aborted');
+					break;
+				}
+
+				totalTokens++;
+
+				if (isAIMessageChunk && isAIMessageChunk(token)) {
+					const content = token.content;
+					if (content) {
+						const { thinking, content: textContent } = this.extractThinkingContent(token);
+
+						// Handle thinking/reasoning (simplified - full implementation would match runAgentLoop)
+						if (thinking) {
+							if (!accumulatedReasoning || thinking.startsWith(accumulatedReasoning)) {
+								const delta = thinking.slice(accumulatedReasoning.length);
+								if (delta.length > 0) {
+									currentReasoningPart += delta;
+									eventHandler({
+										type: 'token',
+										payload: { thinking: delta },
+										timestamp: Date.now(),
+										task_id: taskId,
+									});
+								}
+								accumulatedReasoning = thinking;
+							}
+						}
+
+						// Handle text content
+						if (textContent) {
+							let deltaContent = textContent;
+							if (lastEmittedContent && textContent.startsWith(lastEmittedContent)) {
+								deltaContent = textContent.slice(lastEmittedContent.length);
+							}
+
+							if (deltaContent.length > 0 && !emittedContentSet.has(textContent)) {
+								eventHandler({
+									type: 'token',
+									payload: { content: deltaContent },
+									timestamp: Date.now(),
+									task_id: taskId,
+								});
+								emittedContentSet.add(textContent);
+								lastEmittedContent = textContent;
+							}
+						}
+					}
+				}
+			}
+
+			console.log(`[VybeLangGraphService] Resume streaming complete: ${totalTokens} tokens`);
+			eventHandler({
+				type: 'complete',
+				payload: { status: 'success' },
+				timestamp: Date.now(),
+				task_id: taskId,
+			});
+		} catch (resumeError) {
+			const errorMsg = resumeError instanceof Error ? resumeError.message : String(resumeError);
+			console.error('[VybeLangGraphService] Resume stream error:', errorMsg);
+			throw resumeError;
+		}
+	}
+
+	/**
+	 * Retry a task from scratch after an error.
+	 * Clears old checkpoint and starts new task with original message.
+	 */
+	async retryTask(
+		originalRequest: LangGraphTaskRequest,
+		eventHandler: (event: LangGraphEvent) => void,
+		toolContext?: ToolContext
+	): Promise<void> {
+		if (!this.errorRecovery) {
+			throw new Error('Error recovery not initialized');
+		}
+
+		// Clear old checkpoint
+		await this.errorRecovery.clearTaskCheckpoint(originalRequest.taskId);
+
+		// Start new task (will create new thread_id)
+		await this.startTask(originalRequest, eventHandler, toolContext);
+	}
+
+	/**
+	 * Get incomplete tasks for recovery on startup.
+	 */
+	async getIncompleteTasks(userId: string): Promise<Array<{
+		taskId: string;
+		threadId: string;
+		lastMessage: string;
+		timestamp: number;
+	}>> {
+		if (!this.errorRecovery) {
+			return [];
+		}
+
+		const incomplete = await this.errorRecovery.detectIncompleteThreads(userId);
+		// Import IncompleteThread type
+		type IncompleteThread = {
+			threadId: string;
+			taskId: string;
+			lastCheckpointId: string;
+			lastMessage: string;
+			timestamp: Date;
+		};
+		return incomplete.map((t: IncompleteThread) => ({
+			taskId: t.taskId,
+			threadId: t.threadId,
+			lastMessage: t.lastMessage,
+			timestamp: t.timestamp.getTime(),
+		}));
 	}
 }
 

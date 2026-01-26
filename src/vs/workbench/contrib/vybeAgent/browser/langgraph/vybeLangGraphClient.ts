@@ -28,6 +28,9 @@ const IPC_CHANNELS = {
 	LANGGRAPH_STATUS: 'vscode:vybeLangGraphStatus',
 	LANGGRAPH_TOOL_EXEC: 'vscode:vybeLangGraphToolExec',
 	LANGGRAPH_TOOL_RESULT: 'vscode:vybeLangGraphToolResult',
+	LANGGRAPH_RESUME_TASK: 'vscode:vybeLangGraphResumeTask',
+	LANGGRAPH_RETRY_TASK: 'vscode:vybeLangGraphRetryTask',
+	LANGGRAPH_GET_INCOMPLETE_TASKS: 'vscode:vybeLangGraphGetIncompleteTasks',
 } as const;
 
 // ============================================================================
@@ -267,6 +270,49 @@ export class VybeLangGraphClient extends Disposable {
 		}
 
 		return { available: false, initialized: false };
+	}
+
+	/**
+	 * Resume a task from its last checkpoint after an error.
+	 */
+	async resumeTask(taskId: string, modelId?: string, reasoningLevel?: 'low' | 'medium' | 'high' | 'xhigh'): Promise<void> {
+		if (!ipcRenderer) {
+			throw new Error('IPC renderer not available');
+		}
+
+		await ipcRenderer.invoke(IPC_CHANNELS.LANGGRAPH_RESUME_TASK, {
+			taskId,
+			modelId,
+			reasoningLevel,
+		});
+	}
+
+	/**
+	 * Retry a task from scratch after an error.
+	 */
+	async retryTask(request: LangGraphStartRequest): Promise<void> {
+		if (!ipcRenderer) {
+			throw new Error('IPC renderer not available');
+		}
+
+		await ipcRenderer.invoke(IPC_CHANNELS.LANGGRAPH_RETRY_TASK, request);
+	}
+
+	/**
+	 * Get incomplete tasks for recovery on startup.
+	 */
+	async getIncompleteTasks(): Promise<Array<{
+		taskId: string;
+		threadId: string;
+		lastMessage: string;
+		timestamp: number;
+	}>> {
+		if (!ipcRenderer) {
+			return [];
+		}
+
+		const result = await ipcRenderer.invoke(IPC_CHANNELS.LANGGRAPH_GET_INCOMPLETE_TASKS);
+		return (result as { tasks: Array<{ taskId: string; threadId: string; lastMessage: string; timestamp: number }> }).tasks || [];
 	}
 
 	/**

@@ -65,3 +65,13 @@ export interface LangGraphStreamChunk {
 	updates?: unknown;
 	custom?: unknown;
 }
+
+// Checkpointer utilities (moved to common directory)
+export {
+	createPostgresCheckpointer,
+	getUserScopedThreadId,
+	parseThreadId,
+	getLatestCheckpoint,
+	listCheckpoints,
+	deleteThread,
+} from '../../common/vybeCheckpointer.js';

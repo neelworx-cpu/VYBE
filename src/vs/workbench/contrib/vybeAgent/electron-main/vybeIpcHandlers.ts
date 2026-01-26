@@ -47,6 +47,15 @@ export const IPC_CHANNELS = {
 	/** Check if LangGraph is available */
 	LANGGRAPH_STATUS: 'vscode:vybeLangGraphStatus',
 
+	/** Resume task from checkpoint after error */
+	LANGGRAPH_RESUME_TASK: 'vscode:vybeLangGraphResumeTask',
+
+	/** Retry task from scratch after error */
+	LANGGRAPH_RETRY_TASK: 'vscode:vybeLangGraphRetryTask',
+
+	/** Get incomplete tasks for recovery */
+	LANGGRAPH_GET_INCOMPLETE_TASKS: 'vscode:vybeLangGraphGetIncompleteTasks',
+
 	/** Execute a tool (called from LangGraph, executed in browser) */
 	LANGGRAPH_TOOL_EXEC: 'vscode:vybeLangGraphToolExec',
 
@@ -297,6 +306,133 @@ export function registerVybeIpcHandlers(): void {
 		}
 
 		return { received: true };
+	});
+
+	// Resume task from checkpoint after error
+	validatedIpcMain.handle(IPC_CHANNELS.LANGGRAPH_RESUME_TASK, async (event: IpcMainInvokeEvent, request: { taskId: string; modelId?: string; reasoningLevel?: 'low' | 'medium' | 'high' | 'xhigh' }) => {
+		const { taskId, modelId, reasoningLevel } = request;
+		console.log('[VybeIpcHandlers] Resuming task from checkpoint:', taskId);
+
+		// Get tool context (same as startTask)
+		const toolContext: ToolContext = {
+			fileService: {
+				readFile: (path: string, offset?: number, limit?: number) =>
+					executeToolInBrowser(event, taskId, 'read_file', { path, offset, limit }),
+				writeFile: async (path: string, contents: string) => {
+					await executeToolInBrowser(event, taskId, 'write_file', { path, contents });
+				},
+				editFile: async (path: string, oldString: string, newString: string) => {
+					await executeToolInBrowser(event, taskId, 'edit_file', { path, old_string: oldString, new_string: newString });
+				},
+				grep: (pattern: string, path?: string, glob?: string) =>
+					executeToolInBrowser(event, taskId, 'grep', { pattern, path, glob }),
+				listDir: (path: string) =>
+					executeToolInBrowser(event, taskId, 'list_dir', { path }),
+				codebaseSearch: (query: string, directories?: string[]) =>
+					executeToolInBrowser(event, taskId, 'codebase_search', { query, directories }),
+				deleteFile: (targetFile: string) =>
+					executeToolInBrowser(event, taskId, 'delete_file', { target_file: targetFile }),
+			},
+			terminalService: {
+				runCommand: (command: string, isBackground?: boolean) =>
+					executeToolInBrowser(event, taskId, 'run_terminal_cmd', { command, is_background: isBackground }),
+			},
+		};
+
+		// Event handler sends events to browser
+		const eventHandler = (langGraphEvent: LangGraphEvent) => {
+			try {
+				event.sender.send(IPC_CHANNELS.LANGGRAPH_EVENT, langGraphEvent);
+			} catch {
+				// Window might be closed
+			}
+		};
+
+		await langGraphService.resumeTask(taskId, eventHandler, modelId, reasoningLevel, toolContext).catch(error => {
+			console.error('[VybeIpcHandlers] Resume task error:', error);
+			try {
+				event.sender.send(IPC_CHANNELS.LANGGRAPH_EVENT, {
+					type: 'error',
+					payload: { message: error instanceof Error ? error.message : String(error), code: 'RESUME_ERROR', recoverable: false },
+					timestamp: Date.now(),
+					task_id: taskId,
+				});
+			} catch {
+				// Window might be closed
+			}
+		});
+
+		return { resumed: true };
+	});
+
+	// Retry task from scratch after error
+	validatedIpcMain.handle(IPC_CHANNELS.LANGGRAPH_RETRY_TASK, async (event: IpcMainInvokeEvent, request: LangGraphStartRequest) => {
+		const { taskId, goal, model, level, reasoningLevel, context } = request;
+		console.log('[VybeIpcHandlers] Retrying task from scratch:', taskId);
+
+		// Get tool context (same as startTask)
+		const toolContext: ToolContext = {
+			fileService: {
+				readFile: (path: string, offset?: number, limit?: number) =>
+					executeToolInBrowser(event, taskId, 'read_file', { path, offset, limit }),
+				writeFile: async (path: string, contents: string) => {
+					await executeToolInBrowser(event, taskId, 'write_file', { path, contents });
+				},
+				editFile: async (path: string, oldString: string, newString: string) => {
+					await executeToolInBrowser(event, taskId, 'edit_file', { path, old_string: oldString, new_string: newString });
+				},
+				grep: (pattern: string, path?: string, glob?: string) =>
+					executeToolInBrowser(event, taskId, 'grep', { pattern, path, glob }),
+				listDir: (path: string) =>
+					executeToolInBrowser(event, taskId, 'list_dir', { path }),
+				codebaseSearch: (query: string, directories?: string[]) =>
+					executeToolInBrowser(event, taskId, 'codebase_search', { query, directories }),
+				deleteFile: (targetFile: string) =>
+					executeToolInBrowser(event, taskId, 'delete_file', { target_file: targetFile }),
+			},
+			terminalService: {
+				runCommand: (command: string, isBackground?: boolean) =>
+					executeToolInBrowser(event, taskId, 'run_terminal_cmd', { command, is_background: isBackground }),
+			},
+		};
+
+		// Event handler sends events to browser
+		const eventHandler = (langGraphEvent: LangGraphEvent) => {
+			try {
+				event.sender.send(IPC_CHANNELS.LANGGRAPH_EVENT, langGraphEvent);
+			} catch {
+				// Window might be closed
+			}
+		};
+
+		await langGraphService.retryTask(
+			{ taskId, goal, model, level, reasoningLevel, context },
+			eventHandler,
+			toolContext
+		).catch(error => {
+			console.error('[VybeIpcHandlers] Retry task error:', error);
+			try {
+				event.sender.send(IPC_CHANNELS.LANGGRAPH_EVENT, {
+					type: 'error',
+					payload: { message: error instanceof Error ? error.message : String(error), code: 'RETRY_ERROR', recoverable: false },
+					timestamp: Date.now(),
+					task_id: taskId,
+				});
+			} catch {
+				// Window might be closed
+			}
+		});
+
+		return { retried: true };
+	});
+
+	// Get incomplete tasks for recovery
+	validatedIpcMain.handle(IPC_CHANNELS.LANGGRAPH_GET_INCOMPLETE_TASKS, async () => {
+		console.log('[VybeIpcHandlers] Getting incomplete tasks...');
+		const { getUserId } = await import('../../../services/indexing/common/namespaceUtils.js');
+		const userId = getUserId();
+		const incomplete = await langGraphService.getIncompleteTasks(userId);
+		return { tasks: incomplete };
 	});
 
 }

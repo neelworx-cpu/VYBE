@@ -38,25 +38,16 @@ export class ComposerWarningPopup extends Disposable {
 	}
 
 	private isDarkTheme(): boolean {
-		// Check body classes first
+		// Same detection as MessageComposer so theme switch matches (body + workbench)
 		const body = document.body;
-		if (body.classList.contains('vs-dark') || body.classList.contains('vscode-dark')) {
-			return true;
-		}
-		// Also check by background color brightness
-		const inputBox = this.getInputBox();
-		if (inputBox) {
-			const computedBg = window.getComputedStyle(inputBox).backgroundColor;
-			const rgbMatch = computedBg.match(/\d+/g);
-			if (rgbMatch && rgbMatch.length >= 3) {
-				const r = parseInt(rgbMatch[0]);
-				const g = parseInt(rgbMatch[1]);
-				const b = parseInt(rgbMatch[2]);
-				const avg = (r + g + b) / 3;
-				return avg < 128; // Dark if average is less than 128
-			}
-		}
-		return false;
+		const workbench = document.querySelector('.monaco-workbench');
+		return !!(
+			body.classList.contains('vs-dark') ||
+			body.classList.contains('vscode-dark') ||
+			body.classList.contains('hc-black') ||
+			workbench?.classList.contains('vs-dark') ||
+			workbench?.classList.contains('hc-black')
+		);
 	}
 
 	private getComposerBackgroundColor(): string {
@@ -69,8 +60,34 @@ export class ComposerWarningPopup extends Disposable {
 				return computedBg;
 			}
 		}
-		// Fallback: check theme and use hardcoded values
+		// Fallback: same as AI input box in messageComposer (Vybe light/dark)
 		return this.isDarkTheme() ? '#212427' : '#eceff2';
+	}
+
+	private getComposerBorder(): string {
+		// Get the actual computed border from the input box so popup matches exactly
+		const inputBox = this.getInputBox();
+		if (inputBox) {
+			const s = window.getComputedStyle(inputBox);
+			const w = s.borderWidth;
+			const style = s.borderStyle;
+			const color = s.borderColor;
+			if (w && style && color && style !== 'none') {
+				return `${w} ${style} ${color}`;
+			}
+		}
+		// Fallback: same as AI input box in messageComposer (Vybe light/dark)
+		return this.isDarkTheme() ? '1px solid #383838' : '1px solid #d9d9d9';
+	}
+
+	private isElementInViewport(element: HTMLElement): boolean {
+		const rect = element.getBoundingClientRect();
+		return (
+			rect.top >= 0 &&
+			rect.left >= 0 &&
+			rect.bottom <= (window.innerHeight || document.documentElement.clientHeight) &&
+			rect.right <= (window.innerWidth || document.documentElement.clientWidth)
+		);
 	}
 
 	/**
@@ -80,72 +97,73 @@ export class ComposerWarningPopup extends Disposable {
 		// Remove existing popup if any
 		this.hide();
 
-		// Get the actual computed background color from the input box
-		const composerBg = this.getComposerBackgroundColor();
-
-		// Get input box for positioning
-		const inputBox = this.getInputBox();
-		const inputBoxRect = inputBox ? inputBox.getBoundingClientRect() : null;
-		const parentRect = this.parentElement.getBoundingClientRect();
-
-		// Create popup element
+		// Create popup element - part of composer family: same border, background, font as input box
 		this.popupElement = $('.composer-warning-popup');
 		this.popupElement.setAttribute('tabindex', '-1');
-		this.popupElement.className = 'flex flex-col border-[var(--vscode-dropdown-border)] border border-solid absolute z-[11] p-2 rounded-lg shadow-md fade-in-fast bottom-full composer-warning-popup';
+		this.popupElement.className = 'composer-warning-popup';
+		// Position as part of composer: absolute, full width of parent, above composer
+		this.popupElement.style.position = 'absolute';
+		this.popupElement.style.left = '0';
+		this.popupElement.style.right = '0';
+		this.popupElement.style.bottom = '100%';
 		this.popupElement.style.marginBottom = '4px';
-		this.popupElement.style.backgroundColor = composerBg;
-		this.popupElement.style.gap = '0';
+		this.popupElement.style.zIndex = '11';
+		this.popupElement.style.display = 'flex';
+		this.popupElement.style.flexDirection = 'column';
+		this.popupElement.style.padding = '8px';
+		// Same border radius as AI input box (8px)
+		this.popupElement.style.borderRadius = '8px';
+		this.popupElement.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
+		// Match AI input box exactly: copy computed background and border from .vybe-ai-input-box
+		this.popupElement.style.backgroundColor = this.getComposerBackgroundColor();
+		this.popupElement.style.border = this.getComposerBorder();
+		this.popupElement.style.fontFamily = 'var(--vscode-font-family)';
+		this.popupElement.style.fontSize = 'var(--vscode-font-size)';
+		this.popupElement.style.color = 'var(--vscode-foreground)';
 
-		// Position exactly aligned with input box (accounting for wrapper)
-		if (inputBoxRect && parentRect) {
-			// Calculate offset from parent to input box
-			const leftOffset = inputBoxRect.left - parentRect.left;
-			const rightOffset = parentRect.right - inputBoxRect.right;
-			this.popupElement.style.left = `${leftOffset}px`;
-			this.popupElement.style.right = `${rightOffset}px`;
-		} else {
-			// Fallback: align with parent
-			this.popupElement.style.left = '0';
-			this.popupElement.style.right = '0';
-		}
-
-		// Header row - title on left, close button on far right
-		const headerRow = $('.flex.gap-1.5.items-start.flex-wrap');
+		// Header row: title (left) | close button (right) only
+		const headerRow = $('.composer-warning-popup-header');
 		headerRow.style.display = 'flex';
-		headerRow.style.gap = '6px';
+		headerRow.style.gap = '8px';
 		headerRow.style.alignItems = 'center';
-		headerRow.style.flexWrap = 'nowrap';
-		headerRow.style.justifyContent = 'space-between';
 		headerRow.style.width = '100%';
 		headerRow.style.marginBottom = '6px';
+		headerRow.style.minHeight = '0';
 
-		// Title
+		// Title (left)
 		const title = $('.composer-error-title');
 		title.className = 'composer-error-title';
 		title.textContent = options.title;
 		title.style.fontSize = '12px';
 		title.style.fontWeight = '500';
-		title.style.lineHeight = '15.6px';
+		title.style.lineHeight = '1.4';
 		title.style.flex = '1';
 		title.style.minWidth = '0';
+		title.style.color = 'var(--vscode-foreground)';
+		headerRow.appendChild(title);
 
-		// Close button
 		if (options.showCloseButton !== false) {
-			const closeButton = $('.composer-warning-popup-close-button');
-			closeButton.className = 'anysphere-icon-button bg-[transparent] border-none text-[var(--cursor-text-primary)] flex w-4 items-center justify-center h-[14px] w-[16px] p-0 composer-warning-popup-close-button';
-			closeButton.style.width = '20px';
-			closeButton.style.height = '20px';
+			const closeButton = $('button.composer-warning-popup-close-button');
+			closeButton.setAttribute('type', 'button');
+			closeButton.setAttribute('aria-label', 'Close');
+			closeButton.className = 'composer-warning-popup-close-button codicon-button';
+			closeButton.style.width = '22px';
+			closeButton.style.height = '22px';
+			closeButton.style.minWidth = '22px';
 			closeButton.style.cursor = 'pointer';
-			closeButton.style.opacity = '0.5';
 			closeButton.style.display = 'flex';
 			closeButton.style.alignItems = 'center';
 			closeButton.style.justifyContent = 'center';
 			closeButton.style.flexShrink = '0';
-			closeButton.style.marginLeft = 'auto';
+			closeButton.style.border = 'none';
+			closeButton.style.background = 'transparent';
+			closeButton.style.color = 'var(--vscode-foreground)';
+			closeButton.style.opacity = '1';
 
-			const closeIcon = $('span');
+			const closeIcon = $('span.codicon.codicon-close');
 			closeIcon.className = 'codicon codicon-close';
-			closeIcon.style.fontSize = '15px';
+			closeIcon.style.fontSize = '16px';
+			closeIcon.style.color = 'inherit';
 			closeButton.appendChild(closeIcon);
 
 			this._register(addDisposableListener(closeButton, 'click', () => {
@@ -155,19 +173,26 @@ export class ComposerWarningPopup extends Disposable {
 				}
 			}));
 
-			headerRow.appendChild(title);
 			headerRow.appendChild(closeButton);
-		} else {
-			headerRow.appendChild(title);
 		}
 
-		// Message row
-		const messageRow = $('.text-[12px].select-text');
-		messageRow.style.fontSize = '12px';
-		messageRow.style.userSelect = 'text';
-		messageRow.style.color = 'var(--vscode-foreground)';
-		messageRow.style.minWidth = '0';
-		messageRow.style.marginBottom = '6px';
+		// Details row: same row — description (left, wraps if long) + Try Again / other buttons (bottom-right)
+		const detailsRow = $('.composer-warning-popup-details');
+		detailsRow.style.display = 'flex';
+		detailsRow.style.flexDirection = 'row';
+		detailsRow.style.gap = '8px';
+		detailsRow.style.alignItems = 'flex-end';
+		detailsRow.style.width = '100%';
+		detailsRow.style.minWidth = '0';
+
+		// Description (left, takes remaining space, wraps)
+		const messageBlock = $('.composer-warning-popup-message');
+		messageBlock.style.flex = '1';
+		messageBlock.style.fontSize = '12px';
+		messageBlock.style.userSelect = 'text';
+		messageBlock.style.color = 'var(--vscode-foreground)';
+		messageBlock.style.minWidth = '0';
+		messageBlock.style.wordWrap = 'break-word';
 
 		const messageContainer = $('.composer-warning-message-with-title');
 		messageContainer.style.opacity = '0.8';
@@ -191,90 +216,54 @@ export class ComposerWarningPopup extends Disposable {
 		markdownSection.appendChild(messageSpan);
 		markdownContainer.appendChild(markdownSection);
 		messageContainer.appendChild(markdownContainer);
-		messageRow.appendChild(messageContainer);
+		messageBlock.appendChild(messageContainer);
 
-		// Control row (buttons)
-		let controlRow: HTMLElement | null = null;
-		if (options.buttons && options.buttons.length > 0) {
-			controlRow = $('.composer-warning-popup-control-row');
-			controlRow.className = 'composer-warning-popup-control-row flex gap-1.5 justify-between items-center flex-row';
-			controlRow.style.display = 'flex';
-			controlRow.style.gap = '6px';
-			controlRow.style.justifyContent = 'space-between';
-			controlRow.style.alignItems = 'center';
-			controlRow.style.flexDirection = 'row';
-			controlRow.style.paddingTop = '0';
-			controlRow.style.paddingLeft = '0';
+		detailsRow.appendChild(messageBlock);
 
-			// Count non-tertiary buttons to determine variant
-			// If only one non-tertiary button = primary, if two+ = secondary
-			const nonTertiaryButtons = options.buttons.filter(b => b.variant !== 'tertiary');
-			const nonTertiaryCount = nonTertiaryButtons.length;
-			const isSingleNonTertiary = nonTertiaryCount === 1;
-
-			// Left side buttons (tertiary) - can shrink/truncate
-			const leftButtons = $('.flex.gap-1.5.items-center');
-			leftButtons.style.display = 'flex';
-			leftButtons.style.gap = '6px';
-			leftButtons.style.alignItems = 'center';
-			leftButtons.style.paddingLeft = '0';
-			leftButtons.style.flex = '1';
-			leftButtons.style.minWidth = '0'; // Allow shrinking below content size
-			leftButtons.style.overflow = 'hidden'; // Hide overflow
-
-			// Right side buttons (primary/secondary) - must not shrink
-			const rightButtons = $('.flex.gap-1.5.items-center');
-			rightButtons.style.display = 'flex';
-			rightButtons.style.gap = '6px';
-			rightButtons.style.alignItems = 'center';
-			rightButtons.style.flexShrink = '0'; // Prevent shrinking
-
-			// Detect theme for button styling
+		// Buttons on same row (right side): Try Again, Resume, etc.
+		const nonTertiaryButtons = options.buttons ? options.buttons.filter(b => b.variant !== 'tertiary') : [];
+		if (nonTertiaryButtons.length > 0) {
 			const isDarkTheme = this.isDarkTheme();
+			const isSingleAction = nonTertiaryButtons.length === 1;
+			const buttonGroup = $('div');
+			buttonGroup.style.display = 'flex';
+			buttonGroup.style.gap = '6px';
+			buttonGroup.style.alignItems = 'center';
+			buttonGroup.style.flexShrink = '0';
 
-			options.buttons.forEach((button) => {
-				// Determine final variant
-				let finalVariant = button.variant;
-				if (button.variant === 'tertiary') {
-					// Keep tertiary as is
-					finalVariant = 'tertiary';
-				} else if (isSingleNonTertiary) {
-					// Single non-tertiary button = primary
-					finalVariant = 'primary';
-				} else {
-					// Multiple non-tertiary buttons = secondary
-					finalVariant = 'secondary';
-				}
-
-				const buttonElement = this.createButton({
-					...button,
-					variant: finalVariant
-				}, isDarkTheme);
-
-				if (button.variant === 'tertiary') {
-					leftButtons.appendChild(buttonElement);
-				} else {
-					rightButtons.appendChild(buttonElement);
-				}
+			nonTertiaryButtons.forEach((button) => {
+				// Use button's variant when provided so e.g. Try Again can match solo primary style
+				const finalVariant = button.variant ?? (isSingleAction ? 'primary' : 'secondary');
+				const buttonElement = this.createButton({ ...button, variant: finalVariant }, isDarkTheme);
+				buttonGroup.appendChild(buttonElement);
 			});
 
-			controlRow.appendChild(leftButtons);
-			controlRow.appendChild(rightButtons);
+			detailsRow.appendChild(buttonGroup);
 		}
 
-		// Assemble popup
+		// Assemble popup: header row + details row (description + buttons)
 		this.popupElement.appendChild(headerRow);
-		this.popupElement.appendChild(messageRow);
-		if (controlRow) {
-			this.popupElement.appendChild(controlRow);
+		this.popupElement.appendChild(detailsRow);
+
+		// Ensure parent has position: relative so absolute popup is positioned relative to it
+		const parentStyle = window.getComputedStyle(this.parentElement);
+		if (parentStyle.position === 'static') {
+			this.parentElement.style.position = 'relative';
 		}
 
-		// Append to parent (should be the input box wrapper)
-		this.parentElement.appendChild(this.popupElement);
+		// Append as first child so it sits above the input in DOM and draws above it; width follows parent (left/right 0)
+		if (this.parentElement.firstChild) {
+			this.parentElement.insertBefore(this.popupElement, this.parentElement.firstChild);
+		} else {
+			this.parentElement.appendChild(this.popupElement);
+		}
 		this.isVisible = true;
 
-		// Add fade-in animation
+		// If popup would be above viewport, scroll it into view
 		requestAnimationFrame(() => {
+			if (this.popupElement && !this.isElementInViewport(this.popupElement)) {
+				this.popupElement.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+			}
 			if (this.popupElement) {
 				this.popupElement.classList.add('fade-in-fast');
 			}
@@ -373,6 +362,31 @@ export class ComposerWarningPopup extends Disposable {
 		}
 		this.popupElement = null;
 		this.isVisible = false;
+	}
+
+	/**
+	 * Update popup position (e.g. after resize). With absolute positioning in parent, width follows automatically; optionally scroll into view.
+	 */
+	public updatePosition(): void {
+		if (!this.popupElement || !this.isVisible) {
+			return;
+		}
+		if (!this.isElementInViewport(this.popupElement)) {
+			this.popupElement.scrollIntoView({ block: 'nearest', behavior: 'auto' });
+		}
+	}
+
+	/**
+	 * Re-apply theme-dependent styles (background, border) when theme changes so the popup matches the composer in light/dark.
+	 * Uses the same logic and values as MessageComposer.updateTheme() for the input box so we stay in sync without depending on getComputedStyle timing.
+	 */
+	public updateTheme(): void {
+		if (!this.popupElement || !this.isVisible) {
+			return;
+		}
+		const isDark = this.isDarkTheme();
+		this.popupElement.style.backgroundColor = 'var(--vscode-titleBar-activeBackground)';
+		this.popupElement.style.border = isDark ? '1px solid #383838' : '1px solid #d9d9d9';
 	}
 
 	/**

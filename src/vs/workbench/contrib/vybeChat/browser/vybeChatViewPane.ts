@@ -27,7 +27,7 @@ import { getSessionIdFromViewId, VYBE_CHAT_NEW_CHAT_LABEL } from '../common/vybe
 import { MessageComposer } from './components/composer/messageComposer.js';
 import { ContextDropdown } from './components/composer/contextDropdown.js';
 import { UsageDropdown } from './components/composer/usageDropdown.js';
-import { MessagePage, MessagePageOptions } from './components/chatArea/messagePage.js';
+import { MessagePage, MessagePageOptions, type ContextPillData, type ImageAttachmentData } from './components/chatArea/messagePage.js';
 import type { IVybeChatTodoContent, IVybeChatTodoItemContent, IVybeChatToolContent, IVybeChatTextEditContent } from './contentParts/vybeChatContentPart.js';
 import { IModelService } from '../../../../editor/common/services/model.js';
 import { ILanguageService } from '../../../../editor/common/languages/language.js';
@@ -231,11 +231,21 @@ export class VybeChatViewPane extends ViewPane {
 		// Render composer at the bottom
 		this.composer = this._register(this.instantiationService.createInstance(MessageComposer, container, this._speechService, false, false));
 
+		// Check for incomplete tasks on startup (recovery)
+		// Delay slightly to ensure agent service is ready
+		setTimeout(() => {
+			this.checkForIncompleteTasks().catch(error => {
+				console.error('[VYBE Chat] Failed to check for incomplete tasks:', error);
+			});
+		}, 2000);
+
 		// VYBE-PATCH-START: test-helpers
 		// Expose composer globally for testing
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 		(globalThis as any).__vybeComposer = this.composer;
-		// Helper function to test warning popup
+		// Helper to test warning popup without toggling WiFi.
+		// In DevTools console: testComposerWarning() or testComposerWarning('error')
+		// For connection error popup: testConnectionErrorPopup()
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 		(globalThis as any).testComposerWarning = (type: 'error' | 'warning' | 'info' = 'error') => {
 			if (this.composer) {
@@ -244,6 +254,10 @@ export class VybeChatViewPane extends ViewPane {
 			} else {
 				console.warn('Composer not available');
 			}
+		};
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		(globalThis as any).testConnectionErrorPopup = () => {
+			(globalThis as any).testComposerWarning('error');
 		};
 		// Test function for TODO component
 		// Capture 'this' in closure so it works when called from console
@@ -469,109 +483,139 @@ export class VybeChatViewPane extends ViewPane {
 		}));
 	}
 
-	private async handleSendMessage(message: string): Promise<void> {
+	/**
+	 * Check for incomplete tasks on startup and show recovery popups.
+	 */
+	private async checkForIncompleteTasks(): Promise<void> {
+		try {
+			if (this._agentService.getIncompleteTasks) {
+				const incomplete = await this._agentService.getIncompleteTasks();
+				if (incomplete && incomplete.length > 0) {
+					// Show recovery popup for first incomplete task
+					// TODO: Handle multiple incomplete tasks (show list or queue)
+					const task = incomplete[0];
+					console.log('[VYBE Chat] Incomplete task detected on startup:', task.taskId);
+					// The recovery popup will be shown when the UI receives the recovery event
+					// For now, we just log - the UI handler for recovery.incomplete_tasks will show the popup
+				}
+			}
+		} catch (error) {
+			console.error('[VYBE Chat] Failed to check for incomplete tasks:', error);
+		}
+	}
+
+	/** Used by offline Try Again to retry on the same message page (Cursor-style: one page, retry reuses it). */
+	private async handleSendMessage(
+		message: string,
+		retryContext?: { messageId: string; messagePage: MessagePage; message: string; contextPills: ContextPillData[]; images: ImageAttachmentData[] }
+	): Promise<void> {
 		// Don't reset todo tracking here - let it persist across message pages
 		// The tracking will be updated as todos are completed via trackTodosForPersistence
 		if (!this.chatArea || !message.trim()) {
 			return;
 		}
 
-		// Create message page
-		const messageId = `msg-${Date.now()}`;
-		this.currentStreamingMessageId = messageId; // Track current streaming message
+		let messageId: string;
+		let messagePage: MessagePage;
+		let contextPills: ContextPillData[];
+		let images: ImageAttachmentData[];
+		let options: MessagePageOptions;
 
-		// Capture full composer state (pills, images)
-		const contextPills = this.composer ? this.composer.getContextPillsData() : [];
-		const images = this.composer ? this.composer.getImagesData() : [];
+		if (retryContext) {
+			// Cursor-style: reuse same message page — do not create message page 2; retry on page 1
+			messageId = retryContext.messageId;
+			messagePage = retryContext.messagePage;
+			message = retryContext.message;
+			contextPills = retryContext.contextPills;
+			images = retryContext.images;
+			this.currentStreamingMessageId = messageId;
+			options = {
+				messageId,
+				messageIndex: 0,
+				content: message,
+				contextPills,
+				images,
+				isStreaming: true,
+				speechService: this._speechService,
+				instantiationService: this.instantiationService,
+				onStop: () => {
+					const page = this.messagePages.get(messageId);
+					if (page) page.setStreaming(false);
+					if (this.currentStreamingMessageId === messageId) this.currentStreamingMessageId = null;
+					if (this.composer) this.composer.switchToSendButton();
+				},
+				onComposerSend: () => {},
+				onContentUpdate: () => {
+					this.scrollToShowLatestContent();
+					this.trackTodosForPersistence(messagePage);
+				}
+			};
+		} else {
+			// New send: always create message page 1 (even when offline so the human message shows); Try Again reuses it
+			messageId = `msg-${Date.now()}`;
+			this.currentStreamingMessageId = messageId;
+			contextPills = this.composer ? this.composer.getContextPillsData() : [];
+			images = this.composer ? this.composer.getImagesData() : [];
+			options = {
+				messageId,
+				messageIndex: this.messageIndex++,
+				content: message,
+				contextPills,
+				images,
+				isStreaming: true,
+				speechService: this._speechService,
+				instantiationService: this.instantiationService,
+				onStop: () => {
+					const page = this.messagePages.get(messageId);
+					if (page) page.setStreaming(false);
+					if (this.currentStreamingMessageId === messageId) this.currentStreamingMessageId = null;
+					if (this.composer) this.composer.switchToSendButton();
+				},
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any
+				onComposerSend: (content: string, pills: any[], imgs: any[], agentMode: any, modelState: any) => {
+					const page = this.messagePages.get(messageId);
+					if (page) page.updateContent(content, pills, imgs, agentMode, modelState);
+				},
+				onContentUpdate: () => {
+					this.scrollToShowLatestContent();
+					this.trackTodosForPersistence(messagePage);
+				}
+			};
+			messagePage = this._register(new MessagePage(
+				this.chatArea,
+				options,
+				this.markdownRendererService,
+				this._modelService,
+				this._languageService,
+				this.instantiationService,
+				this._clipboardService,
+				this._editorService,
+				this._fileService,
+				this._notificationService,
+				this.workspaceContextService
+			));
+			this.messagePages.set(messageId, messagePage);
 
-
-		const options: MessagePageOptions = {
-			messageId,
-			messageIndex: this.messageIndex++,
-			content: message,
-			contextPills: contextPills,
-			images: images,
-			isStreaming: true, // Start in streaming state
-			speechService: this._speechService,
-			instantiationService: this.instantiationService,
-			onStop: () => {
-				// Stop streaming for this message
-				const page = this.messagePages.get(messageId);
-				if (page) {
-					page.setStreaming(false);
+			if (this.incompleteTodos) {
+				const incompleteCount = this.incompleteTodos.items.filter(item => item.status !== 'completed').length;
+				if (incompleteCount > 0) {
+					messagePage.attachTodoToHumanMessage(this.incompleteTodos);
+				} else {
+					this.incompleteTodos = null;
 				}
-				// Clear current streaming message
-				if (this.currentStreamingMessageId === messageId) {
-					this.currentStreamingMessageId = null;
-				}
-				// Switch main composer back to send button
-				if (this.composer) {
-					this.composer.switchToSendButton();
-				}
-			},
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
-			onComposerSend: (content: string, pills: any[], images: any[], agentMode: any, modelState: any) => {
-				// Update the message page with new content
-				const page = this.messagePages.get(messageId);
-				if (page) {
-					page.updateContent(content, pills, images, agentMode, modelState);
-				}
-				// TODO: Send updated message to AI service
-			},
-			onContentUpdate: () => {
-				// Smart scroll when content changes (streaming, new elements, etc.)
-				this.scrollToShowLatestContent();
-
-				// Track todos and todoItem parts for cross-page persistence
-				this.trackTodosForPersistence(messagePage);
 			}
-		};
 
-		const messagePage = this._register(new MessagePage(
-			this.chatArea,
-			options,
-			this.markdownRendererService,
-			this._modelService,
-			this._languageService,
-			this.instantiationService,
-			this._clipboardService,
-			this._editorService,
-			this._fileService,
-			this._notificationService,
-			this.workspaceContextService
-		));
-		this.messagePages.set(messageId, messagePage);
-
-		// Check if there are incomplete todos from previous page that need to be attached
-		// Attach to human message in the next chat pair if todos are still incomplete
-		if (this.incompleteTodos) {
-			// Check if todos are still incomplete (not all completed)
-			const incompleteCount = this.incompleteTodos.items.filter(item => item.status !== 'completed').length;
-			if (incompleteCount > 0) {
-				// Attach todos to the human message in this new page
-				messagePage.attachTodoToHumanMessage(this.incompleteTodos);
-				// Keep tracking - they're attached but we still need to track for next page if still incomplete
-				// The tracking will be updated as todos are completed
-			} else {
-				// All completed - clear tracking
-				this.incompleteTodos = null;
-			}
+			const targetWindow = this.chatArea ? getWindow(this.chatArea) : getActiveWindow();
+			targetWindow.requestAnimationFrame(() => {
+				if (this.chatArea) {
+					const messageElement = messagePage.getElement();
+					const chatAreaRect = this.chatArea.getBoundingClientRect();
+					const messageRect = messageElement.getBoundingClientRect();
+					const scrollOffset = messageRect.top - chatAreaRect.top + this.chatArea.scrollTop;
+					this.chatArea.scrollTop = scrollOffset;
+				}
+			});
 		}
-
-		// Scroll to show new message (smooth scroll within chat area only)
-		const targetWindow = this.chatArea ? getWindow(this.chatArea) : getActiveWindow();
-		targetWindow.requestAnimationFrame(() => {
-			if (this.chatArea) {
-				// Calculate the position of the message page within the chat area
-				const messageElement = messagePage.getElement();
-				const chatAreaRect = this.chatArea.getBoundingClientRect();
-				const messageRect = messageElement.getBoundingClientRect();
-
-				// Scroll chat area to bring message to the top
-				const scrollOffset = messageRect.top - chatAreaRect.top + this.chatArea.scrollTop;
-				this.chatArea.scrollTop = scrollOffset;
-			}
-		});
 
 		// Convert context pills to AI service format
 		await this.convertContextPillsToVariableEntries(contextPills);
@@ -607,7 +651,15 @@ export class VybeChatViewPane extends ViewPane {
 
 		// Set streaming state
 		messagePage.setStreaming(true);
+		// Show animated planning phase indicator immediately (backend may never send agent.phase if it fails fast)
+		messagePage.addContentPart({
+			kind: 'phaseIndicator',
+			id: `phase-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+			phase: 'planning',
+			isStreaming: true
+		});
 
+		let eventSubscription: IDisposable | null = null;
 		try {
 			// Get selected mode and level from composer (defaults if not available)
 			const selectedMode = this.composer?.getAgentMode() || 'agent';
@@ -620,7 +672,6 @@ export class VybeChatViewPane extends ViewPane {
 			const taskId = `task-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
 			// Subscribe to streaming events BEFORE starting the task
-			let eventSubscription: IDisposable | null = null;
 			let hasReceivedEvents = false;
 
 			// Track when tool parts are created to ensure minimum display time for "Reading" state
@@ -634,6 +685,72 @@ export class VybeChatViewPane extends ViewPane {
 			// Track tool parts by toolType:target to prevent duplicates
 			// Key: "toolType:target", Value: toolId
 			const toolPartsByTarget = new Map<string, string>();
+
+			// Shared resolve for wait promise so we can resolve on network error (Cursor-style: popup after request fails)
+			let resolveWait: (() => void) | null = null;
+			// Cursor-style: don't show connection error popup until we've waited at least N seconds for first token
+			const MIN_WAIT_BEFORE_CONNECTION_ERROR_MS = 15000;
+			let hasReceivedFirstToken = false;
+			let noFirstTokenTimer: ReturnType<typeof setTimeout> | null = null;
+			let pendingConnectionError = false;
+
+			const showConnectionErrorPopup = () => {
+				messagePage.removePhaseIndicator();
+				messagePage.setStreaming(false);
+				if (this.currentStreamingMessageId === messageId) {
+					this.currentStreamingMessageId = null;
+				}
+				if (this.composer) {
+					this.composer.showWarning({
+						title: 'Connection Error',
+						message: 'Connection failed. If the problem persists, please check your internet connection or VPN.',
+						showCloseButton: true,
+						buttons: [
+							{
+								label: 'Resume',
+								variant: 'primary',
+								action: () => {
+									this.composer?.hideWarning();
+									messagePage.setStreaming(true);
+									this.currentStreamingMessageId = messageId;
+									if (this._agentService.resumeTask) {
+										void this._agentService.resumeTask(taskId, selectedModelId, reasoningLevel);
+									}
+								}
+							},
+							{
+								label: 'Try Again',
+								variant: 'primary',
+								keybinding: '⌘⏎',
+								action: () => {
+									resolveWait?.();
+									this.composer?.hideWarning();
+									messagePage.clearAiContent();
+									void this.handleSendMessage(message, {
+										messageId,
+										messagePage,
+										message,
+										contextPills,
+										images
+									});
+								}
+							},
+							{
+								label: 'Cancel',
+								variant: 'tertiary',
+								action: () => {
+									resolveWait?.();
+									this.composer?.hideWarning();
+								}
+							}
+						],
+						onClose: () => {
+							resolveWait?.();
+						}
+					});
+				}
+				// Do not resolve here: wait for Resume (complete will resolve) or Try Again/Cancel/close (they call resolveWait)
+			};
 
 			// LangGraph native streaming - direct event handling
 			// Events: token, tool.result, complete
@@ -650,6 +767,11 @@ export class VybeChatViewPane extends ViewPane {
 
 				switch (event.type) {
 					case 'token': {
+						hasReceivedFirstToken = true;
+						if (noFirstTokenTimer) {
+							clearTimeout(noFirstTokenTimer);
+							noFirstTokenTimer = null;
+						}
 						// Handle token events - can contain text, thinking, or tool calls
 						const payload = event.payload || {};
 
@@ -1438,19 +1560,19 @@ export class VybeChatViewPane extends ViewPane {
 						// Parse todo items
 						if ((toolName === 'get_todos' || toolName === 'list_todos' || toolName === 'check_todos') && !toolError) {
 							try {
-								let parsed: any;
-								if (typeof toolResult === 'string') {
-									parsed = JSON.parse(toolResult);
-								} else {
-									parsed = toolResult;
-								}
+									let parsed: any;
+									if (typeof toolResult === 'string') {
+										parsed = JSON.parse(toolResult);
+									} else {
+										parsed = toolResult;
+									}
 
-								if (parsed.todos && Array.isArray(parsed.todos)) {
-									todoItems = parsed.todos.map((t: any) => ({
-										id: t.id || '',
-										text: t.text || t.content || '',
-										status: (t.status === 'in_progress' ? 'in-progress' : t.status) || 'pending'
-									}));
+									if (parsed.todos && Array.isArray(parsed.todos)) {
+										todoItems = parsed.todos.map((t: any) => ({
+											id: t.id || '',
+											text: t.text || t.content || '',
+											status: (t.status === 'in_progress' ? 'in-progress' : t.status) || 'pending'
+										}));
 								}
 							} catch (error) {
 								console.warn(`[VYBE Chat] ⚠️ Failed to parse todos result:`, error);
@@ -1594,16 +1716,148 @@ export class VybeChatViewPane extends ViewPane {
 					}
 
 					case 'error': {
-						// Handle errors
+						// Handle errors with recovery options
 						const errorMessage = event.payload?.message || 'An error occurred';
 						const errorCode = event.payload?.code;
-						console.error('[VYBE Chat] Error event:', errorMessage, errorCode);
-						// Remove phase indicator when error occurs
+						const errorType = event.payload?.errorType as 'network' | 'timeout' | 'bad_request' | 'crash' | 'unknown' | undefined;
+						const canResume = event.payload?.canResume as boolean | undefined;
+						const canRetry = event.payload?.canRetry as boolean | undefined;
+						const threadId = event.payload?.threadId as string | undefined;
+						const originalMessage = event.payload?.originalMessage as string | undefined;
+
+						const isConnectionStyleError =
+							errorType === 'network' ||
+							errorType === 'timeout' ||
+							/enotfound|getaddrinfo|econnrefused|etimedout|econnreset|eai_again|network unreachable|fetch failed|failed to fetch/i.test(errorMessage);
+						if (isConnectionStyleError) {
+							if (hasReceivedFirstToken) {
+								// Already got tokens; show connection popup now
+								console.error('[VYBE Chat] Error event (connection, showing now):', errorMessage, errorCode);
+								if (noFirstTokenTimer) {
+									clearTimeout(noFirstTokenTimer);
+									noFirstTokenTimer = null;
+								}
+								showConnectionErrorPopup();
+							} else {
+								// No token yet: defer popup until no-first-token timer fires (keeps "planning" visible)
+								pendingConnectionError = true;
+							}
+							break;
+						}
+						console.error('[VYBE Chat] Error event:', errorMessage, errorCode, { errorType, canResume, canRetry });
+
+						// Non-connection error: show now
 						messagePage.removePhaseIndicator();
-						messagePage.showError(errorMessage, errorCode);
+						if (noFirstTokenTimer) {
+							clearTimeout(noFirstTokenTimer);
+							noFirstTokenTimer = null;
+						}
+						// Show error popup with recovery options (non-connection errors)
+						// Don't call setComplete() before showing error - it might interfere
+						const displayMessage = errorMessage;
+						console.log('[VYBE Chat] Calling showError with:', { errorMessage, displayMessage, errorCode, errorType, canResume, canRetry, hasThreadId: !!threadId, hasOriginalMessage: !!originalMessage });
+						messagePage.showError(displayMessage, errorCode, {
+							errorType,
+							canResume,
+							canRetry,
+							onResume: canResume && threadId ? async () => {
+								try {
+									// Get model info from task state or use defaults
+									const modelState = this.composer?.getModelState();
+									const selectedModelId = modelState?.selectedModelId;
+									const reasoningLevel = modelState?.reasoningLevel || 'medium';
+
+									if (this._agentService.resumeTask) {
+										await this._agentService.resumeTask(taskId, selectedModelId, reasoningLevel);
+									}
+								} catch (resumeError) {
+									console.error('[VYBE Chat] Resume failed:', resumeError);
+									messagePage.showError(
+										resumeError instanceof Error ? resumeError.message : 'Failed to resume task',
+										'RESUME_ERROR'
+									);
+								}
+							} : undefined,
+							onRetry: canRetry && originalMessage ? async () => {
+								try {
+									// Get model info from task state or use defaults
+									const modelState = this.composer?.getModelState();
+									const selectedModelId = modelState?.selectedModelId;
+									const selectedLevel = this.composer?.getAgentLevel() || 'L2';
+									const reasoningLevel = modelState?.reasoningLevel || 'medium';
+
+									if (this._agentService.retryTask) {
+										await this._agentService.retryTask(
+											event.task_id || taskId,
+											originalMessage,
+											selectedModelId,
+											selectedLevel,
+											reasoningLevel
+										);
+									}
+								} catch (retryError) {
+									console.error('[VYBE Chat] Retry failed:', retryError);
+									messagePage.showError(
+										retryError instanceof Error ? retryError.message : 'Failed to retry task',
+										'RETRY_ERROR'
+									);
+								}
+							} : undefined,
+							onCancel: () => {
+								// Mark task as failed
 						messagePage.setComplete();
+							}
+						});
+						resolveWait?.();
+						// Don't call setComplete() immediately after error - let user see the popup first
+						// setComplete() will be called when user dismisses/resumes/retries
+						// messagePage.setComplete();
 						if (options.onContentUpdate) {
 							options.onContentUpdate();
+						}
+						break;
+					}
+
+					case 'recovery.incomplete_tasks': {
+						// Handle incomplete tasks detected on startup
+						const tasks = event.payload?.tasks as Array<{
+							taskId: string;
+							threadId: string;
+							lastMessage: string;
+							timestamp: number;
+						}> | undefined;
+
+						if (tasks && tasks.length > 0) {
+							// Show recovery popup for first incomplete task
+							// TODO: Handle multiple incomplete tasks (show list or queue)
+							const task = tasks[0];
+							messagePage.showRecoveryPopup(task, {
+								onResume: async () => {
+									try {
+										const modelState = this.composer?.getModelState();
+										const selectedModelId = modelState?.selectedModelId;
+										const reasoningLevel = modelState?.reasoningLevel || 'medium';
+
+										if (this._agentService.resumeTask) {
+											await this._agentService.resumeTask(task.taskId, selectedModelId, reasoningLevel);
+										}
+									} catch (resumeError) {
+										console.error('[VYBE Chat] Resume failed:', resumeError);
+										messagePage.showError(
+											resumeError instanceof Error ? resumeError.message : 'Failed to resume task',
+											'RESUME_ERROR'
+										);
+									}
+								},
+								onStartFresh: () => {
+									// User wants to start fresh - do nothing (they can start a new task)
+									console.log('[VYBE Chat] User chose to start fresh, ignoring incomplete task');
+								},
+								onDismiss: () => {
+									// User dismissed - keep incomplete state for later
+									console.log('[VYBE Chat] User dismissed recovery popup');
+								}
+							});
 						}
 						break;
 					}
@@ -1615,6 +1869,19 @@ export class VybeChatViewPane extends ViewPane {
 					}
 				}
 			});
+
+			// Cursor-style: if connection error arrived before any token, show popup only after this delay (keeps "planning" visible)
+			const targetWindow = this.chatArea ? getWindow(this.chatArea) : getActiveWindow();
+			noFirstTokenTimer = setTimeout(() => {
+				noFirstTokenTimer = null;
+				if (pendingConnectionError) {
+					pendingConnectionError = false;
+					// Run on UI thread so popup displays reliably
+					targetWindow.requestAnimationFrame(() => {
+						showConnectionErrorPopup();
+					});
+				}
+			}, MIN_WAIT_BEFORE_CONNECTION_ERROR_MS);
 
 			// Start the task and wait for completion
 			// Ensure API keys are set before starting the stream (for cloud providers)
@@ -1640,24 +1907,39 @@ export class VybeChatViewPane extends ViewPane {
 				reasoningLevel: reasoningLevel
 			});
 
-			// Wait for complete event instead of promise resolution
-			// The solveTask promise resolves immediately, but we need events to complete
-			await new Promise<void>((resolve) => {
+			// Wait for complete or error event (or frontend timeout when backend never responds, e.g. offline)
+			const CONNECTION_TIMEOUT_MS = 45000; // 45s - backend may hang on first LLM call when offline
+			const waitPromise = new Promise<void>((resolve) => {
+				resolveWait = resolve;
 				if (eventSubscription) {
-					// Create a one-time listener for complete event
 					const completeListener = this._agentService.onDidEmitEvent((event: any) => {
 						if (event?.type === 'complete' && event?.task_id === taskId) {
 							completeListener.dispose();
+							// If we deferred a connection error, do NOT resolve here - let the no-first-token timer show popup and resolve
+							if (pendingConnectionError) {
+								return;
+							}
+							if (noFirstTokenTimer) {
+								clearTimeout(noFirstTokenTimer);
+								noFirstTokenTimer = null;
+							}
 							resolve();
 						}
 					});
 				} else {
-					// Fallback: resolve after a delay if no subscription
 					setTimeout(resolve, 10000);
 				}
 			});
+			const timeoutPromise = new Promise<never>((_, reject) => {
+				setTimeout(() => reject(new Error('Connection timeout: no response from agent. Check your internet connection.')), CONNECTION_TIMEOUT_MS);
+			});
+			await Promise.race([waitPromise, timeoutPromise]);
 
-			// Clean up event subscription AFTER task completes
+			// Clean up event subscription and no-first-token timer AFTER task completes
+			if (noFirstTokenTimer) {
+				clearTimeout(noFirstTokenTimer);
+				noFirstTokenTimer = null;
+			}
 			if (eventSubscription) {
 				eventSubscription.dispose();
 				eventSubscription = null;
@@ -1682,23 +1964,56 @@ export class VybeChatViewPane extends ViewPane {
 				options.onContentUpdate();
 			}
 		} catch (error) {
-			// Show error in markdown part
 			const errorMessage = error instanceof Error ? error.message : String(error);
-			const errorContentParts: any[] = [{
-				kind: 'markdown',
-				content: `**Error:** ${errorMessage}`,
-				isStreaming: false
-			}];
-			messagePage.updateContentParts(errorContentParts);
-
-			// Stop streaming state
-			messagePage.setStreaming(false);
-			this.currentStreamingMessageId = null;
-			if (this.composer) {
-				this.composer.switchToSendButton();
+			// Connection-style failure (fetch failed, timeout, etc.): show composer popup, same page retry (Cursor-style)
+			const isConnectionError = /fetch|network|failed to fetch|networkerror|econnrefused|enotfound|etimedout|econnreset|connection timeout/i.test(errorMessage);
+			if (isConnectionError && this.composer) {
+				if (eventSubscription) {
+					eventSubscription.dispose();
+					eventSubscription = null;
+				}
+				// Remove "Planning next steps" so it goes to inactive state when popup appears
+				messagePage.removePhaseIndicator();
+				messagePage.setStreaming(false);
+				this.currentStreamingMessageId = null;
+				this.composer.showWarning({
+					title: 'Connection Error',
+					message: 'Connection failed. If the problem persists, please check your internet connection or VPN.',
+					showCloseButton: true,
+					buttons: [
+						{
+							label: 'Try Again',
+							variant: 'primary',
+							keybinding: '⌘⏎',
+							action: () => {
+								this.composer?.hideWarning();
+								messagePage.clearAiContent();
+								void this.handleSendMessage(message, {
+									messageId,
+									messagePage,
+									message,
+									contextPills,
+									images
+								});
+							}
+						}
+					]
+				});
+			} else {
+				// Non-connection error: show in message page + notification
+				const errorContentParts: any[] = [{
+					kind: 'markdown',
+					content: `**Error:** ${errorMessage}`,
+					isStreaming: false
+				}];
+				messagePage.updateContentParts(errorContentParts);
+				messagePage.setStreaming(false);
+				this.currentStreamingMessageId = null;
+				if (this.composer) {
+					this.composer.switchToSendButton();
+				}
+				this._notificationService.error(`Agent Error: ${errorMessage}`);
 			}
-			// Show notification
-			this._notificationService.error(`Agent Error: ${errorMessage}`);
 		}
 
 		// Update onStop (Phase 4.1: no cancellation yet)

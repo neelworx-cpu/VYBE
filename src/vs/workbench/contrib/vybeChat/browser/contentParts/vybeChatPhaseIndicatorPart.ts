@@ -8,6 +8,7 @@ import * as dom from '../../../../../base/browser/dom.js';
 import './media/vybeChatPhaseIndicator.css';
 
 const $ = dom.$;
+const { scheduleAtNextAnimationFrame, getWindow } = dom;
 
 /**
  * Renders "Planning next steps" phase indicator.
@@ -47,9 +48,21 @@ export class VybeChatPhaseIndicatorPart extends VybeChatContentPart {
 			`
 		});
 		this.textElement.textContent = 'Planning next steps';
-		// Apply shine animation class if streaming
+		// Apply shine animation class if streaming. Use requestAnimationFrame so the node
+		// is in the DOM and CSS is applied before the animation starts (fixes plain-text
+		// appearance when part is added at stream start before any backend event).
 		if (this.isStreaming) {
 			this.textElement.classList.add('make-shine');
+			const win = getWindow(container);
+			scheduleAtNextAnimationFrame(win, () => {
+				if (this.textElement && !this.textElement.isConnected) {
+					return;
+				}
+				this.textElement?.classList.remove('make-shine');
+				// Force reflow so the animation restarts
+				void this.textElement?.offsetHeight;
+				this.textElement?.classList.add('make-shine');
+			});
 		}
 
 		container.appendChild(this.textElement);

@@ -419,6 +419,57 @@ export class VybeAgentServiceImpl extends Disposable implements IVybeAgentServic
 		return this.apiKeys.has(provider);
 	}
 
+	/**
+	 * Resume a task from its last checkpoint after an error.
+	 */
+	async resumeTask(taskId: string, modelId?: string, reasoningLevel?: 'low' | 'medium' | 'high' | 'xhigh'): Promise<void> {
+		if (!this.langGraphEnabled) {
+			throw new Error('LangGraph not available');
+		}
+
+		await this.langGraphClient.resumeTask(taskId, modelId, reasoningLevel);
+	}
+
+	/**
+	 * Retry a task from scratch after an error.
+	 */
+	async retryTask(taskId: string, goal: string, modelId?: string, level?: 'L1' | 'L2' | 'L3', reasoningLevel?: 'low' | 'medium' | 'high' | 'xhigh'): Promise<void> {
+		if (!this.langGraphEnabled) {
+			throw new Error('LangGraph not available');
+		}
+
+		// Get workspace context
+		const workspaceRoot = this.workspaceService.getWorkspace().folders[0]?.uri;
+		const context = workspaceRoot ? {
+			workspaceRoot: workspaceRoot.fsPath,
+		} : undefined;
+
+		await this.langGraphClient.retryTask({
+			taskId,
+			goal,
+			model: modelId,
+			level,
+			reasoningLevel,
+			context,
+		});
+	}
+
+	/**
+	 * Get incomplete tasks for recovery on startup.
+	 */
+	async getIncompleteTasks(): Promise<Array<{
+		taskId: string;
+		threadId: string;
+		lastMessage: string;
+		timestamp: number;
+	}>> {
+		if (!this.langGraphEnabled) {
+			return [];
+		}
+
+		return await this.langGraphClient.getIncompleteTasks();
+	}
+
 	override dispose(): void {
 		// Cancel all active tasks
 		for (const taskId of this.activeTasks) {
