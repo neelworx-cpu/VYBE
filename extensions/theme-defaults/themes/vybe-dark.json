@@ -46,7 +46,7 @@
 		"errorForeground": "#F85149",
 		"focusBorder": "#00000000",
 		"foreground": "#CCCCCC",
-		"icon.foreground": "#CCCCCC",
+		"icon.foreground": "#9a9a9a",
 		"input.background": "#282a2e",
 		"input.border": "#3e3f46",
 		"input.foreground": "#CCCCCC",

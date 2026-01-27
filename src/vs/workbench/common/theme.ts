@@ -664,6 +664,13 @@ export const TITLE_BAR_INACTIVE_FOREGROUND = registerColor('titleBar.inactiveFor
 	hcLight: '#292929'
 }, localize('titleBarInactiveForeground', "Title bar foreground when the window is inactive."));
 
+export const TITLE_BAR_ICON_FOREGROUND = registerColor('titleBar.iconForeground', {
+	dark: 'rgba(228, 228, 228, 0.52)',
+	light: 'rgba(20, 20, 20, 0.55)',
+	hcDark: '#FFFFFF',
+	hcLight: '#292929'
+}, localize('titleBarIconForeground', "Title bar icon foreground color."));
+
 export const TITLE_BAR_ACTIVE_BACKGROUND = registerColor('titleBar.activeBackground', {
 	dark: '#3C3C3C',
 	light: '#DDDDDD',

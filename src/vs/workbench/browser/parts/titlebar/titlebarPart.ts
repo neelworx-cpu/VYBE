@@ -49,6 +49,8 @@ import { IProductService } from '../../../../platform/product/common/productServ
 import { IEditorCommandsContext, IEditorPartOptionsChangeEvent, IToolbarActions } from '../../../common/editor.js';
 import { CodeWindow, mainWindow } from '../../../../base/browser/window.js';
 import { ACCOUNTS_ACTIVITY_TILE_ACTION, GLOBAL_ACTIVITY_TITLE_ACTION } from './titlebarActions.js';
+import { Codicon } from '../../../../base/common/codicons.js';
+import { ThemeIcon } from '../../../../base/common/themables.js';
 import { IView } from '../../../../base/browser/ui/grid/grid.js';
 import { createInstantHoverDelegate } from '../../../../base/browser/ui/hover/hoverDelegateFactory.js';
 import { IBaseActionViewItemOptions } from '../../../../base/browser/ui/actionbar/actionViewItems.js';
@@ -56,6 +58,7 @@ import { IHoverDelegate } from '../../../../base/browser/ui/hover/hoverDelegate.
 import { CommandsRegistry } from '../../../../platform/commands/common/commands.js';
 import { safeIntl } from '../../../../base/common/date.js';
 import { IsCompactTitleBarContext, TitleBarVisibleContext } from '../../../common/contextkeys.js';
+import { VybeSettingsDropdown } from '../../../contrib/vybeSettings/browser/vybeSettingsDropdown.js';
 
 export interface ITitleVariable {
 	readonly name: string;
@@ -279,6 +282,9 @@ export class BrowserTitlebarPart extends Part implements ITitlebarPart {
 	private readonly activityToolbarDisposables = this._register(new DisposableStore());
 
 	private readonly hoverDelegate: IHoverDelegate;
+
+	private vybeSettingsDropdown: VybeSettingsDropdown | undefined;
+	private vybeSettingsButton: HTMLElement | undefined;
 
 	private readonly titleDisposables = this._register(new DisposableStore());
 	private titleBarStyle: TitlebarStyle;
@@ -758,6 +764,13 @@ export class BrowserTitlebarPart extends Part implements ITitlebarPart {
 		// Requires to be recreated whenever editor actions enablement changes
 
 		this.actionToolBarDisposable.clear();
+		
+		// Clear settings dropdown when toolbar is recreated
+		if (this.vybeSettingsDropdown) {
+			this.vybeSettingsDropdown.dispose();
+			this.vybeSettingsDropdown = undefined;
+			this.vybeSettingsButton = undefined;
+		}
 
 		this.actionToolBar = this.actionToolBarDisposable.add(this.instantiationService.createInstance(WorkbenchToolBar, this.actionToolBarElement, {
 			contextMenu: MenuId.TitleBarContext,
@@ -825,6 +838,84 @@ export class BrowserTitlebarPart extends Part implements ITitlebarPart {
 
 				actions.primary.push(GLOBAL_ACTIVITY_TITLE_ACTION);
 			}
+
+			// VYBE-PATCH-START: settings-button
+			// Add settings button as the last action item
+			const settingsAction: IAction = {
+				id: 'vybe.titlebar.settings',
+				label: localize('settings', 'Settings'),
+				tooltip: localize('settings', 'Settings'),
+				class: ThemeIcon.asClassName(Codicon.settings),
+				enabled: true,
+				run: (event?: any) => {
+					// Stop event propagation to prevent immediate close
+					if (event?.originalEvent) {
+						event.originalEvent.stopPropagation();
+					}
+					
+					// Find or update the settings button element
+					const findButton = (): HTMLElement | null => {
+						// Try by action ID attribute
+						let button = this.actionToolBarElement.querySelector(`[data-action-id="vybe.titlebar.settings"]`) as HTMLElement | null;
+						if (button) {
+							// Get the clickable element within
+							const clickable = button.querySelector('a, button') as HTMLElement | null;
+							return clickable || button;
+						}
+						
+						// Try by aria-label
+						button = this.actionToolBarElement.querySelector(`[aria-label="${localize('settings', 'Settings')}"]`) as HTMLElement | null;
+						if (button) {
+							const clickable = button.querySelector('a, button') as HTMLElement | null;
+							return clickable || button;
+						}
+						
+						// Try by class (settings icon) - find the clickable parent
+						const iconElements = this.actionToolBarElement.querySelectorAll('.codicon.codicon-settings');
+						for (const icon of Array.from(iconElements)) {
+							// Find the closest action item or clickable element
+							const actionItem = icon.closest('.action-item');
+							if (actionItem) {
+								const clickable = actionItem.querySelector('a, button') as HTMLElement | null;
+								if (clickable) return clickable;
+								return actionItem as HTMLElement;
+							}
+						}
+						
+						// Fallback: find last action item in toolbar
+						const lastActionItem = this.actionToolBarElement.querySelector('.monaco-action-bar .action-item:last-child a, .monaco-action-bar .action-item:last-child button');
+						return lastActionItem as HTMLElement | null;
+					};
+					
+					// Find button after DOM updates (use longer timeout to ensure DOM is ready)
+					setTimeout(() => {
+						const settingsButton = findButton();
+						if (settingsButton) {
+							// Update button reference if it changed or is not set
+							if (!this.vybeSettingsButton || this.vybeSettingsButton !== settingsButton) {
+								// Dispose old dropdown if button changed
+								if (this.vybeSettingsDropdown && this.vybeSettingsButton && this.vybeSettingsButton !== settingsButton) {
+									this.vybeSettingsDropdown.dispose();
+									this.vybeSettingsDropdown = undefined;
+								}
+								this.vybeSettingsButton = settingsButton;
+							}
+							
+							// Create dropdown if needed
+							if (!this.vybeSettingsDropdown && this.vybeSettingsButton) {
+								this.vybeSettingsDropdown = this._register(this.instantiationService.createInstance(VybeSettingsDropdown, this.vybeSettingsButton));
+							}
+							
+							// Toggle dropdown
+							if (this.vybeSettingsDropdown) {
+								this.vybeSettingsDropdown.show();
+							}
+						}
+					}, 10);
+				}
+			};
+			actions.primary.push(settingsAction);
+			// VYBE-PATCH-END: settings-button
 
 			this.actionToolBar.setActions(prepareActions(actions.primary), prepareActions(actions.secondary));
 		};

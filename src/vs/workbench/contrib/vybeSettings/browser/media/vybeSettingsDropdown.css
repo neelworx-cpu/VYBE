@@ -1,0 +1,120 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* VYBE Settings Dropdown Styles */
+
+.agent-layout-quick-menu {
+	/* Base styles are applied inline, but additional theme-specific overrides can go here */
+}
+
+.agent-layout-quick-menu__backdrop {
+	/* Backdrop for click-outside-to-close functionality */
+}
+
+.agent-layout-quick-menu__divider {
+	/* Divider between sections */
+}
+
+.agent-layout-quick-menu__row {
+	/* Base row styles */
+}
+
+.agent-layout-quick-menu__row--toggle {
+	/* Toggle row styles */
+}
+
+.agent-layout-quick-menu__row--submenu {
+	/* Submenu row styles */
+}
+
+.agent-layout-quick-menu__row-left {
+	/* Left container in row */
+}
+
+.agent-layout-quick-menu__row-right {
+	/* Right container in row */
+}
+
+.agent-layout-quick-menu__icon {
+	/* Icon styles */
+}
+
+.agent-layout-quick-menu__icon--panel {
+	/* Panel icon container with overlay support */
+	position: relative;
+}
+
+.agent-layout-quick-menu__icon-layer {
+	/* Icon layer base */
+}
+
+.agent-layout-quick-menu__icon-layer--overlay {
+	/* Icon overlay layer */
+	position: absolute;
+	top: 0;
+	left: 0;
+	right: 0;
+	bottom: 0;
+}
+
+.agent-layout-quick-menu__label {
+	/* Label text styles */
+}
+
+.agent-layout-quick-menu__keybinding {
+	/* Keybinding text styles */
+}
+
+.agent-layout-quick-menu__submenu-value-wrapper {
+	/* Submenu value wrapper */
+}
+
+.agent-layout-quick-menu__submenu-current-value {
+	/* Current submenu value text */
+}
+
+.agent-layout-quick-menu__chevron {
+	/* Chevron icon for submenu */
+}
+
+.agent-layout-quick-menu__submenu {
+	/* Submenu container */
+}
+
+.agent-layout-quick-menu__submenu-option {
+	/* Submenu option row */
+}
+
+.agent-layout-quick-menu__submenu-option.is-selected {
+	/* Selected submenu option */
+}
+
+.agent-layout-quick-menu__footer-link {
+	/* Footer link button */
+}
+
+.solid-switch {
+	/* Switch container */
+}
+
+.solid-switch-small {
+	/* Small switch variant */
+}
+
+.solid-switch-toggle {
+	/* Switch toggle element */
+}
+
+.solid-switch-toggle-small {
+	/* Small switch toggle variant */
+}
+
+.solid-switch-toggle.on {
+	/* Switch in on state */
+}
+
+.solid-switch-toggle.off {
+	/* Switch in off state */
+}

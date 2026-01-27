@@ -152,6 +152,11 @@
 	visibility: hidden;
 }
 
+/* Disable monaco-dropdown-with-primary in titlebar */
+.monaco-workbench .part.titlebar > .titlebar-container > .titlebar-center > .window-title > .command-center > .monaco-toolbar > .monaco-action-bar > .actions-container > .action-item.monaco-dropdown-with-primary {
+	display: none !important;
+}
+
 .monaco-workbench .part.titlebar > .titlebar-container > .titlebar-center > .window-title > .command-center > .monaco-toolbar > .monaco-action-bar > .actions-container > .action-item > .action-label,
 .monaco-workbench .part.titlebar > .titlebar-container > .titlebar-center > .window-title > .command-center > .monaco-toolbar > .monaco-action-bar > .actions-container > .action-item.monaco-dropdown-with-primary .action-label {
 	color: var(--vscode-titleBar-activeForeground);
@@ -171,7 +176,7 @@
 	align-items: stretch;
 	color: var(--vscode-commandCenter-foreground);
 	background-color: var(--vscode-commandCenter-background);
-	border: 1px solid var(--vscode-commandCenter-border);
+	border: none;
 	overflow: hidden;
 	margin: 0 6px;
 	border-top-left-radius: 6px;
@@ -222,13 +227,11 @@
 
 .monaco-workbench .part.titlebar.inactive > .titlebar-container > .titlebar-center > .window-title > .command-center .action-item.command-center-center {
 	color: var(--vscode-titleBar-inactiveForeground);
-	border-color: var(--vscode-commandCenter-inactiveBorder) !important;
 }
 
 .monaco-workbench .part.titlebar > .titlebar-container > .titlebar-center > .window-title > .command-center .action-item.command-center-center:HOVER {
 	color: var(--vscode-commandCenter-activeForeground);
 	background-color: var(--vscode-commandCenter-activeBackground);
-	border-color: var(--vscode-commandCenter-activeBorder);
 }
 
 /* Menubar */
@@ -414,6 +417,14 @@
 .monaco-workbench .part.titlebar > .titlebar-container > .titlebar-right > .action-toolbar-container .codicon {
 	color: inherit;
 }
+
+/* VYBE-PATCH-START: settings-icon-color */
+/* Set action-label color to use iconForeground so codicon inherits it */
+.monaco-workbench .part.titlebar > .titlebar-container > .titlebar-right > .action-toolbar-container .monaco-action-bar .action-item .action-label {
+	color: var(--vscode-icon-foreground);
+}
+/* VYBE-PATCH-END: settings-icon-color */
+
 
 .monaco-workbench .part.titlebar > .titlebar-container > .titlebar-right > .action-toolbar-container .monaco-action-bar .action-item {
 	display: flex;
@@ -653,3 +664,4 @@
 	display: block;
 }
 /* VYBE-PATCH-END: vybe-mode-toggle */
+

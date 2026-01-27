@@ -27,7 +27,7 @@ export const descriptionForeground = registerColor('descriptionForeground',
 	nls.localize('descriptionForeground', "Foreground color for description text providing additional information, for example for a label."));
 
 export const iconForeground = registerColor('icon.foreground',
-	{ dark: '#C5C5C5', light: '#424242', hcDark: '#FFFFFF', hcLight: '#292929' },
+	{ dark: 'rgba(228, 228, 228, 0.52)', light: 'rgba(20, 20, 20, 0.55)', hcDark: '#FFFFFF', hcLight: '#292929' },
 	nls.localize('iconForeground', "The default color for icons in the workbench."));
 
 export const focusBorder = registerColor('focusBorder',
