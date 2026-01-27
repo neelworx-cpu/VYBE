@@ -9,6 +9,7 @@ import * as dom from '../../../../../base/browser/dom.js';
 import { MarkdownString } from '../../../../../base/common/htmlContent.js';
 import { IMarkdownRendererService } from '../../../../../platform/markdown/browser/markdownRenderer.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
+import './media/vybeChatPhaseIndicator.css'; // Import to use make-shine class
 
 const $ = dom.$;
 
@@ -38,7 +39,7 @@ function injectThinkingShineKeyframes(): void {
 export class VybeChatThinkingPart extends VybeChatContentPart {
 	private container: HTMLElement | undefined;
 	private headerElement: HTMLElement | undefined;
-	private iconElement: HTMLElement | undefined; // Loading spinner or chevron
+	private iconElement: HTMLElement | undefined; // Chevron (no loading spinner)
 	private contentElement: HTMLElement | undefined; // Now the scrollable container itself
 	private thoughtTextElement: HTMLElement | undefined;
 	private durationTextElement: HTMLElement | undefined;
@@ -95,13 +96,13 @@ export class VybeChatThinkingPart extends VybeChatContentPart {
 			style: 'background-color: transparent;'
 		});
 
-		// Markdown think container
+		// Markdown think container - no vertical padding so header row height matches tool (18.2px)
 		const markdownThink = $('.markdown-jsx markdown-think', {
-			style: 'padding: 2px 0px; margin: 0px;'
+			style: 'padding: 0; margin: 0;'
 		});
 
-		// Collapsible container
-		const collapsibleContainer = $('.collapsible-clean collapsible-thought', {
+		// Collapsible container (add is-expanded in toggleExpanded for chevron CSS)
+		const collapsibleContainer = $('.collapsible-clean.collapsible-thought', {
 			style: `
 				display: flex;
 				flex-direction: column;
@@ -110,7 +111,7 @@ export class VybeChatThinkingPart extends VybeChatContentPart {
 			`
 		});
 
-		// Header (clickable)
+		// Header (clickable) - 2px top/bottom padding for uniform spacing between rows
 		this.headerElement = $('.collapsible-header', {
 			style: `
 				display: flex;
@@ -122,6 +123,7 @@ export class VybeChatThinkingPart extends VybeChatContentPart {
 				max-width: 100%;
 				box-sizing: border-box;
 				overflow: hidden;
+				padding: 2px 0;
 			`
 		});
 
@@ -130,7 +132,7 @@ export class VybeChatThinkingPart extends VybeChatContentPart {
 			style: 'display: flex; gap: 4px; overflow: hidden;'
 		});
 
-		// Header text
+		// Header text - line-height 18.2px to match tool UI row; 4px gap before chevron
 		const headerText = $('.collapsible-header-text', {
 			style: `
 				flex: 0 1 auto;
@@ -142,6 +144,7 @@ export class VybeChatThinkingPart extends VybeChatContentPart {
 				color: var(--vscode-foreground);
 				transition: opacity 0.1s ease-in;
 				font-size: 12px;
+				line-height: 18.2px;
 			`
 		});
 
@@ -156,90 +159,65 @@ export class VybeChatThinkingPart extends VybeChatContentPart {
 			`
 		});
 
-		// Inner flex container for "Thought" + "for Xs" - apply animation when streaming
-		const innerFlexBaseStyle = 'display: flex; align-items: center; overflow: hidden;';
-		const innerFlexAnimationStyle = this.isStreaming ? `
-			animation: tool-shine 2s linear infinite;
-			background-image: linear-gradient(
-				90deg,
-				rgba(200, 200, 200, 0.6) 0%,
-				rgba(200, 200, 200, 0.6) 25%,
-				rgba(255, 255, 255, 1) 50%,
-				rgba(200, 200, 200, 0.6) 75%,
-				rgba(200, 200, 200, 0.6) 100%
-			);
-			background-size: 200% 100%;
-			-webkit-background-clip: text;
-			background-clip: text;
-		` : '';
-
+		// Inner flex container for "Thought" + "for Xs" - no animation on container (animation on individual elements)
 		const innerFlex = $('div', {
-			style: innerFlexBaseStyle + innerFlexAnimationStyle
+			style: 'display: flex; align-items: center; overflow: hidden;'
 		});
 
-		// "Thinking..." or "Thought" text
+		// "Thinking..." or "Thought" - var(--vscode-foreground) with 0.7 opacity to differentiate from secondary items
+		// During streaming, apply make-shine class for animation (same as planning next steps)
 		this.thoughtTextElement = $('span', {
 			style: `
 				white-space: nowrap;
 				flex-shrink: 0;
-				${this.isStreaming ? '-webkit-text-fill-color: transparent;' : 'color: var(--vscode-foreground); opacity: 0.6;'}
+				color: var(--vscode-foreground);
+				opacity: 0.7;
 			`
 		});
 		this.thoughtTextElement.textContent = this.isStreaming ? 'Thinking' : 'Thought';
+		// Apply make-shine class during streaming (same animation as planning next steps)
+		if (this.isStreaming) {
+			this.thoughtTextElement.classList.add('make-shine');
+		}
 
-		// Duration text
+		// Duration "for Xs" - same as tool target: var(--vscode-descriptionForeground) with 0.36 opacity
+		// During streaming, apply make-shine class for animation (same as planning next steps)
 		this.durationTextElement = $('span', {
 			style: `
 				margin-left: 4px;
 				white-space: nowrap;
-				${this.isStreaming ? '-webkit-text-fill-color: transparent;' : 'color: var(--vscode-foreground); opacity: 0.4;'}
+				color: var(--vscode-descriptionForeground) !important;
+				opacity: 0.36 !important;
 			`
 		});
 		// Minimum display of 1 second - "for 0s" looks wrong
 		const displaySeconds = Math.max(1, Math.round(this.duration / 1000));
 		this.durationTextElement.textContent = this.duration > 0 ? `for ${displaySeconds}s` : '';
-
-		// Icon: Loading spinner (when streaming) or Chevron (when complete)
+		// Apply make-shine class during streaming (same animation as planning next steps)
 		if (this.isStreaming) {
-			// Loading spinner with spin animation
-			this.iconElement = $('div.codicon.codicon-loading.codicon-modifier-spin', {
-				style: `
-					color: var(--vscode-foreground);
-					opacity: 0.55;
-					line-height: 12px;
-					width: 12px;
-					height: 12px;
-					display: flex;
-					justify-content: center;
-					align-items: center;
-					flex-shrink: 0;
-					font-size: 12px;
-					margin-left: 4px;
-				`
-			});
-		} else {
-			// Chevron icon (collapsed state) - match Cursor exactly
-			this.iconElement = $('div.codicon.codicon-chevron-right.chevron-right', {
-				style: `
-					color: var(--vscode-foreground);
-					line-height: 14px;
-					width: 21px;
-					height: 14px;
-					display: inline-flex;
-					justify-content: center;
-					align-items: center;
-					transform-origin: center center;
-					transition: transform 0.15s ease-in-out, opacity 0.2s ease-in-out, color 0.1s ease-in;
-					flex-shrink: 0;
-					cursor: pointer;
-					opacity: 0.6;
-					transform: rotate(0deg);
-					font-size: 18px;
-					margin-left: 4px;
-					position: relative;
-				`
-			});
+			this.durationTextElement.classList.add('make-shine');
 		}
+
+		// Chevron - 14px size; same color as secondary items (descriptionForeground, opacity controlled by CSS)
+		// No loading spinner - removed entirely
+		this.iconElement = $('div.codicon.codicon-chevron-right.chevron-right', {
+			style: `
+				color: var(--vscode-descriptionForeground);
+				line-height: 14px;
+				width: 14px;
+				height: 14px;
+				display: flex;
+				justify-content: center;
+				align-items: center;
+				transform-origin: center center;
+				transition: transform 0.15s ease-in-out, opacity 0.2s ease-in-out, color 0.1s ease-in;
+				flex-shrink: 0;
+				cursor: pointer;
+				transform: rotate(0deg);
+				font-size: 14px;
+				position: relative;
+			`
+		});
 
 		// Build header hierarchy with inner flex container
 		innerFlex.appendChild(this.thoughtTextElement);
@@ -258,10 +236,11 @@ export class VybeChatThinkingPart extends VybeChatContentPart {
 			`
 		});
 
-		// Set display based on streaming state
+		// Set display and is-expanded class based on streaming state
 		if (this.isStreaming) {
 			collapsibleChildren.style.display = 'block';
 			this.isExpanded = true;
+			collapsibleContainer.classList.add('is-expanded');
 		} else {
 			collapsibleChildren.style.display = 'none';
 			this.isExpanded = false;
@@ -1052,6 +1031,12 @@ export class VybeChatThinkingPart extends VybeChatContentPart {
 
 		this.isExpanded = !this.isExpanded;
 
+		// Toggle is-expanded on collapsible container so CSS can show/hide chevron (match tool UI)
+		const collapsibleContainer = this.container?.querySelector('.collapsible-clean.collapsible-thought') as HTMLElement;
+		if (collapsibleContainer) {
+			collapsibleContainer.classList.toggle('is-expanded', this.isExpanded);
+		}
+
 		// Find collapsible children
 		const children = this.container?.querySelector('.collapsible-clean-children') as HTMLElement;
 		if (!children) {
@@ -1121,87 +1106,49 @@ export class VybeChatThinkingPart extends VybeChatContentPart {
 			this.durationTextElement.textContent = `for ${displaySeconds}s`;
 		}
 
-		// Update animation on inner flex container (flows across "Thought" + "for Xs")
-		const innerFlex = this.thoughtTextElement?.parentElement as HTMLElement;
-		if (innerFlex) {
-			const baseContainerStyle = 'display: flex; align-items: center; overflow: hidden;';
+		// Update make-shine class on verb and duration elements (same animation as planning next steps)
+		if (this.thoughtTextElement) {
 			if (this.isStreaming) {
-				// Streaming - apply shine animation to container
-				innerFlex.setAttribute('style', baseContainerStyle + `
-					animation: tool-shine 2s linear infinite;
-					background-image: linear-gradient(
-						90deg,
-						rgba(200, 200, 200, 0.6) 0%,
-						rgba(200, 200, 200, 0.6) 25%,
-						rgba(255, 255, 255, 1) 50%,
-						rgba(200, 200, 200, 0.6) 75%,
-						rgba(200, 200, 200, 0.6) 100%
-					);
-					background-size: 200% 100%;
-					-webkit-background-clip: text;
-					background-clip: text;
-				`);
-				// Update text colors to transparent (shows gradient from parent)
-				if (this.thoughtTextElement) {
-					this.thoughtTextElement.style.webkitTextFillColor = 'transparent';
-					this.thoughtTextElement.style.color = '';
-					this.thoughtTextElement.style.opacity = '';
-				}
-				if (this.durationTextElement) {
-					this.durationTextElement.style.webkitTextFillColor = 'transparent';
-					this.durationTextElement.style.color = '';
-					this.durationTextElement.style.opacity = '';
-				}
+				// Streaming - add make-shine class for animation
+				this.thoughtTextElement.classList.add('make-shine');
+				// Ensure base colors are correct (verb: 0.7)
+				this.thoughtTextElement.style.color = 'var(--vscode-foreground)';
+				this.thoughtTextElement.style.opacity = '0.7';
 			} else {
-				// Complete - remove animation from container
-				innerFlex.setAttribute('style', baseContainerStyle);
-				// Update text colors to static
-				if (this.thoughtTextElement) {
-					this.thoughtTextElement.style.webkitTextFillColor = '';
-					this.thoughtTextElement.style.color = 'var(--vscode-foreground)';
-					this.thoughtTextElement.style.opacity = '0.6';
-				}
-				if (this.durationTextElement) {
-					this.durationTextElement.style.webkitTextFillColor = '';
-					this.durationTextElement.style.color = 'var(--vscode-foreground)';
-					this.durationTextElement.style.opacity = '0.4';
-				}
+				// Complete - remove make-shine class
+				this.thoughtTextElement.classList.remove('make-shine');
+				// Update text colors to static (verb 0.7)
+				this.thoughtTextElement.style.color = 'var(--vscode-foreground)';
+				this.thoughtTextElement.style.opacity = '0.7';
+			}
+		}
+		if (this.durationTextElement) {
+			if (this.isStreaming) {
+				// Streaming - add make-shine class for animation
+				this.durationTextElement.classList.add('make-shine');
+				// Ensure base colors are correct (target: 0.36)
+				this.durationTextElement.style.setProperty('color', 'var(--vscode-descriptionForeground)', 'important');
+				this.durationTextElement.style.setProperty('opacity', '0.36', 'important');
+			} else {
+				// Complete - remove make-shine class
+				this.durationTextElement.classList.remove('make-shine');
+				// Update text colors to static (target: 0.36)
+				this.durationTextElement.style.setProperty('color', 'var(--vscode-descriptionForeground)', 'important');
+				this.durationTextElement.style.setProperty('opacity', '0.36', 'important');
 			}
 		}
 
-		// Handle streaming → complete transition (loading spinner → chevron)
-		if (wasStreaming && !isNowStreaming && this.iconElement) {
-			// Replace loading spinner with chevron - match Cursor exactly
-			const newChevron = $('div.codicon.codicon-chevron-right.chevron-right', {
-				style: `
-					color: var(--vscode-foreground);
-					line-height: 14px;
-					width: 21px;
-					height: 14px;
-					display: inline-flex;
-					justify-content: center;
-					align-items: center;
-					transform-origin: center center;
-					transition: transform 0.15s ease-in-out, opacity 0.2s ease-in-out, color 0.1s ease-in;
-					flex-shrink: 0;
-					cursor: pointer;
-					opacity: 0.6;
-					transform: rotate(0deg);
-					font-size: 18px;
-					margin-left: 4px;
-					position: relative;
-				`
-			});
-
-			// Replace in DOM
-			this.iconElement.replaceWith(newChevron);
-			this.iconElement = newChevron;
-
+		// Handle streaming → complete transition (no spinner to replace, just collapse)
+		if (wasStreaming && !isNowStreaming) {
 			// Collapse the thinking block automatically when streaming completes
+			const collapsibleContainer = this.container?.querySelector('.collapsible-clean.collapsible-thought') as HTMLElement;
 			const children = this.container?.querySelector('.collapsible-clean-children') as HTMLElement;
 			if (children) {
 				children.style.display = 'none';
 				this.isExpanded = false;
+			}
+			if (collapsibleContainer) {
+				collapsibleContainer.classList.remove('is-expanded');
 			}
 		}
 	}

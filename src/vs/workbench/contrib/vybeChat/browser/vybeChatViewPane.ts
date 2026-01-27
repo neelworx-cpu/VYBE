@@ -69,6 +69,12 @@ export class VybeChatViewPane extends ViewPane {
 	private messagePages: Map<string, MessagePage> = new Map();
 	private messageIndex: number = 0;
 	private currentStreamingMessageId: string | null = null;
+	/** Active task id for stop; cleared when task completes or is cancelled */
+	private _currentTaskId: string | null = null;
+	/** Event subscription for active task; disposed when task completes or is cancelled */
+	private _currentEventSubscription: IDisposable | null = null;
+	/** Resolve for the wait promise; called on cancel so handleSendMessage cleanup runs */
+	private _resolveWait: (() => void) | null = null;
 	private autoScrollDisabled: boolean = false;
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	private wheelCheckTimeout: any = null;
@@ -234,8 +240,8 @@ export class VybeChatViewPane extends ViewPane {
 		// Check for incomplete tasks on startup (recovery)
 		// Delay slightly to ensure agent service is ready
 		setTimeout(() => {
-			this.checkForIncompleteTasks().catch(error => {
-				console.error('[VYBE Chat] Failed to check for incomplete tasks:', error);
+			this.checkForIncompleteTasks().catch(() => {
+				// Failed to check for incomplete tasks
 			});
 		}, 2000);
 
@@ -252,7 +258,7 @@ export class VybeChatViewPane extends ViewPane {
 				// eslint-disable-next-line @typescript-eslint/no-explicit-any
 				(this.composer as any).testWarning(type);
 			} else {
-				console.warn('Composer not available');
+				// Composer not available
 			}
 		};
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -271,7 +277,6 @@ export class VybeChatViewPane extends ViewPane {
 			const lastPage = pages[pages.length - 1];
 
 			if (!lastPage) {
-				console.warn('No message page found. Send a message first.');
 				return;
 			}
 
@@ -314,7 +319,7 @@ export class VybeChatViewPane extends ViewPane {
 			const part = lastPage.attachTodoToHumanMessage(testTodoData);
 			if (part) {
 			} else {
-				console.error('❌ Failed to attach TODO component to human message');
+				// Failed to attach TODO component to human message
 			}
 		};
 
@@ -325,7 +330,6 @@ export class VybeChatViewPane extends ViewPane {
 			const lastPage = pages[pages.length - 1];
 
 			if (!lastPage) {
-				console.warn('No message page found. Send a message first.');
 				return;
 			}
 
@@ -393,7 +397,7 @@ export class VybeChatViewPane extends ViewPane {
 				if (itemPart) {
 				}
 			} else {
-				console.error('❌ Failed to add TODO component');
+				// Failed to add TODO component
 			}
 		};
 		// VYBE-PATCH-END: test-helpers
@@ -493,14 +497,12 @@ export class VybeChatViewPane extends ViewPane {
 				if (incomplete && incomplete.length > 0) {
 					// Show recovery popup for first incomplete task
 					// TODO: Handle multiple incomplete tasks (show list or queue)
-					const task = incomplete[0];
-					console.log('[VYBE Chat] Incomplete task detected on startup:', task.taskId);
 					// The recovery popup will be shown when the UI receives the recovery event
 					// For now, we just log - the UI handler for recovery.incomplete_tasks will show the popup
 				}
 			}
 		} catch (error) {
-			console.error('[VYBE Chat] Failed to check for incomplete tasks:', error);
+			// Failed to check for incomplete tasks
 		}
 	}
 
@@ -660,6 +662,7 @@ export class VybeChatViewPane extends ViewPane {
 		});
 
 		let eventSubscription: IDisposable | null = null;
+		let hasReceivedFirstToken = false;
 		try {
 			// Get selected mode and level from composer (defaults if not available)
 			const selectedMode = this.composer?.getAgentMode() || 'agent';
@@ -670,9 +673,6 @@ export class VybeChatViewPane extends ViewPane {
 
 			// Generate taskId first (we'll use it for event subscription)
 			const taskId = `task-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-
-			// Subscribe to streaming events BEFORE starting the task
-			let hasReceivedEvents = false;
 
 			// Track when tool parts are created to ensure minimum display time for "Reading" state
 			const toolCreationTimes = new Map<string, number>();
@@ -690,7 +690,6 @@ export class VybeChatViewPane extends ViewPane {
 			let resolveWait: (() => void) | null = null;
 			// Cursor-style: don't show connection error popup until we've waited at least N seconds for first token
 			const MIN_WAIT_BEFORE_CONNECTION_ERROR_MS = 15000;
-			let hasReceivedFirstToken = false;
 			let noFirstTokenTimer: ReturnType<typeof setTimeout> | null = null;
 			let pendingConnectionError = false;
 
@@ -752,6 +751,46 @@ export class VybeChatViewPane extends ViewPane {
 				// Do not resolve here: wait for Resume (complete will resolve) or Try Again/Cancel/close (they call resolveWait)
 			};
 
+			// Stream inactivity detection - SAFETY NET ONLY
+			// LangGraph/LangChain emit 'complete' events when tasks finish (see vybeLangGraphService.ts line 2619, 2714, etc.)
+			// This timer is ONLY for edge cases where 'complete' is missing (network issues, backend crash, etc.)
+			// Use a longer timeout (90s) to account for legitimate tool execution delays
+			const STREAM_INACTIVITY_TIMEOUT_MS = 90000; // 90s - allows for long-running tools
+			let lastEventTime = Date.now();
+			let streamInactivityTimer: ReturnType<typeof setTimeout> | null = null;
+			let pendingToolCalls = new Set<string>(); // Track pending tool calls
+			
+			// Reset inactivity timer whenever we receive any event
+			const resetInactivityTimer = () => {
+				lastEventTime = Date.now();
+				if (streamInactivityTimer) {
+					clearTimeout(streamInactivityTimer);
+					streamInactivityTimer = null;
+				}
+				// Only set timer if we've received at least one token (stream has started)
+				// AND we're not waiting for tool results (tools can take time to execute)
+				if (hasReceivedFirstToken && pendingToolCalls.size === 0) {
+					streamInactivityTimer = setTimeout(() => {
+						const timeSinceLastEvent = Date.now() - lastEventTime;
+						// Double-check: only trigger if still inactive AND no pending tools
+						if (timeSinceLastEvent >= STREAM_INACTIVITY_TIMEOUT_MS && pendingToolCalls.size === 0) {
+							console.error('[VYBE] Stream stopped unexpectedly - no events for', timeSinceLastEvent, 'ms');
+							// Stream stopped silently - show error and resolve
+							messagePage.removePhaseIndicator();
+							messagePage.setStreaming(false);
+							messagePage.showError(
+								'Stream stopped unexpectedly. The AI may have encountered an error or the connection was interrupted.',
+								'STREAM_INACTIVITY'
+							);
+							if (this.composer) {
+								this.composer.switchToSendButton();
+							}
+							resolveWait?.();
+						}
+					}, STREAM_INACTIVITY_TIMEOUT_MS);
+				}
+			};
+
 			// LangGraph native streaming - direct event handling
 			// Events: token, tool.result, complete
 			// eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -762,8 +801,10 @@ export class VybeChatViewPane extends ViewPane {
 				if (!event?.type || !taskIdMatches) {
 					return;
 				}
-
-				hasReceivedEvents = true;
+				
+				// Reset stream inactivity timer on ANY event (token, tool.result, error, etc.)
+				// This ensures we detect when the stream stops unexpectedly
+				resetInactivityTimer();
 
 				switch (event.type) {
 					case 'token': {
@@ -791,7 +832,10 @@ export class VybeChatViewPane extends ViewPane {
 
 						// Handle text content
 						if (payload.content) {
-							// Removed verbose logging
+							console.log('[DIAG] vybeChatViewPane: content event', {
+								content: payload.content.substring(0, 50),
+								contentLength: payload.content.length
+							});
 							// Remove phase indicator when content starts arriving
 							messagePage.removePhaseIndicator();
 							messagePage.finalizeThinking();
@@ -811,13 +855,25 @@ export class VybeChatViewPane extends ViewPane {
 							try {
 								toolArgs = typeof tc.args === 'string' ? JSON.parse(tc.args) : tc.args;
 							} catch (e) {
-								console.warn('[VYBE Chat] Failed to parse tool args:', e);
+								// Failed to parse tool args
+							}
+
+							// Track this tool call as pending (will be removed when tool.result arrives)
+							pendingToolCalls.add(toolId);
+							// Don't set inactivity timer while tools are executing
+							if (streamInactivityTimer) {
+								clearTimeout(streamInactivityTimer);
+								streamInactivityTimer = null;
 							}
 
 							// Removed verbose logging
 
 							// Helper function to process the tool call
 							const processToolCall = () => {
+								console.log('[DIAG] vybeChatViewPane: tool_call event', {
+									toolName: toolName,
+									toolId: toolId
+								});
 								// CRITICAL: Finalize current thinking block before tool calls
 								// This ensures new thinking after tools goes to a new block
 								messagePage.finalizeThinking();
@@ -912,15 +968,6 @@ export class VybeChatViewPane extends ViewPane {
 									const fileName = extractFileName(filePath);
 									const language = detectLanguageFromPath(filePath);
 
-									console.log(`[Tool Call Mapping] ${toolName}:`, {
-										filePath,
-										fileName,
-										hasContents: !!toolArgsAny?.contents,
-										hasContent: !!toolArgsAny?.content,
-										hasOldString: !!toolArgsAny?.old_string,
-										hasNewString: !!toolArgsAny?.new_string,
-										toolId
-									});
 
 									if (toolName === 'edit_file') {
 										// Unified edit_file: handles both new files and existing files
@@ -982,7 +1029,6 @@ export class VybeChatViewPane extends ViewPane {
 															// Note: originalContent is full file, but diff will show old_string vs new_string
 														}
 													} catch (readError) {
-														console.warn('[Tool Call Mapping] Failed to read file content:', readError);
 														// Fallback: use old_string as originalContent
 														originalContent = oldString;
 														addedLines = countLines(newString);
@@ -1019,7 +1065,7 @@ export class VybeChatViewPane extends ViewPane {
 																try {
 																	await this._agentService.resumeWithApproval(taskId, 'approve');
 																} catch (error) {
-																	console.error('[TextEdit] Failed to resume with approval:', error);
+																	// Failed to resume with approval
 																}
 															}
 														};
@@ -1051,7 +1097,6 @@ export class VybeChatViewPane extends ViewPane {
 																// Open the file in editor to show the change
 																await this._editorService.openEditor({ resource: fileUri });
 															} catch (error) {
-																console.error('[TextEdit] Failed to write file after streaming:', error);
 																this._notificationService?.error(`Failed to apply changes to ${fileName}: ${error instanceof Error ? error.message : String(error)}`);
 															}
 														};
@@ -1060,7 +1105,6 @@ export class VybeChatViewPane extends ViewPane {
 
 												messagePage.addContentPart(textEditContent, toolId);
 											} catch (error) {
-												console.error('[Tool Call Mapping] Error processing edit_file:', error);
 												// Fallback: create content part with minimal info
 												const textEditContent: IVybeChatTextEditContent = {
 													kind: 'textEdit',
@@ -1117,6 +1161,7 @@ export class VybeChatViewPane extends ViewPane {
 								let target = '';
 								let filePath: string | undefined = undefined;
 								let lineRange: { start: number; end: number } | undefined = undefined;
+								let grepPathForDedupe: string | undefined = undefined;
 
 								if (toolName === 'read_file') {
 									toolType = 'read';
@@ -1149,7 +1194,6 @@ export class VybeChatViewPane extends ViewPane {
 											}
 										}
 									} else {
-										console.warn(`[VYBE Chat] ⚠️ No file path found in tool args for read_file. Full toolArgs:`, JSON.stringify(toolArgs));
 										target = 'file'; // Fallback
 									}
 
@@ -1164,10 +1208,6 @@ export class VybeChatViewPane extends ViewPane {
 
 									// Removed verbose logging
 
-									// CRITICAL: If target is still empty or generic, log error
-									if (!target || target === 'file') {
-										console.error(`[VYBE Chat] ❌ Failed to extract filename! target="${target}", fullFilePath="${fullFilePath}", toolArgs:`, JSON.stringify(toolArgs));
-									}
 								} else if (toolName === 'list_dir') {
 									toolType = 'list';
 									// eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1176,7 +1216,10 @@ export class VybeChatViewPane extends ViewPane {
 								} else if (toolName === 'grep') {
 									toolType = 'grep';
 									// eslint-disable-next-line @typescript-eslint/no-explicit-any
-									target = (toolArgs as any)?.pattern || '';
+									const grepArgs = toolArgs as any;
+									target = grepArgs?.pattern || '';
+									// Dedupe key includes path so "grep function in path X" and "grep function in repo" are separate tool parts
+									grepPathForDedupe = typeof grepArgs?.path === 'string' ? grepArgs.path : '';
 								} else if (toolName === 'search' || toolName === 'codebase_search') {
 									toolType = 'search';
 									// eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1195,18 +1238,15 @@ export class VybeChatViewPane extends ViewPane {
 								if (toolType) {
 									// Removed verbose logging
 
-									// Log if target is empty (for debugging)
-									if (!target || target === 'file') {
-										console.warn(`[VYBE Chat] ⚠️ Empty target for tool: ${toolName}, using fallback`);
-									}
 
-									// Check for duplicate tool parts with same toolType:target
-									const targetKey = `${toolType}:${target}`;
+									// Check for duplicate tool parts: for grep, include path so same pattern in different paths = separate parts
+									const targetKey = toolType === 'grep'
+										? `grep:${target}:${grepPathForDedupe ?? ''}`
+										: `${toolType}:${target}`;
 									const existingToolId = toolPartsByTarget.get(targetKey);
 
 									if (existingToolId) {
 										// Duplicate detected - update existing part instead of creating new one
-										console.log(`[VYBE Chat] 🔄 Duplicate tool detected: ${toolType} "${target}" (existing id: ${existingToolId}, new id: ${toolId})`);
 										// Map the new toolId to the existing one for tool.result handling
 										toolPartsByTarget.set(toolId, existingToolId);
 									} else {
@@ -1226,7 +1266,7 @@ export class VybeChatViewPane extends ViewPane {
 										// Removed verbose logging
 
 										if (!partCreated) {
-											console.error(`[VYBE Chat] ⚠️ Failed to create tool part for: ${toolName} (id: ${toolId})`);
+											// Failed to create tool part
 										} else {
 											// Record creation time for minimum display duration
 											toolCreationTimes.set(toolId, Date.now());
@@ -1236,7 +1276,7 @@ export class VybeChatViewPane extends ViewPane {
 										}
 									}
 								} else {
-									console.warn(`[VYBE Chat] Unknown tool name: ${toolName}, not creating UI component`);
+									// Unknown tool name
 								}
 							};
 
@@ -1270,6 +1310,11 @@ export class VybeChatViewPane extends ViewPane {
 						if (mappedToolId && mappedToolId !== toolId) {
 							toolId = mappedToolId;
 						}
+
+						// Remove from pending tools - tool execution completed
+						pendingToolCalls.delete(toolId);
+						// Reset inactivity timer now that tool is done
+						resetInactivityTimer();
 
 						// Detect errors from result string
 						let toolError: { code: string; message: string } | undefined;
@@ -1318,7 +1363,7 @@ export class VybeChatViewPane extends ViewPane {
 										}));
 									}
 								} catch (error) {
-									console.warn(`[VYBE Chat] ⚠️ Failed to parse list_dir result:`, error, `Result: ${typeof toolResult === 'string' ? toolResult.substring(0, 200) : toolResult}`);
+									// Failed to parse list_dir result
 								}
 							}
 						}
@@ -1345,7 +1390,7 @@ export class VybeChatViewPane extends ViewPane {
 										parsedSearchResults = parsed.results;
 									}
 								} catch (error) {
-									console.warn(`[VYBE Chat] 🔍 ⚠️ Failed to parse codebase_search result:`, error);
+									// Failed to parse codebase_search result
 								}
 							}
 
@@ -1388,8 +1433,7 @@ export class VybeChatViewPane extends ViewPane {
 									// Empty array is valid (no matches found)
 									grepResults = [];
 								} else {
-									// Invalid structure - log warning but try to use it anyway
-									console.warn(`[VYBE Chat] 🔍 ⚠️ Backend grepResults has invalid structure, attempting to use anyway`);
+									// Invalid structure - try to use it anyway
 									grepResults = event.payload.grepResults;
 								}
 							} else if (typeof toolResult === 'string') {
@@ -1450,7 +1494,6 @@ export class VybeChatViewPane extends ViewPane {
 									} else {
 										// Matches exist but no file paths found
 										grepResults = [];
-										console.warn(`[VYBE Chat] 🔍 ⚠️ Parsed JSON but couldn't extract file paths. Sample matches:`, parsed.matches?.slice(0, 3));
 									}
 
 									// Extract totalMatches and truncated from parsed result if not already set
@@ -1489,8 +1532,6 @@ export class VybeChatViewPane extends ViewPane {
 											});
 										}
 									} catch (error) {
-										const errorMsg = error instanceof Error ? error.message : String(error);
-										console.warn(`[VYBE Chat] ⚠️ Failed to parse grep result from string:`, errorMsg);
 										// Ensure grepResults is set even on error
 										if (!grepResults || grepResults.length === 0) {
 											grepResults = [];
@@ -1500,7 +1541,6 @@ export class VybeChatViewPane extends ViewPane {
 
 								// Final fallback: ensure grepResults is always an array
 								if (!Array.isArray(grepResults)) {
-									console.warn(`[VYBE Chat] 🔍 ⚠️ grepResults is not an array after parsing, setting to empty array`);
 									grepResults = [];
 								}
 							} else if (toolResult && typeof toolResult === 'object') {
@@ -1575,7 +1615,7 @@ export class VybeChatViewPane extends ViewPane {
 										}));
 								}
 							} catch (error) {
-								console.warn(`[VYBE Chat] ⚠️ Failed to parse todos result:`, error);
+								// Failed to parse todos result
 							}
 						}
 
@@ -1662,8 +1702,23 @@ export class VybeChatViewPane extends ViewPane {
 
 					case 'complete': {
 						// Task complete - finalize the message
+						// CRITICAL: Cancel inactivity timer immediately - LangGraph emits 'complete' when done
+						// The inactivity timer is only a safety net for edge cases where 'complete' is missing
+						if (streamInactivityTimer) {
+							clearTimeout(streamInactivityTimer);
+							streamInactivityTimer = null;
+						}
+						// Clear pending tool calls since task is complete
+						pendingToolCalls.clear();
+						
 						messagePage.finalize();
 						messagePage.setComplete();
+						// CRITICAL: Stop streaming and switch back to send button IMMEDIATELY when task completes
+						// This happens synchronously in the event handler, before promise resolution
+						messagePage.setStreaming(false);
+						if (this.composer) {
+							this.composer.switchToSendButton();
+						}
 						if (options.onContentUpdate) {
 							options.onContentUpdate();
 						}
@@ -1702,6 +1757,14 @@ export class VybeChatViewPane extends ViewPane {
 						const toolName = event.payload?.tool_name || 'Tool';
 						const errorMessage = event.payload?.error || 'Unknown error';
 						const errorCode = event.payload?.code || 'TOOL_ERROR';
+						const toolId = event.payload?.tool_id;
+
+						// Remove from pending tools - tool execution failed
+						if (toolId) {
+							pendingToolCalls.delete(toolId);
+						}
+						// Reset inactivity timer now that tool is done (even if it failed)
+						resetInactivityTimer();
 
 						// Show error popup above composer
 						messagePage.showError(
@@ -1724,27 +1787,39 @@ export class VybeChatViewPane extends ViewPane {
 						const canRetry = event.payload?.canRetry as boolean | undefined;
 						const threadId = event.payload?.threadId as string | undefined;
 						const originalMessage = event.payload?.originalMessage as string | undefined;
+						
+						console.error('[VYBE] Error event received:', {
+							errorMessage,
+							errorCode,
+							errorType,
+							hasReceivedFirstToken,
+							taskId: event?.task_id
+						});
 
+						// Exclude "Stream timeout" — agent stream timeout during tool runs, not a real network failure
 						const isConnectionStyleError =
-							errorType === 'network' ||
-							errorType === 'timeout' ||
-							/enotfound|getaddrinfo|econnrefused|etimedout|econnreset|eai_again|network unreachable|fetch failed|failed to fetch/i.test(errorMessage);
+							!/Stream timeout/i.test(errorMessage) &&
+							(errorType === 'network' ||
+								errorType === 'timeout' ||
+								/enotfound|getaddrinfo|econnrefused|etimedout|econnreset|eai_again|network unreachable|fetch failed|failed to fetch/i.test(errorMessage));
 						if (isConnectionStyleError) {
 							if (hasReceivedFirstToken) {
-								// Already got tokens; show connection popup now
-								console.error('[VYBE Chat] Error event (connection, showing now):', errorMessage, errorCode);
+								// We already received tokens — we're connected. Do NOT show Connection Error popup;
+								// a mid-stream error (e.g. from a tool or transient failure) would block the UI
+								// while the stream often continues.
 								if (noFirstTokenTimer) {
 									clearTimeout(noFirstTokenTimer);
 									noFirstTokenTimer = null;
 								}
-								showConnectionErrorPopup();
+								// Do not call showConnectionErrorPopup(); do not break — fall through would hit default,
+								// so we break without showing.
+								break;
 							} else {
 								// No token yet: defer popup until no-first-token timer fires (keeps "planning" visible)
 								pendingConnectionError = true;
 							}
 							break;
 						}
-						console.error('[VYBE Chat] Error event:', errorMessage, errorCode, { errorType, canResume, canRetry });
 
 						// Non-connection error: show now
 						messagePage.removePhaseIndicator();
@@ -1755,7 +1830,6 @@ export class VybeChatViewPane extends ViewPane {
 						// Show error popup with recovery options (non-connection errors)
 						// Don't call setComplete() before showing error - it might interfere
 						const displayMessage = errorMessage;
-						console.log('[VYBE Chat] Calling showError with:', { errorMessage, displayMessage, errorCode, errorType, canResume, canRetry, hasThreadId: !!threadId, hasOriginalMessage: !!originalMessage });
 						messagePage.showError(displayMessage, errorCode, {
 							errorType,
 							canResume,
@@ -1771,7 +1845,6 @@ export class VybeChatViewPane extends ViewPane {
 										await this._agentService.resumeTask(taskId, selectedModelId, reasoningLevel);
 									}
 								} catch (resumeError) {
-									console.error('[VYBE Chat] Resume failed:', resumeError);
 									messagePage.showError(
 										resumeError instanceof Error ? resumeError.message : 'Failed to resume task',
 										'RESUME_ERROR'
@@ -1796,7 +1869,6 @@ export class VybeChatViewPane extends ViewPane {
 										);
 									}
 								} catch (retryError) {
-									console.error('[VYBE Chat] Retry failed:', retryError);
 									messagePage.showError(
 										retryError instanceof Error ? retryError.message : 'Failed to retry task',
 										'RETRY_ERROR'
@@ -1842,7 +1914,6 @@ export class VybeChatViewPane extends ViewPane {
 											await this._agentService.resumeTask(task.taskId, selectedModelId, reasoningLevel);
 										}
 									} catch (resumeError) {
-										console.error('[VYBE Chat] Resume failed:', resumeError);
 										messagePage.showError(
 											resumeError instanceof Error ? resumeError.message : 'Failed to resume task',
 											'RESUME_ERROR'
@@ -1851,11 +1922,9 @@ export class VybeChatViewPane extends ViewPane {
 								},
 								onStartFresh: () => {
 									// User wants to start fresh - do nothing (they can start a new task)
-									console.log('[VYBE Chat] User chose to start fresh, ignoring incomplete task');
 								},
 								onDismiss: () => {
 									// User dismissed - keep incomplete state for later
-									console.log('[VYBE Chat] User dismissed recovery popup');
 								}
 							});
 						}
@@ -1863,8 +1932,8 @@ export class VybeChatViewPane extends ViewPane {
 					}
 
 					default: {
-						// Unknown event type - log but don't crash
-						console.warn('[VYBE Chat] Unhandled event type:', event.type);
+						// Unknown event type - log for debugging
+						console.warn('[VYBE] Unknown event type:', event?.type, event);
 						break;
 					}
 				}
@@ -1890,10 +1959,13 @@ export class VybeChatViewPane extends ViewPane {
 					// Refresh models will ensure API keys are fetched and set
 					await this._llmModelService.refreshModels();
 				} catch (error) {
-					console.warn('[VYBE Chat] Failed to refresh models/ensure API keys:', error);
 					// Continue anyway - the stream will fail with a clear error message
 				}
 			}
+
+			// Store refs so stop can cancel backend and dispose subscription
+			this._currentTaskId = taskId;
+			this._currentEventSubscription = eventSubscription;
 
 			// Start the task (returns immediately with taskId)
 			await this._agentService.solveTask({
@@ -1909,12 +1981,18 @@ export class VybeChatViewPane extends ViewPane {
 
 			// Wait for complete or error event (or frontend timeout when backend never responds, e.g. offline)
 			const CONNECTION_TIMEOUT_MS = 45000; // 45s - backend may hang on first LLM call when offline
+			
 			const waitPromise = new Promise<void>((resolve) => {
 				resolveWait = resolve;
+				this._resolveWait = resolve;
 				if (eventSubscription) {
 					const completeListener = this._agentService.onDidEmitEvent((event: any) => {
 						if (event?.type === 'complete' && event?.task_id === taskId) {
 							completeListener.dispose();
+							if (streamInactivityTimer) {
+								clearTimeout(streamInactivityTimer);
+								streamInactivityTimer = null;
+							}
 							// If we deferred a connection error, do NOT resolve here - let the no-first-token timer show popup and resolve
 							if (pendingConnectionError) {
 								return;
@@ -1934,6 +2012,12 @@ export class VybeChatViewPane extends ViewPane {
 				setTimeout(() => reject(new Error('Connection timeout: no response from agent. Check your internet connection.')), CONNECTION_TIMEOUT_MS);
 			});
 			await Promise.race([waitPromise, timeoutPromise]);
+			
+			// Clean up inactivity timer
+			if (streamInactivityTimer) {
+				clearTimeout(streamInactivityTimer);
+				streamInactivityTimer = null;
+			}
 
 			// Clean up event subscription and no-first-token timer AFTER task completes
 			if (noFirstTokenTimer) {
@@ -1944,39 +2028,44 @@ export class VybeChatViewPane extends ViewPane {
 				eventSubscription.dispose();
 				eventSubscription = null;
 			}
+			this._currentTaskId = null;
+			this._currentEventSubscription = null;
+			this._resolveWait = null;
 
 			// Note: Event handler disposed automatically when subscription is disposed
 
 			// Content parts are already updated via direct event handling
 			// Events are the source of truth - no need to render result object
-			if (!hasReceivedEvents) {
-				console.warn('[VYBE Chat] No streaming events received - this should not happen with LangGraph');
-			}
 
 			// Stop streaming state
 			messagePage.setStreaming(false);
 			this.currentStreamingMessageId = null;
-			if (this.composer) {
-				this.composer.switchToSendButton();
-			}
+			// Button switch already handled in 'complete' event handler - no need to do it again here
+			// This prevents the delay from waiting for promise resolution
 			// Trigger scroll update
 			if (options.onContentUpdate) {
 				options.onContentUpdate();
 			}
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : String(error);
-			// Connection-style failure (fetch failed, timeout, etc.): show composer popup, same page retry (Cursor-style)
-			const isConnectionError = /fetch|network|failed to fetch|networkerror|econnrefused|enotfound|etimedout|econnreset|connection timeout/i.test(errorMessage);
-			if (isConnectionError && this.composer) {
+			// Connection-style failure (fetch failed, timeout, etc.): show composer popup only if we never received tokens.
+			// If we already received tokens, the stream may still be delivering — don't show Connection Error or dispose
+			// the subscription so the UI can keep updating.
+			const isConnectionError = !/Stream timeout/i.test(errorMessage) && /fetch|network|failed to fetch|networkerror|econnrefused|enotfound|etimedout|econnreset|connection timeout/i.test(errorMessage);
+			const shouldShowConnectionPopup = isConnectionError && this.composer && !hasReceivedFirstToken;
+			if (shouldShowConnectionPopup && this.composer) {
+				const composer = this.composer;
 				if (eventSubscription) {
 					eventSubscription.dispose();
 					eventSubscription = null;
 				}
-				// Remove "Planning next steps" so it goes to inactive state when popup appears
+				this._currentTaskId = null;
+				this._currentEventSubscription = null;
+				this._resolveWait = null;
 				messagePage.removePhaseIndicator();
 				messagePage.setStreaming(false);
 				this.currentStreamingMessageId = null;
-				this.composer.showWarning({
+				composer.showWarning({
 					title: 'Connection Error',
 					message: 'Connection failed. If the problem persists, please check your internet connection or VPN.',
 					showCloseButton: true,
@@ -1999,8 +2088,15 @@ export class VybeChatViewPane extends ViewPane {
 						}
 					]
 				});
-			} else {
+			} else if (isConnectionError && hasReceivedFirstToken) {
+				// Connection-style error but we already had tokens — stream may still be going; keep subscription
+				// Don't log as warning - this is often a false positive (network hiccup during active stream)
+				// The inactivity timer will catch true stream stops
+			} else if (!isConnectionError) {
 				// Non-connection error: show in message page + notification
+				this._currentTaskId = null;
+				this._currentEventSubscription = null;
+				this._resolveWait = null;
 				const errorContentParts: any[] = [{
 					kind: 'markdown',
 					content: `**Error:** ${errorMessage}`,
@@ -2016,11 +2112,9 @@ export class VybeChatViewPane extends ViewPane {
 			}
 		}
 
-		// Update onStop (Phase 4.1: no cancellation yet)
+		// Ensure onStop runs (handleStopGeneration does backend cancel + UI; original does page cleanup)
 		const originalOnStop = options.onStop;
 		options.onStop = () => {
-			// Phase 4.1: Cancellation not implemented yet
-			// Call original onStop
 			if (originalOnStop) {
 				originalOnStop();
 			}
@@ -2117,7 +2211,6 @@ export class VybeChatViewPane extends ViewPane {
 					variableEntries.push(docEntry);
 				}
 			} catch (error) {
-				console.error(`[VYBE Chat] Failed to convert context pill ${pill.id}:`, error);
 				// Continue with other pills even if one fails
 			}
 		}
@@ -2292,7 +2385,6 @@ export class VybeChatViewPane extends ViewPane {
 				this.composer.insertContextPill('file', name, relativePathStr, iconClasses);
 			} catch (error) {
 				// File/folder doesn't exist or error reading - skip it
-				console.error('[VYBE Chat] Error handling dropped file/folder:', error);
 			}
 		}
 	}
@@ -2358,18 +2450,6 @@ export class VybeChatViewPane extends ViewPane {
 						// Only scroll if content still extends beyond viewport
 						if (newDistanceFromBottom > 10) {
 							this.chatArea.scrollTop = newScrollHeight;
-							const afterScroll = this.chatArea.scrollTop;
-
-							// DIAGNOSTIC: Log scroll jumps (only if significant)
-							if (Math.abs(afterScroll - beforeScroll) > 100) {
-								console.log('[Scroll] Large scroll jump', {
-									before: beforeScroll,
-									after: afterScroll,
-									scrollHeight: newScrollHeight,
-									jump: afterScroll - beforeScroll,
-									distanceFromBottom: newDistanceFromBottom
-								});
-							}
 						}
 					}
 					this.scrollRafId = null;
@@ -2380,15 +2460,33 @@ export class VybeChatViewPane extends ViewPane {
 	}
 
 	private handleStopGeneration(): void {
-		// Stop the currently streaming message
+		// 1. Cancel backend task so AI/credits stop (no wastage)
+		if (this._currentTaskId) {
+			void this._agentService.cancelTask(this._currentTaskId);
+			this._currentTaskId = null;
+		}
+		// 2. Unsubscribe from events so no more tokens update the UI
+		if (this._currentEventSubscription) {
+			this._currentEventSubscription.dispose();
+			this._currentEventSubscription = null;
+		}
+		// 3. Stop streaming UI on the current message page
 		if (this.currentStreamingMessageId) {
 			const page = this.messagePages.get(this.currentStreamingMessageId);
 			if (page) {
 				page.setStreaming(false);
-				this.currentStreamingMessageId = null;
 			}
+			this.currentStreamingMessageId = null;
 		}
-		// TODO: Cancel actual AI service request when implemented
+		// 4. Resolve wait promise so handleSendMessage cleanup runs (no hanging await)
+		if (this._resolveWait) {
+			this._resolveWait();
+			this._resolveWait = null;
+		}
+		// 5. Switch composer back to send button
+		if (this.composer) {
+			this.composer.switchToSendButton();
+		}
 	}
 
 	/**

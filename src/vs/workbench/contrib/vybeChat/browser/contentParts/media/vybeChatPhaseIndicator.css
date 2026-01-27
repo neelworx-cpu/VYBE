@@ -12,10 +12,10 @@
 /* Shine animation for phase indicator text - left to right sweep */
 @keyframes shine {
 	0% {
-		background-position: -200% center;  /* Highlight starts off-screen left */
+		background-position: 200% center;   /* Highlight starts off-screen right */
 	}
 	100% {
-		background-position: 200% center;   /* Highlight ends off-screen right (left-to-right sweep) */
+		background-position: -200% center;  /* Highlight ends off-screen left (sweeps left to right) */
 	}
 }
 
@@ -41,13 +41,9 @@
 	height: auto;
 }
 
-/* Child span with shine animation - matches computed CSS exactly */
-.simulated-thinking-container .make-shine {
-	display: inline;
-	font-family: -apple-system, "system-ui", sans-serif;
-	font-size: 12px;
-	line-height: 18.2px;
-	opacity: 0.8;
+/* General make-shine class - can be used anywhere (thinking, tool UI, phase indicator) */
+/* Base styles - color and opacity should be set via inline styles to override defaults */
+.make-shine {
 	animation: shine 2s linear infinite;
 	animation-delay: 0s;
 	animation-direction: normal;
@@ -59,16 +55,55 @@
 	animation-timing-function: linear;
 	background-clip: text;
 	-webkit-background-clip: text;
+	/* Dim segments use currentColor so base matches theme; bright streak for shine */
 	background-image: linear-gradient(
 		90deg,
-		rgba(20, 20, 20, 0.552941) 0px,
-		rgba(20, 20, 20, 0.552941) 25%,
+		currentColor 0px,
+		currentColor 25%,
 		rgb(252, 252, 252) 60%,
-		rgba(20, 20, 20, 0.552941) 75%,
-		rgba(20, 20, 20, 0.552941) 100%
+		currentColor 75%,
+		currentColor 100%
 	);
 	background-size: 200% 100%;
-	-webkit-text-fill-color: rgba(0, 0, 0, 0);
-	color: rgba(20, 20, 20, 0.92);
+	-webkit-text-fill-color: transparent;
+}
+
+/* Child span with shine animation - base font color matches tool verbs (Vybe light + dark) */
+.simulated-thinking-container .make-shine {
+	display: inline;
+	font-family: -apple-system, "system-ui", sans-serif;
+	font-size: 12px;
+	line-height: 18.2px;
+	/* Same as tool verbs: var(--vscode-foreground) at 0.7 opacity */
+	color: var(--vscode-foreground);
+	opacity: 0.7;
+}
+
+/* Dark theme (Vybe Dark): base is light so currentColor→white has poor contrast. Use dimmer base so streak pops. */
+@media (preferred-color-scheme: dark) {
+	.make-shine {
+		/* Dim base (semi-transparent white) so full-white streak is clearly visible */
+		background-image: linear-gradient(
+			90deg,
+			rgba(255, 255, 255, 0.5) 0px,
+			rgba(255, 255, 255, 0.5) 25%,
+			rgb(255, 255, 255) 60%,
+			rgba(255, 255, 255, 0.5) 75%,
+			rgba(255, 255, 255, 0.5) 100%
+		);
+	}
+}
+
+/* VS Code dark theme (e.g. Vybe Dark) - same gradient so animation is visible */
+.vs-dark .make-shine,
+.monaco-workbench.vs-dark .make-shine {
+	background-image: linear-gradient(
+		90deg,
+		rgba(255, 255, 255, 0.5) 0px,
+		rgba(255, 255, 255, 0.5) 25%,
+		rgb(255, 255, 255) 60%,
+		rgba(255, 255, 255, 0.5) 75%,
+		rgba(255, 255, 255, 0.5) 100%
+	);
 }
 

@@ -11,6 +11,7 @@
 
 import { ISearchService, QueryType, ITextQuery, IFileMatch, DEFAULT_MAX_SEARCH_RESULTS, resultIsMatch, ITextSearchMatch, ITextSearchContext } from '../../../../services/search/common/search.js';
 import { IWorkspaceContextService } from '../../../../../platform/workspace/common/workspace.js';
+import { IFileService } from '../../../../../platform/files/common/files.js';
 import { extUri } from '../../../../../base/common/resources.js';
 import type { VybeTool, ToolContext } from './vybeToolRegistry.js';
 
@@ -70,7 +71,8 @@ export function normalizeGlobPattern(glob: string): string {
 
 export function createGrepTool(
 	searchService: ISearchService,
-	workspaceService: IWorkspaceContextService
+	workspaceService: IWorkspaceContextService,
+	fileService: IFileService
 ): VybeTool {
 	return {
 		name: 'grep',
@@ -162,7 +164,7 @@ export function createGrepTool(
 			});
 
 			// Build folder URI - handles both absolute and relative paths correctly
-			const folderUri = path
+			let folderUri = path
 				? extUri.resolvePath(context.workspaceRoot, path)
 				: context.workspaceRoot;
 
@@ -173,7 +175,45 @@ export function createGrepTool(
 				throw new Error(error);
 			}
 
-			// Build search query
+			// Search API requires a directory as root (ripgrep uses it as cwd). If the user passed
+			// a file path, resolve to its parent directory to avoid spawn ENOTDIR.
+			// When path is set, validate it exists so we can distinguish "path invalid" from "0 matches".
+			let fileOnlyInclude: string | undefined;
+			try {
+				const stat = await fileService.stat(folderUri);
+				if (stat.isFile) {
+					fileOnlyInclude = extUri.basename(folderUri);
+					folderUri = extUri.dirname(folderUri);
+				}
+			} catch (err) {
+				if (path) {
+					const error = `Path does not exist: ${path}`;
+					console.error(`[VybeGrepTool] ❌ ${error}`);
+					throw new Error(error);
+				}
+				// path not set (searching workspace root): keep folderUri as-is
+			}
+
+			// Build include pattern: optional glob/fileType, and if path was a file then restrict to that file
+			let includePattern: Record<string, boolean> | undefined;
+			if (fileOnlyInclude) {
+				includePattern = normalizedGlob
+					? { [`**/${fileOnlyInclude}`]: true, [normalizedGlob]: true }
+					: { [fileOnlyInclude]: true };
+			} else if (normalizedGlob) {
+				includePattern = { [normalizedGlob]: true };
+			} else if (fileType) {
+				includePattern = { [`**/*.${fileType}`]: true };
+			}
+
+			// Context lines: engine uses single number for both before/after (--before-context / --after-context)
+			const surroundingContext = Math.max(
+				beforeLines ?? 0,
+				afterLines ?? 0,
+				contextLines ?? 0
+			);
+
+			// Build search query (folder is always a directory; file paths were resolved to parent above)
 			const query: ITextQuery = {
 				type: QueryType.Text,
 				contentPattern: {
@@ -184,18 +224,11 @@ export function createGrepTool(
 				},
 				folderQueries: [{
 					folder: folderUri,
+					...(includePattern && { includePattern }),
 				}],
 				maxResults,
+				...(surroundingContext > 0 && { surroundingContext }),
 			};
-
-			// Add file pattern filter if specified (glob or file type)
-			if (normalizedGlob) {
-				query.folderQueries![0].includePattern = { [normalizedGlob]: true };
-			} else if (fileType) {
-				// Convert file type to glob pattern (e.g., "ts" -> "*.ts")
-				const typeGlob = `**/*.${fileType}`;
-				query.folderQueries![0].includePattern = { [typeGlob]: true };
-			}
 
 			try {
 			// Execute search
@@ -271,17 +304,49 @@ export function createGrepTool(
 					pattern,
 					matchCount,
 					fileCount,
-					truncated
+					truncated,
+					outputMode
 				});
 
-				// Return structured result with summary for AI visibility
-				// The summary appears first so the AI sees accurate counts even if JSON is truncated
+				const summary = `Found ${matchCount} matches in ${fileCount} files${truncated ? ' (results truncated, more matches exist)' : ''}.`;
+
+				// Return shape depends on output_mode (plan 2.3)
+				const mode = outputMode ?? 'content';
+				if (mode === 'files_with_matches') {
+					// Build grepResults [{ file, path, matchCount }] from matches so UI/service can show file list
+					const fileToCount = new Map<string, number>();
+					for (const m of matches) {
+						fileToCount.set(m.file, (fileToCount.get(m.file) ?? 0) + 1);
+					}
+					const grepResults = Array.from(fileToCount.entries()).map(([path, matchCountPerFile]) => ({
+						file: path.split(/[/\\]/).pop() || path,
+						path,
+						matchCount: matchCountPerFile
+					}));
+					return {
+						summary,
+						totalMatches: matchCount,
+						fileCount,
+						truncated,
+						grepResults,
+						matches: []
+					};
+				}
+				if (mode === 'count') {
+					return {
+						summary,
+						totalMatches: matchCount,
+						fileCount,
+						truncated
+					};
+				}
+				// content (default): full matches array for existing UI and agent behavior
 				return {
-					summary: `Found ${matchCount} matches in ${fileCount} files${truncated ? ' (results truncated, more matches exist)' : ''}.`,
+					summary,
 					matches,
 					truncated,
 					totalMatches: matchCount,
-					fileCount,
+					fileCount
 				};
 			} catch (error) {
 				console.error(`[VybeGrepTool] ❌ Search failed:`, error);

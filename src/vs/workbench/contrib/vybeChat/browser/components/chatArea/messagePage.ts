@@ -720,7 +720,6 @@ export class MessagePage extends Disposable {
 		// Removed verbose logging
 
 		if (!this.aiResponseArea || !this.markdownRendererService) {
-			console.error(`[MessagePage] addContentPart: Missing aiResponseArea or markdownRendererService!`);
 			return null;
 		}
 
@@ -809,7 +808,6 @@ export class MessagePage extends Disposable {
 			return part;
 		}
 
-		console.warn('[MessagePage] Failed to create content part:', contentData.kind);
 		return null;
 	}
 
@@ -1472,7 +1470,6 @@ export class MessagePage extends Disposable {
 			};
 			existingPart = this.addContentPart(contentData) as VybeChatThinkingPart | undefined;
 			if (existingPart) {
-				console.log(`[MessagePage] ✅ Created new thinking block for new reasoning part (${this.accumulatedThinking.length} chars)`);
 			}
 		} else {
 			// This is a continuation - find existing streaming part
@@ -1744,9 +1741,15 @@ export class MessagePage extends Disposable {
 	 * CRITICAL: Clears currentMarkdownBlockId so next appendText creates a new block.
 	 */
 	public finalizeCurrentMarkdown(): void {
+		console.log('[DIAG] finalizeCurrentMarkdown', {
+			currentMarkdownBlockId: this.currentMarkdownBlockId,
+			accumulatedMarkdown: this.accumulatedMarkdown.substring(0, 50),
+			accumulatedMarkdownLength: this.accumulatedMarkdown.length,
+			existingMarkdownBlocks: this.contentPartsData.filter(d => d.kind === 'markdown').length
+		});
+
 		// Find the markdown part with the current block ID
 		if (!this.currentMarkdownBlockId) {
-			// Removed verbose logging
 			return;
 		}
 
@@ -1758,7 +1761,6 @@ export class MessagePage extends Disposable {
 			const markdownData = this.contentPartsData[markdownIndex] as IVybeChatMarkdownContent;
 			// Type guard: check if it's markdown content with isStreaming
 			if (markdownData.isStreaming) {
-				// Removed verbose logging
 				// Update the markdown part to finalize it
 				const markdownPart = this.contentParts[markdownIndex];
 				if (markdownPart && markdownPart.updateContent) {
@@ -1772,16 +1774,10 @@ export class MessagePage extends Disposable {
 					...markdownData,
 					isStreaming: false
 				};
-				// Removed verbose logging
-			} else {
-				// Removed verbose logging
 			}
-		} else {
-			// Removed verbose logging
 		}
 
 		// CRITICAL: Clear the current block ID so next appendText creates a NEW block
-		// Removed verbose logging
 		this.currentMarkdownBlockId = null;
 		// Reset accumulator for the next block
 		this.accumulatedMarkdown = '';
@@ -1801,6 +1797,21 @@ export class MessagePage extends Disposable {
 		// This allows us to check the full accumulated content against existing blocks
 		const testAccumulated = this.accumulatedMarkdown + text;
 
+		console.log('[DIAG] appendText', {
+			text: text.substring(0, 50),
+			textLength: text.length,
+			currentMarkdownBlockId: this.currentMarkdownBlockId,
+			accumulatedMarkdown: this.accumulatedMarkdown.substring(0, 50),
+			accumulatedMarkdownLength: this.accumulatedMarkdown.length,
+			existingBlocksCount: this.contentPartsData.filter(d => d.kind === 'markdown').length,
+			existingBlocks: this.contentPartsData.filter(d => d.kind === 'markdown').map((d, i) => ({
+				index: i,
+				id: (d as IVybeChatMarkdownContent).id,
+				content: (d as IVybeChatMarkdownContent).content.substring(0, 50),
+				contentLength: (d as IVybeChatMarkdownContent).content.length,
+				isStreaming: (d as IVybeChatMarkdownContent).isStreaming
+			}))
+		});
 
 		// CRITICAL: Check if this content already exists in ANY markdown block
 		// This prevents duplicates when final content arrives after streaming completes
@@ -1847,11 +1858,21 @@ export class MessagePage extends Disposable {
 		});
 
 		if (existingBlock) {
+			const mdData = existingBlock as IVybeChatMarkdownContent;
+			console.log('[DIAG] appendText DUPLICATE REJECTED', {
+				text: text.substring(0, 50),
+				textLength: text.length,
+				matchedBlockId: mdData.id,
+				matchedBlockContent: mdData.content.substring(0, 50),
+				matchedBlockContentLength: mdData.content.length,
+				matchedBlockIsStreaming: mdData.isStreaming,
+				currentMarkdownBlockId: this.currentMarkdownBlockId,
+				accumulatedMarkdown: this.accumulatedMarkdown.substring(0, 50)
+			});
+
 			// This content already exists - reuse the existing block instead of creating a duplicate
 			const existingIndex = this.contentPartsData.findIndex(d => d === existingBlock);
 			if (existingIndex >= 0) {
-				const mdData = existingBlock as IVybeChatMarkdownContent;
-
 				// CRITICAL: When duplicate is detected, DO NOT update the content
 				// The existing block already has the correct content
 				// Just ensure the block ID and accumulator are in sync
@@ -1872,6 +1893,10 @@ export class MessagePage extends Disposable {
 		if (!this.currentMarkdownBlockId) {
 			this.currentMarkdownBlockId = `md_${++this.markdownBlockCounter}`;
 			this.accumulatedMarkdown = ''; // Reset accumulator for new block
+			console.log('[DIAG] appendText CREATING NEW BLOCK', {
+				newBlockId: this.currentMarkdownBlockId,
+				text: text.substring(0, 50)
+			});
 		}
 
 		// Append text to accumulator
@@ -1910,7 +1935,7 @@ export class MessagePage extends Disposable {
 			};
 			const part = this.addContentPart(contentData);
 			if (!part) {
-				console.error(`[MessagePage] appendText: Failed to create markdown part for block ${this.currentMarkdownBlockId}!`);
+				// Failed to create markdown part
 			}
 		}
 	}
@@ -2009,7 +2034,6 @@ export class MessagePage extends Disposable {
 		// Find code block part by block_id
 		const codeBlockPart = this.activeCodeBlocks.get(block_id);
 		if (!codeBlockPart) {
-			console.warn('[MessagePage] appendCodeBlock: block_id not found:', block_id);
 			return;
 		}
 
@@ -2044,7 +2068,6 @@ export class MessagePage extends Disposable {
 		// Find code block part by block_id
 		const codeBlockPart = this.activeCodeBlocks.get(block_id);
 		if (!codeBlockPart) {
-			console.warn('[MessagePage] endCodeBlock: block_id not found:', block_id);
 			return;
 		}
 
@@ -2219,7 +2242,6 @@ export class MessagePage extends Disposable {
 	public appendToBlock(blockId: string, delta: string): void {
 		const block = this.blocks.get(blockId);
 		if (!block) {
-			console.warn('[MessagePage] appendToBlock: block not found', blockId);
 			return;
 		}
 
@@ -2233,7 +2255,6 @@ export class MessagePage extends Disposable {
 	public finalizeBlock(blockId: string, content: string): void {
 		const block = this.blocks.get(blockId);
 		if (!block) {
-			console.warn('[MessagePage] finalizeBlock: block not found', blockId);
 			return;
 		}
 
@@ -2424,14 +2445,6 @@ export class MessagePage extends Disposable {
 				// Update contentPartsData to reflect finalization
 				this.contentPartsData[i] = updatedData;
 			} catch (error) {
-				console.error('[MessagePage] Error updating content part during finalize:', error, {
-					partKind: partData.kind,
-					index: i,
-					hasContent: !!(partData as any).content || !!(partData as any).value,
-					contentLength: (partData as any).content ? (partData as any).content.length :
-						((partData as any).value ? ((partData as any).value instanceof Array ? (partData as any).value.join('').length : (partData as any).value.length) : 0),
-					errorMessage: error instanceof Error ? error.message : String(error)
-				});
 				// Don't re-throw - continue finalizing other parts
 			}
 		}
@@ -2460,14 +2473,11 @@ export class MessagePage extends Disposable {
 	}): void {
 		// Check if composer is available
 		if (!this.composer) {
-			console.error('[MessagePage] Cannot show error: composer not available');
 			return;
 		}
 
 		// Use the new composer warning popup (standard error display)
 		const fullMessage = code ? `${message} (Code: ${code})` : message;
-
-		console.log('[MessagePage] Showing error popup:', { message: fullMessage, errorType: options?.errorType, canResume: options?.canResume, canRetry: options?.canRetry });
 
 		const buttons: Array<{ label: string; action: () => void; variant?: 'primary' | 'secondary' | 'tertiary' }> = [];
 
@@ -2516,13 +2526,15 @@ export class MessagePage extends Disposable {
 			});
 		}
 
-		// Determine title and icon based on error type
+		// Determine title and icon based on error type. Do not show "Connection Error" for
+		// "Stream timeout" — that's the agent's first-token timeout, not a real network failure.
 		let title = 'Error';
 		let icon: 'error' | 'warning' | 'info' = 'error';
+		const isStreamTimeout = /Stream timeout/i.test(message);
 
-		if (options?.errorType === 'network') {
+		if (options?.errorType === 'network' && !isStreamTimeout) {
 			title = 'Connection Error';
-		} else if (options?.errorType === 'timeout') {
+		} else if (options?.errorType === 'timeout' || isStreamTimeout) {
 			title = 'Timeout Error';
 		} else if (options?.errorType === 'bad_request') {
 			title = 'Request Error';
@@ -2540,12 +2552,10 @@ export class MessagePage extends Disposable {
 				buttons,
 				onClose: () => {
 					// Popup was closed
-					console.log('[MessagePage] Error popup closed');
 				}
 			});
-			console.log('[MessagePage] Error popup shown successfully');
 		} catch (error) {
-			console.error('[MessagePage] Failed to show error popup:', error);
+			// Error popup failed
 		}
 	}
 

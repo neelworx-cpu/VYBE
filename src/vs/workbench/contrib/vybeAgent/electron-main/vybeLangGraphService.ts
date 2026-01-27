@@ -1292,8 +1292,14 @@ export class VybeLangGraphService {
 
 								// Validate parsed structure and create grepResults
 								if (parsed && typeof parsed === 'object' && !parsed.error) {
-									// Directly create grepResults from parsed if it has matches
-									if (parsed.matches && Array.isArray(parsed.matches)) {
+									// Prefer grepResults from tool when present (e.g. output_mode === 'files_with_matches')
+									if (parsed.grepResults && Array.isArray(parsed.grepResults)) {
+										resultPayload.grepResults = parsed.grepResults;
+										resultPayload.totalMatches = typeof parsed.totalMatches === 'number' ? parsed.totalMatches : 0;
+										resultPayload.truncated = typeof parsed.truncated === 'boolean' ? parsed.truncated : false;
+										console.log(`[VybeLangGraphService] 🔍 ✅ Using grepResults from tool: ${resultPayload.grepResults.length} files, ${resultPayload.totalMatches} total matches`);
+									} else if (parsed.matches && Array.isArray(parsed.matches)) {
+										// Build grepResults from matches (content mode or legacy shape)
 										if (parsed.matches.length > 0) {
 											const fileMap = new Map<string, number>();
 											let matchesWithFile = 0;
@@ -1322,30 +1328,27 @@ export class VybeLangGraphService {
 														matchCount: count
 													};
 												});
-												// Use totalMatches from parsed if available, otherwise use matches.length
 												resultPayload.totalMatches = typeof parsed.totalMatches === 'number' ? parsed.totalMatches : parsed.matches.length;
 												resultPayload.truncated = typeof parsed.truncated === 'boolean' ? parsed.truncated : false;
 												console.log(`[VybeLangGraphService] 🔍 ✅ Created grepResults: ${resultPayload.grepResults.length} files, ${resultPayload.totalMatches} total matches`);
 											} else {
-												// No files found after grouping
 												resultPayload.grepResults = [];
 												resultPayload.totalMatches = parsed.matches.length;
 												resultPayload.truncated = typeof parsed.truncated === 'boolean' ? parsed.truncated : false;
 												console.warn(`[VybeLangGraphService] 🔍 ⚠️ No files found after grouping ${parsed.matches.length} matches`);
 											}
 										} else {
-											// Empty matches array - valid result
 											resultPayload.grepResults = [];
 											resultPayload.totalMatches = 0;
 											resultPayload.truncated = typeof parsed.truncated === 'boolean' ? parsed.truncated : false;
 											console.log(`[VybeLangGraphService] 🔍 ℹ️ Empty matches array (0 matches)`);
 										}
 									} else {
-										// No matches array in parsed result
+										// Count-only or no matches/grepResults (e.g. output_mode === 'count')
 										resultPayload.grepResults = [];
-										resultPayload.totalMatches = 0;
-										resultPayload.truncated = false;
-										console.warn(`[VybeLangGraphService] 🔍 ⚠️ No matches array in parsed result. Keys: ${Object.keys(parsed).join(', ')}`);
+										resultPayload.totalMatches = typeof parsed.totalMatches === 'number' ? parsed.totalMatches : 0;
+										resultPayload.truncated = typeof parsed.truncated === 'boolean' ? parsed.truncated : false;
+										console.log(`[VybeLangGraphService] 🔍 ℹ️ Using counts from parsed (no matches/grepResults). Keys: ${Object.keys(parsed).join(', ')}`);
 									}
 								}
 
@@ -2101,78 +2104,52 @@ export class VybeLangGraphService {
 			let lastEmittedReasoning = ''; // Track last emitted reasoning to detect new reasoning parts
 			let currentReasoningPart = ''; // Track current reasoning part being built
 
-			// Stream timeout detection - detect network issues when no tokens arrive
-			const STREAM_TIMEOUT_MS = 20000; // 20 seconds - if no tokens arrive, treat as network error
-			let lastTokenTimestamp = Date.now();
+			// Timeout only while waiting for the *first* token (to detect connection failure). After the first token
+			// we never timeout — tool runs and slow model output can take as long as needed. (Main process code
+			// lives in electron-main; a full app restart is required to pick up changes here.)
+			const FIRST_TOKEN_TIMEOUT_MS = 60000; // 60s to get first token (connection/backend alive)
 			// eslint-disable-next-line @typescript-eslint/no-explicit-any
-			let streamTimeoutId: any = null;
-
-			// Create a timeout promise that will reject if no tokens arrive
-			const createStreamTimeout = (): Promise<never> => {
-				return new Promise((_, reject) => {
-					streamTimeoutId = setTimeout(() => {
-						const timeSinceLastToken = Date.now() - lastTokenTimestamp;
-						console.error(`[VybeLangGraphService] ⚠️ Stream timeout: No tokens received for ${timeSinceLastToken}ms`);
-						reject(new Error(`Stream timeout: No tokens received for ${timeSinceLastToken}ms. Network connection may be lost.`));
-					}, STREAM_TIMEOUT_MS);
-				});
-			};
-
-			// Reset timeout when token arrives
-			const resetStreamTimeout = () => {
-				if (streamTimeoutId) {
-					clearTimeout(streamTimeoutId);
-					streamTimeoutId = null;
-				}
-				lastTokenTimestamp = Date.now();
-				// Create new timeout for next token
-				streamTimeoutId = setTimeout(() => {
-					const timeSinceLastToken = Date.now() - lastTokenTimestamp;
-					console.error(`[VybeLangGraphService] ⚠️ Stream timeout: No tokens received for ${timeSinceLastToken}ms`);
-					throw new Error(`Stream timeout: No tokens received for ${timeSinceLastToken}ms. Network connection may be lost.`);
-				}, STREAM_TIMEOUT_MS);
-			};
-
-			// Start initial timeout
-			resetStreamTimeout();
+			let firstTokenTimeoutId: any = null;
 
 			try {
-				// Use Promise.race to detect timeout
 				const streamIterator = stream[Symbol.asyncIterator]();
 				let streamDone = false;
+				let hasReceivedFirstToken = false;
 
 				while (!streamDone) {
-					// Race between next token and timeout
 					const nextPromise = streamIterator.next();
-					const timeoutPromise = createStreamTimeout();
+					// Only race with timeout before we've ever received a token
+					const result = hasReceivedFirstToken
+						? await nextPromise
+						: await Promise.race([
+							nextPromise,
+							new Promise<never>((_, reject) => {
+								firstTokenTimeoutId = setTimeout(() => {
+									reject(new Error(`Connection may be unavailable: no response within ${FIRST_TOKEN_TIMEOUT_MS / 1000}s. Check your connection and try again.`));
+								}, FIRST_TOKEN_TIMEOUT_MS);
+							})
+						]);
 
-					try {
-						const result = await Promise.race([nextPromise, timeoutPromise]);
+					// Clear first-token timeout once we get any result (token or done)
+					if (firstTokenTimeoutId) {
+						clearTimeout(firstTokenTimeoutId);
+						firstTokenTimeoutId = null;
+					}
 
-						if (abortController.signal.aborted) {
-							console.log('[VybeLangGraphService] Stream aborted');
-							if (streamTimeoutId) {
-								clearTimeout(streamTimeoutId);
-								streamTimeoutId = null;
-							}
-							break;
-						}
+					if (abortController.signal.aborted) {
+						console.log('[VybeLangGraphService] Stream aborted');
+						break;
+					}
 
-						// Check if stream is done
-						if (result.done) {
-							streamDone = true;
-							if (streamTimeoutId) {
-								clearTimeout(streamTimeoutId);
-								streamTimeoutId = null;
-							}
-							break;
-						}
+					// Check if stream is done
+					if (result.done) {
+						streamDone = true;
+						break;
+					}
 
-						// Reset timeout since we got a token
-						resetStreamTimeout();
-
-						const [token] = result.value;
-						totalTokens++;
+					const [token] = result.value;
+					hasReceivedFirstToken = true;
+					totalTokens++;
 
 						// Check if this is an AI message chunk
 						if (isAIMessageChunk && isAIMessageChunk(token)) {
@@ -2604,32 +2581,19 @@ export class VybeLangGraphService {
 					}
 				}
 					}
-				} catch (timeoutError) {
-					// Timeout detected - this is a network error
-					if (streamTimeoutId) {
-						clearTimeout(streamTimeoutId);
-						streamTimeoutId = null;
-					}
-					// Break out of while loop and re-throw to be caught by outer catch block
-					streamDone = true;
-					throw timeoutError;
-				}
 			}
 			} catch (streamError) {
-				// Catch errors during stream iteration (network errors, timeouts, etc.)
+				// Catch errors during stream iteration (network errors, first-token timeout, etc.)
 				console.error('[VybeLangGraphService] Stream iteration error:', streamError);
-				// Clean up timeout if still active
-				if (streamTimeoutId) {
-					clearTimeout(streamTimeoutId);
-					streamTimeoutId = null;
+				if (firstTokenTimeoutId) {
+					clearTimeout(firstTokenTimeoutId);
+					firstTokenTimeoutId = null;
 				}
-				// Re-throw to be caught by outer catch block which will handle error classification and emission
 				throw streamError;
 			} finally {
-				// Clean up timeout
-				if (streamTimeoutId) {
-					clearTimeout(streamTimeoutId);
-					streamTimeoutId = null;
+				if (firstTokenTimeoutId) {
+					clearTimeout(firstTokenTimeoutId);
+					firstTokenTimeoutId = null;
 				}
 			}
 

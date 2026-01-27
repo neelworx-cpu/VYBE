@@ -249,7 +249,7 @@ export class VybeAgentServiceImpl extends Disposable implements IVybeAgentServic
 		this.toolRegistry.register(createReadFileTool(this.fileService, this.workspaceService));
 		// write_file tool removed - use edit_file for all file operations (create, overwrite, edit)
 		this.toolRegistry.register(createListDirTool(this.fileService, this.workspaceService));
-		this.toolRegistry.register(createGrepTool(this.searchService, this.workspaceService));
+		this.toolRegistry.register(createGrepTool(this.searchService, this.workspaceService, this.fileService));
 		this.toolRegistry.register(createTerminalTool(this.terminalService, this.terminalGroupService, this.workspaceService, this.storageService));
 		this.toolRegistry.register(createEditFileTool(
 			this.editorService,

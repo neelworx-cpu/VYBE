@@ -14,7 +14,7 @@ import * as path from '../../../../../base/common/path.js';
 import { IModelService } from '../../../../../editor/common/services/model.js';
 import { ILanguageService } from '../../../../../editor/common/languages/language.js';
 import { getIconClasses } from '../../../../../editor/common/services/getIconClasses.js';
-// Note: Shine animation is applied via inline styles below
+import './media/vybeChatPhaseIndicator.css'; // Import to use make-shine class
 
 const $ = dom.$;
 
@@ -65,9 +65,10 @@ function injectShineKeyframes(): void {
 			cursor: pointer;
 			overflow: hidden;
 		}
-		/* Match Cursor styles for disabled list item (hidden results) */
+		/* Disabled list item: same padding/height as normal, only cursor + opacity differ */
 		.vybe-chat-tool-part .context-list-item--disabled {
 			cursor: default;
+			padding: 3px 0px 3px 16px;
 		}
 		/* Match Cursor styles for context-list-item-content */
 		.vybe-chat-tool-part .context-list-item-content {
@@ -107,13 +108,14 @@ function injectShineKeyframes(): void {
 			color: var(--vscode-foreground);
 			opacity: 0.8;
 		}
-		/* Match Cursor styles for badge */
+		/* Badge: square with rounded corners, 4px left/right padding for centered number */
 		.vybe-chat-tool-part .cursor-badge {
 			display: inline-flex;
 			align-items: center;
 			justify-content: center;
-			padding: 2px 6px;
-			border-radius: 10px;
+			padding: 2px 4px;
+			margin-right: 4px;
+			border-radius: 4px;
 			font-size: 11px;
 			font-weight: 500;
 			line-height: 1.2;
@@ -127,7 +129,23 @@ function injectShineKeyframes(): void {
 		}
 		.vybe-chat-tool-part .cursor-badge-small {
 			font-size: 10px;
-			padding: 1px 5px;
+			padding: 1px 4px;
+		}
+		/* Chevron (Cursor-style): hidden when collapsed; only visible on hover over entire tool row, or when expanded */
+		.vybe-chat-tool-part .collapsible-clean .chevron-right {
+			opacity: 0 !important;
+			width: 0 !important;
+			overflow: hidden !important;
+			margin: 0 !important;
+			transition: transform 0.15s ease-in-out, opacity 0.2s ease-in-out, width 0.2s ease-in-out;
+		}
+		.vybe-chat-tool-part .collapsible-clean:not(.is-expanded):hover .chevron-right {
+			opacity: 0.36 !important;
+			width: 14px !important;
+		}
+		.vybe-chat-tool-part .collapsible-clean.is-expanded .chevron-right {
+			opacity: 0.36 !important;
+			width: 14px !important;
 		}
 	`;
 	activeWindow.document.head.appendChild(style);
@@ -251,6 +269,7 @@ export class VybeChatToolPart extends VybeChatContentPart {
 				max-width: 100%;
 				box-sizing: border-box;
 				overflow: hidden;
+				padding: 2px 0;
 			`
 		});
 
@@ -259,7 +278,7 @@ export class VybeChatToolPart extends VybeChatContentPart {
 			style: 'display: flex; gap: 4px; overflow: hidden;'
 		});
 
-		// Header text container
+		// Header text container (no gap before chevron - chevron sits flush after text)
 		const headerText = $('.collapsible-header-text', {
 			style: `
 				flex: 0 1 auto;
@@ -276,30 +295,16 @@ export class VybeChatToolPart extends VybeChatContentPart {
 		});
 
 		// Extra span wrapper for text (Cursor structure)
+		// flex: 1 1 auto allows it to grow when chevron is hidden, shrink when chevron appears
 		const textWrapper = $('span', {
-			style: 'flex: 0 1 auto; min-width: 0px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;'
+			style: 'flex: 1 1 auto; min-width: 0px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;'
 		});
 
 		// Inner flex container for verb and target
-		// Apply animation to this container when streaming (flows across verb + target)
-		const innerFlexBaseStyle = 'display: flex; align-items: center; overflow: hidden;';
-		const innerFlexAnimationStyle = (this.isStreaming && !hasError) ? `
-			animation: tool-shine 2s linear infinite;
-			background-image: linear-gradient(
-				90deg,
-				var(--vybe-tool-shine-dim) 0%,
-				var(--vybe-tool-shine-dim) 25%,
-				var(--vybe-tool-shine-bright) 50%,
-				var(--vybe-tool-shine-dim) 75%,
-				var(--vybe-tool-shine-dim) 100%
-			);
-			background-size: 200% 100%;
-			-webkit-background-clip: text;
-			background-clip: text;
-		` : '';
-
+		// No animation on container (animation on individual elements via make-shine class)
+		// min-width: 0 allows truncation to work properly in flex containers
 		const innerFlex = $('div', {
-			style: innerFlexBaseStyle + innerFlexAnimationStyle
+			style: 'display: flex; align-items: center; overflow: hidden; min-width: 0px;'
 		});
 
 		// Verb text (Reading/Read, Listing/Listed, etc.)
@@ -307,17 +312,18 @@ export class VybeChatToolPart extends VybeChatContentPart {
 		const verbs = TOOL_VERBS[this.toolType];
 		const verbText = hasError ? verbs.command : (this.isStreaming ? verbs.inProgress : verbs.complete);
 
-		// Base styles for verb
+		// Base styles for verb - doesn't shrink, stays at natural width
 		const verbBaseStyle = `
 			white-space: nowrap;
-			flex-shrink: 0;
+			flex: 0 0 auto;
 		`;
 
-		// Verb color: var(--vscode-foreground) with 0.6 opacity (60%)
-		// When streaming, text will be transparent (inherited from parent animation)
+		// Verb color: var(--vscode-foreground) with 0.7 opacity to differentiate from secondary items
+		// When streaming, apply make-shine class for animation (same as planning next steps)
 		// When error exists, use static color (no animation)
-		const verbColorStyle = (this.isStreaming && !hasError) ? `
-			-webkit-text-fill-color: transparent;
+		const verbColorStyle = hasError ? `
+			color: var(--vscode-foreground);
+			opacity: 0.7;
 		` : `
 			color: var(--vscode-foreground);
 			opacity: 0.7;
@@ -327,12 +333,18 @@ export class VybeChatToolPart extends VybeChatContentPart {
 			style: verbBaseStyle + verbColorStyle
 		});
 		this.verbTextElement.textContent = verbText;
+		// Apply make-shine class during streaming (same animation as planning next steps)
+		if (this.isStreaming && !hasError) {
+			this.verbTextElement.classList.add('make-shine');
+		}
 
 		// Target color: var(--vscode-foreground) with 0.4 opacity (40%)
 		// Target (filename, directory, pattern) OR error message
 		// When error exists, show error message as target, not clickable
 		// When streaming, text will be transparent (inherited from parent animation)
+		// flex: 1 1 auto allows target to grow/shrink and truncate when chevron appears
 		const targetBaseStyle = `
+			flex: 1 1 auto;
 			margin-left: 4px;
 			white-space: nowrap;
 			overflow: hidden;
@@ -341,16 +353,23 @@ export class VybeChatToolPart extends VybeChatContentPart {
 			cursor: ${(!hasError && this.toolType === 'read' && this.filePath) ? 'pointer' : 'default'};
 		`;
 
-		const targetColorStyle = (this.isStreaming && !hasError) ? `
-			-webkit-text-fill-color: transparent;
-		` : `
+		const targetColorStyle = `
 			color: var(--vscode-descriptionForeground);
-			opacity: 1;
+			opacity: 0.36;
 		`;
 
 		this.targetElement = $('span', {
 			style: targetBaseStyle + targetColorStyle
 		});
+		// Apply make-shine class during streaming (same animation as planning next steps)
+		if (this.isStreaming && !hasError) {
+			this.targetElement.classList.add('make-shine');
+		}
+
+		// Ensure opacity is applied correctly (override any parent inheritance)
+		// Always set base colors (make-shine uses currentColor, so base color matters)
+		this.targetElement.style.setProperty('color', 'var(--vscode-descriptionForeground)', 'important');
+		this.targetElement.style.setProperty('opacity', '0.36', 'important');
 
 		// CRITICAL: When error exists, show error message as target
 		let displayTarget = this.target;
@@ -389,8 +408,8 @@ export class VybeChatToolPart extends VybeChatContentPart {
 				this.targetElement!.style.color = '#3ecf8e'; // VYBE green
 			}));
 			this._register(dom.addDisposableListener(this.targetElement, 'mouseleave', () => {
-				this.targetElement!.style.color = 'var(--vscode-foreground)';
-				this.targetElement!.style.opacity = '0.4';
+				this.targetElement!.style.setProperty('color', 'var(--vscode-descriptionForeground)', 'important');
+				this.targetElement!.style.setProperty('opacity', '0.36', 'important');
 			}));
 			this._register(dom.addDisposableListener(this.targetElement, 'click', (e) => {
 				e.stopPropagation();
@@ -505,48 +524,69 @@ export class VybeChatToolPart extends VybeChatContentPart {
 		if (data.error) {
 			this.error = data.error;
 
-			// When error occurs, update UI to match Cursor's error display:
-			// 1. Use command form verb (List, Read, etc.)
-			// 2. Show error message as target
-			// 3. Hide chevron
-			// 4. Change cursor to default
-			// 5. Remove click handler capability
+			// Grep error (Cursor-style): "Grep attempted" + expandable body with error message, chevron on hover only
+			if (this.toolType === 'grep') {
+				if (this.verbTextElement) {
+					this.verbTextElement.textContent = TOOL_VERBS.grep.command;
+					this.verbTextElement.setAttribute('style', `white-space: nowrap; flex-shrink: 0; color: var(--vscode-foreground); opacity: 1.0;`);
+				}
+				if (this.targetElement) {
+					this.targetElement.textContent = 'attempted';
+					this.targetElement.style.cursor = 'default';
+				}
+				if (this.chevronElement) {
+					this.chevronElement.style.display = '';
+				}
+				this.ensureClickHandlerAttached();
+				const collapsibleContainer = this.container?.querySelector('.collapsible-clean');
+				if (collapsibleContainer) {
+					if (this.childrenContainer) {
+						this.childrenContainer.remove();
+						this.childrenContainer = undefined;
+					}
+					const childrenWrapper = $('div', {
+						class: 'collapsible-clean-children',
+						style: `padding-left: 0px; overflow-anchor: none; margin-top: 4px; margin-bottom: 4px; display: ${this.isExpanded ? 'block' : 'none'};`
+					});
+					const messageDiv = $('div', {
+						style: 'font-size: 12px; color: var(--vscode-descriptionForeground); white-space: pre-wrap; word-break: break-word;'
+					});
+					messageDiv.textContent = this.error.message.replace(/^Error:\s*/i, '');
+					childrenWrapper.appendChild(messageDiv);
+					this.childrenContainer = childrenWrapper;
+					collapsibleContainer.appendChild(childrenWrapper);
+				}
+				if (this.container) {
+					this.container.setAttribute('data-tool-status', 'error');
+				}
+				return;
+			}
 
+			// Non-grep error: command form + error as target, hide chevron
 			if (this.verbTextElement) {
 				const verbs = TOOL_VERBS[this.toolType];
 				this.verbTextElement.textContent = verbs.command;
-				// Verb color: var(--vscode-foreground) with 0.6 opacity (60%)
-				this.verbTextElement.setAttribute('style', `white-space: nowrap; flex-shrink: 0; color: var(--vscode-foreground); opacity: 0.6;`);
+				this.verbTextElement.setAttribute('style', `white-space: nowrap; flex-shrink: 0; color: var(--vscode-foreground); opacity: 0.7;`);
 			}
-
 			if (this.targetElement) {
-				// Show error message as target, stripping "Error: " prefix
 				const errorMessage = this.error.message.replace(/^Error:\s*/i, '');
 				this.targetElement.textContent = errorMessage;
 				this.targetElement.style.cursor = 'default';
 			}
-
 			if (this.headerElement) {
 				this.headerElement.style.cursor = 'default';
 			}
-
-			// Hide chevron for error state
 			if (this.chevronElement) {
 				this.chevronElement.style.display = 'none';
 			}
-
-			// Remove children container for error state
 			if (this.childrenContainer) {
 				this.childrenContainer.remove();
 				this.childrenContainer = undefined;
 			}
-
-			// Update tool status
 			if (this.container) {
 				this.container.setAttribute('data-tool-status', 'error');
 			}
-
-			return; // Don't process further updates when error exists
+			return;
 		}
 
 		// Update results if provided (only if no error)
@@ -639,41 +679,35 @@ export class VybeChatToolPart extends VybeChatContentPart {
 					}
 				}
 
-				// Only create container and show chevron if we have results
+				// Cursor-style: all greps expandable; chevron only on hover
 				const hasResults = this.grepResults && this.grepResults.length > 0;
 				if (hasResults) {
-					console.log(`[VybeChatToolPart] 🔍 Creating container for ${this.grepResults.length} grep results`);
 					this.ensureClickHandlerAttached();
-
-					// Show chevron when results are available
-					if (this.chevronElement && !this.isExpanded) {
-						this.chevronElement.style.opacity = '0.6';
-						console.log(`[VybeChatToolPart] 🔍 Chevron visible, isExpanded=${this.isExpanded}`);
-					}
 				} else {
-					console.log(`[VybeChatToolPart] 🔍 No grep results - hiding chevron and not creating container`);
-					// Hide chevron for empty results
-					if (this.chevronElement) {
-						this.chevronElement.style.opacity = '0';
-						this.chevronElement.style.pointerEvents = 'none';
+					// "Grep attempted" (no results): header + expandable body with "No matches found", chevron on hover
+					if (this.verbTextElement) {
+						this.verbTextElement.textContent = TOOL_VERBS.grep.command;
+						this.verbTextElement.setAttribute('style', `white-space: nowrap; flex-shrink: 0; color: var(--vscode-foreground); opacity: 1.0;`);
 					}
+					if (this.targetElement) {
+						this.targetElement.textContent = 'attempted';
+						this.targetElement.style.cursor = 'default';
+					}
+					this.ensureClickHandlerAttached();
+				}
+				if (this.chevronElement && !this.isExpanded) {
+					this.chevronElement.style.display = '';
 				}
 
-				// Only create container if we have results
-				if (hasResults) {
-					const collapsibleContainer = this.container?.querySelector('.collapsible-clean');
-					console.log(`[VybeChatToolPart] 🔍 collapsibleContainer found:`, !!collapsibleContainer, `container exists:`, !!this.container);
-					if (collapsibleContainer) {
-						if (this.childrenContainer) {
-							this.childrenContainer.remove();
-							this.childrenContainer = undefined;
-						}
-						this.childrenContainer = this.createResultsContainer();
-						console.log(`[VybeChatToolPart] 🔍 Created childrenContainer, display=${this.childrenContainer.style.display}, isExpanded=${this.isExpanded}, hasItems=${this.grepResults?.length || 0}`);
-						collapsibleContainer.appendChild(this.childrenContainer);
-					} else {
-						console.warn(`[VybeChatToolPart] 🔍 ⚠️ collapsibleContainer not found! container=`, this.container);
+				// Always create container (with results or "No matches found") so block is expandable
+				const collapsibleContainer = this.container?.querySelector('.collapsible-clean');
+				if (collapsibleContainer) {
+					if (this.childrenContainer) {
+						this.childrenContainer.remove();
+						this.childrenContainer = undefined;
 					}
+					this.childrenContainer = this.createResultsContainer();
+					collapsibleContainer.appendChild(this.childrenContainer);
 				}
 			} else if (this.toolType === 'grep') {
 				console.log(`[VybeChatToolPart] 🔍 ⚠️ No grepResults in data! data keys:`, Object.keys(data || {}), `data.grepResults=`, data.grepResults);
@@ -739,55 +773,40 @@ export class VybeChatToolPart extends VybeChatContentPart {
 		// Animation now flows across verb + target (applied to container)
 		if (this.verbTextElement && !this.error) {
 			const verbs = TOOL_VERBS[this.toolType];
-			const verbText = this.isStreaming ? verbs.inProgress : verbs.complete;
+			const grepZeroResults = this.toolType === 'grep' && this.grepResults && this.grepResults.length === 0;
+			const verbText = grepZeroResults && !this.isStreaming
+				? verbs.command
+				: (this.isStreaming ? verbs.inProgress : verbs.complete);
 			this.verbTextElement.textContent = verbText;
-
-			// Find the innerFlex container (parent of verbTextElement)
-			const innerFlex = this.verbTextElement.parentElement as HTMLElement;
-
-			// Update container animation (flows across verb + target)
-			if (innerFlex) {
-				const baseContainerStyle = 'display: flex; align-items: center; overflow: hidden;';
-				if (this.isStreaming) {
-					// Streaming - apply shine animation to container
-					innerFlex.setAttribute('style', baseContainerStyle + `
-						animation: tool-shine 2s linear infinite;
-						background-image: linear-gradient(
-							90deg,
-							var(--vybe-tool-shine-dim) 0%,
-							var(--vybe-tool-shine-dim) 25%,
-							var(--vybe-tool-shine-bright) 50%,
-							var(--vybe-tool-shine-dim) 75%,
-							var(--vybe-tool-shine-dim) 100%
-						);
-						background-size: 200% 100%;
-						-webkit-background-clip: text;
-						background-clip: text;
-					`);
-				} else {
-					// Complete - remove animation from container
-					innerFlex.setAttribute('style', baseContainerStyle);
-				}
+			if (grepZeroResults && !this.isStreaming && this.targetElement) {
+				this.targetElement.textContent = 'attempted';
+				this.targetElement.style.cursor = 'default';
 			}
 
-			// Update verb text color
-			const verbBaseStyle = `white-space: nowrap; flex-shrink: 0;`;
+			// Update make-shine class on verb and target elements (same animation as planning next steps)
+			const verbBaseStyle = `white-space: nowrap; flex: 0 0 auto;`;
 			if (this.isStreaming) {
-				// Streaming - transparent text (shows gradient from parent)
-				this.verbTextElement.setAttribute('style', verbBaseStyle + `
-					-webkit-text-fill-color: transparent;
-				`);
-			} else {
-				// Complete - static style with var(--vscode-foreground) and 0.6 opacity (60%)
+				// Streaming - add make-shine class for animation
+				this.verbTextElement.classList.add('make-shine');
+				// Ensure base colors are correct (verb: 0.7)
 				this.verbTextElement.setAttribute('style', verbBaseStyle + `
 					color: var(--vscode-foreground);
-						opacity: 0.7;
+					opacity: 0.7;
+				`);
+			} else {
+				// Complete - remove make-shine class
+				this.verbTextElement.classList.remove('make-shine');
+				// Update text colors to static (verb 0.7)
+				this.verbTextElement.setAttribute('style', verbBaseStyle + `
+					color: var(--vscode-foreground);
+					opacity: 0.7;
 				`);
 			}
 
 			// Update target text color
 			if (this.targetElement) {
 				const targetBaseStyle = `
+					flex: 1 1 auto;
 					margin-left: 4px;
 					white-space: nowrap;
 					overflow: hidden;
@@ -796,18 +815,29 @@ export class VybeChatToolPart extends VybeChatContentPart {
 					cursor: ${(this.toolType === 'read' && this.filePath) ? 'pointer' : 'default'};
 				`;
 				if (this.isStreaming) {
-					// Streaming - transparent text (shows gradient from parent)
-					this.targetElement.setAttribute('style', targetBaseStyle + `
-						-webkit-text-fill-color: transparent;
-					`);
-				} else {
-					// Complete - static style with var(--vscode-foreground) and 0.4 opacity (40%)
+					// Streaming - add make-shine class for animation
+					this.targetElement.classList.add('make-shine');
+					// Ensure base colors are correct (target: 0.36)
 					this.targetElement.setAttribute('style', targetBaseStyle + `
 						color: var(--vscode-descriptionForeground);
-						opacity: 1;
+						opacity: 0.36;
 					`);
+					this.targetElement.style.setProperty('color', 'var(--vscode-descriptionForeground)', 'important');
+					this.targetElement.style.setProperty('opacity', '0.36', 'important');
+				} else {
+					// Complete - remove make-shine class
+					this.targetElement.classList.remove('make-shine');
+					// Update text colors to static (target: 0.36)
+					this.targetElement.setAttribute('style', targetBaseStyle + `
+						color: var(--vscode-descriptionForeground);
+						opacity: 0.36;
+					`);
+					// Ensure opacity is applied with important flag
+					this.targetElement.style.setProperty('opacity', '0.36', 'important');
+					this.targetElement.style.setProperty('color', 'var(--vscode-descriptionForeground)', 'important');
 				}
 			}
+
 		}
 
 		// Update line range if provided
@@ -849,58 +879,24 @@ export class VybeChatToolPart extends VybeChatContentPart {
 			return; // Already exists
 		}
 
+		// Opacity is controlled by CSS: hidden when collapsed, visible on .collapsible-clean hover or when .is-expanded
+		// Chevron uses same color as secondary items (descriptionForeground, opacity controlled by CSS)
 		this.chevronElement = $('div', {
 			class: 'codicon codicon-chevron-right chevron-right',
 			style: `
-				color: var(--vscode-foreground);
+				color: var(--vscode-descriptionForeground);
 				line-height: 14px;
-				width: 21px;
 				height: 14px;
 				display: flex;
 				justify-content: center;
 				align-items: center;
 				transform-origin: center center;
-				transition: transform 0.15s ease-in-out, opacity 0.2s ease-in-out, color 0.1s ease-in;
+				transition: transform 0.15s ease-in-out, opacity 0.2s ease-in-out, width 0.2s ease-in-out, color 0.1s ease-in;
 				flex-shrink: 0;
 				cursor: pointer;
-				font-size: 18px;
-				opacity: 0;
+				font-size: 14px;
 			`
 		});
-
-		// Show chevron on hover when collapsed, or always visible when there's content
-		if (this.headerElement) {
-			// Check if there's content to expand
-			const hasContent = (this.toolType === 'list' && this.fileList && this.fileList.length > 0) ||
-				(this.toolType === 'search' && this.searchResults && this.searchResults.length > 0) ||
-				(this.toolType === 'grep' && this.grepResults && this.grepResults.length > 0) ||
-				(this.toolType === 'todos' && this.todoItems && this.todoItems.length > 0) ||
-				(this.toolType === 'search_web' && this.webSearchContent);
-
-			// If there's content, show chevron with some opacity even when collapsed
-			if (hasContent && !this.isExpanded && this.chevronElement) {
-				this.chevronElement.style.opacity = '0.6';
-			}
-
-			this._register(dom.addDisposableListener(this.headerElement, 'mouseenter', () => {
-				if (!this.isExpanded && this.chevronElement) {
-					this.chevronElement.style.opacity = '0.6';
-				}
-			}));
-
-			this._register(dom.addDisposableListener(this.headerElement, 'mouseleave', () => {
-				// Only hide on mouseleave if there's no content, otherwise keep it visible
-				const hasContentNow = (this.toolType === 'list' && this.fileList && this.fileList.length > 0) ||
-					(this.toolType === 'search' && this.searchResults && this.searchResults.length > 0) ||
-					(this.toolType === 'grep' && this.grepResults && this.grepResults.length > 0) ||
-					(this.toolType === 'todos' && this.todoItems && this.todoItems.length > 0) ||
-					(this.toolType === 'search_web' && this.webSearchContent);
-
-				if (!this.isExpanded && this.chevronElement && !hasContentNow) {
-					this.chevronElement.style.opacity = '0';
-				}
-			}));
-		}
 
 		headerText.appendChild(this.chevronElement);
 	}
@@ -936,15 +932,14 @@ export class VybeChatToolPart extends VybeChatContentPart {
 			return;
 		}
 
-		// Check if there's content to expand
+		// Check if there's content to expand (grep: results, zero results, or error message)
 		let hasContent = false;
 		if (this.toolType === 'list' && this.fileList && this.fileList.length > 0) {
 			hasContent = true;
 		} else if (this.toolType === 'search' && this.searchResults && this.searchResults.length > 0) {
 			hasContent = true;
-		} else if (this.toolType === 'grep' && this.grepResults && this.grepResults.length > 0) {
+		} else if (this.toolType === 'grep' && (this.error || (this.grepResults && Array.isArray(this.grepResults)))) {
 			hasContent = true;
-			console.log(`[VybeChatToolPart] toggleExpand: grep has ${this.grepResults.length} results`);
 		} else if (this.toolType === 'todos' && this.todoItems && this.todoItems.length > 0) {
 			hasContent = true;
 		} else if (this.toolType === 'search_web' && this.webSearchContent) {
@@ -960,16 +955,15 @@ export class VybeChatToolPart extends VybeChatContentPart {
 
 		this.isExpanded = !this.isExpanded;
 
-		// Update chevron
+		// Toggle is-expanded on container (chevron visibility is driven by CSS)
+		const collapsibleContainerForClass = this.container?.querySelector('.collapsible-clean') as HTMLElement | null;
+		if (collapsibleContainerForClass) {
+			collapsibleContainerForClass.classList.toggle('is-expanded', this.isExpanded);
+		}
+
+		// Update chevron rotation only (opacity is CSS: hover when collapsed, always on when expanded)
 		if (this.chevronElement) {
-			if (this.isExpanded) {
-				this.chevronElement.style.transform = 'rotate(90deg)';
-				this.chevronElement.style.opacity = '0.6';
-			} else {
-				this.chevronElement.style.transform = 'rotate(0deg)';
-				// Keep chevron visible when collapsed if there's content
-				this.chevronElement.style.opacity = '0.6';
-			}
+			this.chevronElement.style.transform = this.isExpanded ? 'rotate(90deg)' : 'rotate(0deg)';
 		}
 
 		// Create children container if it doesn't exist
@@ -1100,7 +1094,7 @@ export class VybeChatToolPart extends VybeChatContentPart {
 		// Context list container
 		const contextList = $('div', {
 			class: 'context-list--new-conversation',
-			style: 'flex-shrink: 0; border-radius: 0px; padding-right: 8px;'
+			style: 'flex-shrink: 0; border-radius: 0px;'
 		});
 
 		// Add file items
@@ -1364,7 +1358,7 @@ export class VybeChatToolPart extends VybeChatContentPart {
 
 		const contextList = $('div', {
 			class: 'context-list--new-conversation',
-			style: 'flex-shrink: 0; border-radius: 0px; padding-right: 8px;'
+			style: 'flex-shrink: 0; border-radius: 0px;'
 		});
 
 		// Add items based on tool type
@@ -1382,16 +1376,16 @@ export class VybeChatToolPart extends VybeChatContentPart {
 			console.log(`[VybeChatToolPart] 🔍 createResultsContainer: totalFiles=${totalFiles}, showing=${resultsToShow.length}, hiddenFilesCount=${hiddenFilesCount}, truncated=${this.truncated}`);
 
 			if (totalFiles === 0) {
-				// Show "No matches found" message
+				// Show "No matches found" message (same padding/height as normal context-list-item)
 				const noMatchesItem = $('div', {
 					class: 'context-list-item context-list-item--disabled',
 					role: 'listitem',
 					tabindex: '-1',
-					style: 'cursor: default; display: flex; align-items: center; padding: 4px 6px 4px 28px; min-height: 24px; opacity: 0.6; font-style: italic;'
+					style: 'cursor: default; display: flex; align-items: center; opacity: 0.6; font-style: italic;'
 				});
 				const noMatchesText = $('span', {
 					class: 'context-list-item-title',
-					style: 'color: var(--vscode-foreground); font-size: 12px;'
+					style: 'color: var(--vscode-foreground);'
 				});
 				noMatchesText.textContent = 'No matches found';
 				noMatchesItem.appendChild(noMatchesText);
@@ -1425,17 +1419,16 @@ export class VybeChatToolPart extends VybeChatContentPart {
 
 				if (hiddenText) {
 					console.log(`[VybeChatToolPart] 🔍 ✅ Creating hidden indicator: "${hiddenText}"`);
-					// Create disabled list item matching Cursor's design
-					// Align with text content (after the 16px icon + 6px gap = 22px left padding)
+					// Disabled item: same padding/height as normal context-list-item
 					const hiddenItem = $('div', {
 						class: 'context-list-item context-list-item--disabled',
 						role: 'listitem',
 						tabindex: '-1',
-						style: 'cursor: default; display: flex; align-items: center; padding: 4px 6px 4px 28px; min-height: 24px; opacity: 0.6; font-style: italic;'
+						style: 'cursor: default; display: flex; align-items: center; opacity: 0.6; font-style: italic;'
 					});
 					const hiddenTextSpan = $('span', {
 						class: 'context-list-item-title',
-						style: 'color: var(--vscode-foreground); font-size: 12px;'
+						style: 'color: var(--vscode-foreground);'
 					});
 					hiddenTextSpan.textContent = hiddenText;
 					hiddenItem.appendChild(hiddenTextSpan);

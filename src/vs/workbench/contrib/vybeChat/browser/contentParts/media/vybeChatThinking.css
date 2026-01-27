@@ -52,16 +52,16 @@
 	margin: 0; /* No extra margin */
 }
 
-/* Thinking part container - no extra spacing */
+/* Thinking part container - same vertical spacing as tool rows for alignment */
 .vybe-chat-thinking-part {
-	margin-bottom: 0;
+	margin: 2px 0;
 }
 
 /* ============================================
    2. HEADER SECTION (Clickable)
    ============================================ */
 
-/* 2.1 Header Row Container */
+/* 2.1 Header Row Container - 18.2px row height to match tool UI */
 .collapsible-clean.collapsible-thought > div:first-child {
 	align-items: center;
 	box-sizing: border-box;
@@ -69,19 +69,23 @@
 	cursor: pointer;
 	display: flex;
 	flex-direction: row;
+	font-size: 12px;
+	line-height: 18.2px;
 	max-width: 100%;
 	overflow: hidden;
 	row-gap: 4px;
 }
 
-/* 2.3 Header Text Container */
-.collapsible-header-text {
+/* 2.3 Header Text Container - match tool header (18.2px line-height, 12px font, 4px gap before chevron) */
+.collapsible-clean.collapsible-thought .collapsible-header-text {
 	align-items: center;
-	color: rgba(228, 228, 228, 0.92);
+	color: var(--vscode-foreground);
 	column-gap: 4px;
 	display: flex;
 	flex: 0 1 auto;
 	font-size: 12px;
+	gap: 4px;
+	line-height: 18.2px;
 	min-width: 0px;
 	overflow: hidden;
 	row-gap: 4px;
@@ -104,59 +108,64 @@
 	overflow: hidden;
 }
 
-/* 2.6 "Thought" Text */
-.collapsible-header-text > span > div > span:first-child {
-	color: rgba(228, 228, 228, 0.55);
+/* 2.6 "Thought" Text - var(--vscode-foreground) with 0.7 opacity to differentiate from secondary items */
+.collapsible-clean.collapsible-thought .collapsible-header-text > span > div > span:first-child {
+	color: var(--vscode-foreground);
 	flex-shrink: 0;
+	opacity: 0.7;
 	white-space: nowrap;
 }
 
-/* 2.7 "for 3s" Duration Text */
-.collapsible-header-text > span > div > span:last-child {
-	color: rgba(228, 228, 228, 0.37);
+/* 2.7 "for 3s" Duration Text - same as tool target: descriptionForeground with 0.36 opacity (different from verb) */
+.collapsible-clean.collapsible-thought .collapsible-header-text > span > div > span:last-child {
+	color: var(--vscode-descriptionForeground) !important;
 	margin-left: 4px;
+	opacity: 0.36 !important;
 	white-space: nowrap;
 }
 
-/* 2.8 Chevron Icon - Small and properly aligned */
-.collapsible-header-text .codicon.codicon-chevron-right {
+/* 2.8 Chevron Icon - 14px size; hidden when collapsed, visible on hover or when expanded */
+/* Chevron uses same color as secondary items (descriptionForeground with reduced opacity) */
+.collapsible-clean.collapsible-thought .collapsible-header-text .chevron-right.codicon-chevron-right {
 	align-items: center;
-	color: var(--vscode-foreground) !important;
+	color: var(--vscode-descriptionForeground) !important;
 	cursor: pointer;
 	display: inline-flex !important;
 	flex-shrink: 0;
 	font-family: codicon !important;
-	font-size: 12px !important;
-	height: 12px;
+	font-size: 14px !important;
+	height: 14px;
 	justify-content: center;
-	line-height: 12px;
-	opacity: 0.55 !important;
+	line-height: 14px;
+	opacity: 0 !important;
 	text-align: center;
-	transform-origin: center center; /* Rotate around center - fixed to prevent rotation outside row */
+	transform-origin: center center;
 	transition: transform 0.15s ease-in-out, opacity 0.2s ease-in-out;
-	width: 12px;
-	margin-left: 4px;
 	vertical-align: middle;
-	position: relative; /* Keep chevron in place during rotation */
+	width: 14px;
+	position: relative;
 	-webkit-font-smoothing: antialiased;
 	-moz-osx-font-smoothing: grayscale;
 }
 
-/* Ensure the icon content shows via ::before */
-.collapsible-header-text .codicon.codicon-chevron-right::before {
+.collapsible-clean.collapsible-thought .collapsible-header-text .chevron-right.codicon-chevron-right::before {
 	display: inline-block;
 	text-rendering: auto;
 	-webkit-font-smoothing: antialiased;
 	-moz-osx-font-smoothing: grayscale;
 }
 
-/* Chevron hover state */
-.collapsible-clean.collapsible-thought:hover .codicon-chevron-right {
-	opacity: 0.8 !important;
+/* Chevron: visible on hover when collapsed, or when expanded (match tool UI) - 0.36 opacity like secondary items */
+.collapsible-clean.collapsible-thought:not(.is-expanded):hover .chevron-right.codicon-chevron-right {
+	opacity: 0.36 !important;
 }
 
-/* Loading spinner during streaming - Small and properly aligned */
-.collapsible-header-text .codicon.codicon-loading {
+.collapsible-clean.collapsible-thought.is-expanded .chevron-right.codicon-chevron-right {
+	opacity: 0.36 !important;
+}
+
+/* Loading spinner during streaming - no extra left margin (match chevron alignment) */
+.vybe-chat-thinking-part .collapsible-header-text .codicon.codicon-loading {
 	align-items: center;
 	color: var(--vscode-foreground) !important;
 	cursor: default;
@@ -167,11 +176,11 @@
 	height: 12px;
 	justify-content: center;
 	line-height: 12px;
+	margin-left: 0;
 	opacity: 0.55 !important;
 	text-align: center;
-	width: 12px;
-	margin-left: 4px;
 	vertical-align: middle;
+	width: 12px;
 	animation: codicon-spin 1.5s linear infinite;
 	transform-origin: 50% 50%; /* Spin around center */
 	-webkit-font-smoothing: antialiased;

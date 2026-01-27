@@ -37,7 +37,7 @@ export class VybeChatPhaseIndicatorPart extends VybeChatContentPart {
 			`
 		});
 
-		// Text element with shine animation when streaming
+		// Text element: base color matches tool verbs (Read, List, Grep, Search) - var(--vscode-foreground) at 0.7 opacity
 		this.textElement = $('span', {
 			style: `
 				display: inline;
@@ -45,6 +45,7 @@ export class VybeChatPhaseIndicatorPart extends VybeChatContentPart {
 				font-size: 12px;
 				line-height: 18.2px;
 				color: var(--vscode-foreground);
+				opacity: 0.7;
 			`
 		});
 		this.textElement.textContent = 'Planning next steps';
